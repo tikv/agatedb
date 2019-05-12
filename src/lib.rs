@@ -3,10 +3,11 @@ extern crate failure;
 
 mod db;
 mod error;
-mod log;
+mod wal;
 mod memtable;
 
 pub use error::{Error, Result};
+pub use db::{Agate, AgateOptions};
 
 #[cfg(test)]
 mod tests {
