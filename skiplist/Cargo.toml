@@ -6,3 +6,11 @@ edition = "2018"
 
 [dependencies]
 rand = "0.7"
+
+[dev-dependencies]
+yatp = { git = "https://github.com/tikv/yatp.git" }
+criterion = "0.3"
+
+[[bench]]
+name = "bench"
+harness = false

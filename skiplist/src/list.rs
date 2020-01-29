@@ -8,7 +8,9 @@ use std::{mem, ptr, slice, u32};
 
 const HEIGHT_INCREASE: u32 = u32::MAX / 3;
 
+// Uses C layout to make sure tower is at the bottom
 #[derive(Debug)]
+#[repr(C)]
 pub struct Node {
     value: AtomicU64,
     key_offset: u32,
@@ -32,12 +34,8 @@ impl Node {
             node.height = height as u16;
             let value_offset = arena.put_bytes(value) as u64;
             node.value
-                .store(value_offset << 32 | value.len() as u64, Ordering::SeqCst);
+                .store((value.len() as u64) << 32 | value_offset, Ordering::SeqCst);
             ptr::write_bytes(node.tower.as_mut_ptr(), 0, height as usize + 1);
-            println!(
-                "alloc {:?} at {} {} {:p}",
-                node, node_offset, height, node_ptr
-            );
         }
         node_offset
     }
@@ -73,6 +71,7 @@ struct SkiplistCore {
     arena: Arena,
 }
 
+#[derive(Clone)]
 pub struct Skiplist {
     core: Arc<SkiplistCore>,
 }
@@ -110,8 +109,6 @@ impl Skiplist {
         let mut level = self.height();
         loop {
             let next_offset = (&*cursor).next_offset(level);
-            println!("{:?} next_offset {} at {}", key, next_offset, level);
-            println!("{:?}", &*cursor);
             if next_offset == 0 {
                 if level > 0 {
                     level -= 1;
@@ -297,16 +294,13 @@ impl Skiplist {
 
     pub fn get(&self, key: &[u8]) -> Option<&[u8]> {
         let node = unsafe { self.find_near(key, false, true) };
-        println!("find");
         if node.is_null() {
             return None;
         }
-        println!("non null");
         let next_key = unsafe { (&*node).key(&self.core.arena) };
         if next_key != key {
             return None;
         }
-        println!("same key");
         unsafe { Some((&*node).value(&self.core.arena)) }
     }
 
@@ -321,6 +315,9 @@ impl Skiplist {
         self.core.arena.len()
     }
 }
+
+unsafe impl Send for Skiplist {}
+unsafe impl Sync for Skiplist {}
 
 pub struct IterRef<'a> {
     list: &'a Skiplist,
@@ -378,5 +375,61 @@ impl<'a> IterRef<'a> {
 
     pub fn seek_to_last(&mut self) {
         self.cursor = self.list.find_last();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_find_near() {
+        let list = Skiplist::with_capacity(1 << 20);
+        for i in 0..1000 {
+            let key = format!("{:05}", i * 10 + 5);
+            let value = format!("{:05}", i);
+            list.put(key.as_bytes(), value.as_bytes());
+        }
+        let mut cases = vec![
+            (
+                b"00001" as &'static [u8],
+                false,
+                false,
+                Some(b"00005" as &'static [u8]),
+            ),
+            (b"00001", false, true, Some(b"00005")),
+            (b"00001", true, false, None),
+            (b"00001", true, true, None),
+            (b"00005", false, false, Some(b"00015")),
+            (b"00005", false, true, Some(b"00005")),
+            (b"00005", true, false, None),
+            (b"00005", true, true, Some(b"00005")),
+            (b"05555", false, false, Some(b"05565")),
+            (b"05555", false, true, Some(b"05555")),
+            (b"05555", true, false, Some(b"05545")),
+            (b"05555", true, true, Some(b"05555")),
+            (b"05558", false, false, Some(b"05565")),
+            (b"05558", false, true, Some(b"05565")),
+            (b"05558", true, false, Some(b"05555")),
+            (b"05558", true, true, Some(b"05555")),
+            (b"09995", false, false, None),
+            (b"09995", false, true, Some(b"09995")),
+            (b"09995", true, false, Some(b"09985")),
+            (b"09995", true, true, Some(b"09995")),
+            (b"59995", false, false, None),
+            (b"59995", false, true, None),
+            (b"59995", true, false, Some(b"09995")),
+            (b"59995", true, true, Some(b"09995")),
+        ];
+        for (i, (key, less, allow_equal, exp)) in cases.drain(..).enumerate() {
+            let res = unsafe { list.find_near(key, less, allow_equal) };
+            if exp.is_none() {
+                assert!(res.is_null(), "{}", i);
+                continue;
+            }
+            let e = exp.unwrap();
+            let val = unsafe { (&*res).key(&list.core.arena) };
+            assert_eq!(val, e, "{}", i);
+        }
     }
 }

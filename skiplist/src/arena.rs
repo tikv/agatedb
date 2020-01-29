@@ -56,19 +56,6 @@ impl Arena {
         unsafe {
             ptr::copy_nonoverlapping(buf.as_ptr(), self.core.ptr.add(offset as usize), buf.len())
         }
-        println!(
-            "put bytes at {} {} {}",
-            offset,
-            buf.len(),
-            self.core.len.load(Ordering::SeqCst)
-        );
-        let buf_str = unsafe { std::str::from_utf8_unchecked(buf) };
-        let ptr_str = unsafe {
-            let ptr_slice =
-                std::slice::from_raw_parts(self.core.ptr.add(offset as usize), buf.len());
-            std::str::from_utf8_unchecked(ptr_slice)
-        };
-        assert_eq!(buf_str, ptr_str);
         offset as u32
     }
 
