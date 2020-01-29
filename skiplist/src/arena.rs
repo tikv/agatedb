@@ -51,14 +51,6 @@ impl Arena {
         ptr_offset as u32
     }
 
-    pub fn put_bytes(&self, buf: &[u8]) -> u32 {
-        let offset = self.core.len.fetch_add(buf.len() as u32, Ordering::SeqCst);
-        unsafe {
-            ptr::copy_nonoverlapping(buf.as_ptr(), self.core.ptr.add(offset as usize), buf.len())
-        }
-        offset as u32
-    }
-
     pub unsafe fn get_mut<N>(&self, offset: u32) -> *mut N {
         if offset == 0 {
             return ptr::null_mut();

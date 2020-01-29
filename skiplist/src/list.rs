@@ -1,10 +1,11 @@
 use crate::arena::Arena;
 use crate::MAX_HEIGHT;
+use bytes::Bytes;
 use rand::Rng;
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::{mem, ptr, slice, u32};
+use std::{mem, ptr, u32};
 
 const HEIGHT_INCREASE: u32 = u32::MAX / 3;
 
@@ -12,15 +13,14 @@ const HEIGHT_INCREASE: u32 = u32::MAX / 3;
 #[derive(Debug)]
 #[repr(C)]
 pub struct Node {
-    value: AtomicU64,
-    key_offset: u32,
-    key_len: u16,
-    height: u16,
+    key: Bytes,
+    value: Bytes,
+    height: usize,
     tower: [AtomicU32; MAX_HEIGHT as usize],
 }
 
 impl Node {
-    fn alloc(arena: &Arena, key: &[u8], value: &[u8], height: u32) -> u32 {
+    fn alloc(arena: &Arena, key: Bytes, value: Bytes, height: usize) -> u32 {
         let align = mem::align_of::<Node>();
         let size = mem::size_of::<Node>();
         // Not all values in Node::tower will be utilized.
@@ -29,44 +29,21 @@ impl Node {
         unsafe {
             let node_ptr: *mut Node = arena.get_mut(node_offset);
             let node = &mut *node_ptr;
-            node.key_offset = arena.put_bytes(key);
-            node.key_len = key.len() as u16;
-            node.height = height as u16;
-            let value_offset = arena.put_bytes(value) as u64;
-            node.value
-                .store((value.len() as u64) << 32 | value_offset, Ordering::SeqCst);
-            ptr::write_bytes(node.tower.as_mut_ptr(), 0, height as usize + 1);
+            ptr::write(&mut node.key, key);
+            ptr::write(&mut node.value, value);
+            node.height = height;
+            ptr::write_bytes(node.tower.as_mut_ptr(), 0, height + 1);
         }
         node_offset
     }
 
-    fn value_offset(&self) -> (u32, usize) {
-        let value = self.value.load(Ordering::SeqCst);
-        (value as u32, (value >> 32) as usize)
-    }
-
-    unsafe fn key<'a>(&self, arena: &'a Arena) -> &'a [u8] {
-        slice::from_raw_parts(arena.get_mut(self.key_offset), self.key_len as usize)
-    }
-
-    unsafe fn value<'a>(&self, arena: &'a Arena) -> &'a [u8] {
-        let (value_offset, value_len) = self.value_offset();
-        slice::from_raw_parts(arena.get_mut(value_offset), value_len)
-    }
-
-    fn set_value(&self, arena: &Arena, value: &[u8]) {
-        let val_offset = arena.put_bytes(value);
-        let value = (value.len() as u64) << 32 | val_offset as u64;
-        self.value.store(value, Ordering::SeqCst);
-    }
-
-    fn next_offset(&self, height: u32) -> u32 {
-        self.tower[height as usize].load(Ordering::SeqCst)
+    fn next_offset(&self, height: usize) -> u32 {
+        self.tower[height].load(Ordering::SeqCst)
     }
 }
 
 struct SkiplistCore {
-    height: AtomicU32,
+    height: AtomicUsize,
     head: NonNull<Node>,
     arena: Arena,
 }
@@ -79,18 +56,18 @@ pub struct Skiplist {
 impl Skiplist {
     pub fn with_capacity(arena_size: u32) -> Skiplist {
         let arena = Arena::with_capacity(arena_size);
-        let head_offset = Node::alloc(&arena, &[], &[], MAX_HEIGHT - 1);
+        let head_offset = Node::alloc(&arena, Bytes::new(), Bytes::new(), MAX_HEIGHT - 1);
         let head = unsafe { NonNull::new_unchecked(arena.get_mut(head_offset)) };
         Skiplist {
             core: Arc::new(SkiplistCore {
-                height: AtomicU32::new(0),
+                height: AtomicUsize::new(0),
                 head,
                 arena,
             }),
         }
     }
 
-    fn random_height(&self) -> u32 {
+    fn random_height(&self) -> usize {
         let mut rng = rand::thread_rng();
         for h in 0..(MAX_HEIGHT - 1) {
             if !rng.gen_ratio(HEIGHT_INCREASE, u32::MAX) {
@@ -100,7 +77,7 @@ impl Skiplist {
         MAX_HEIGHT - 1
     }
 
-    fn height(&self) -> u32 {
+    fn height(&self) -> usize {
         self.core.height.load(Ordering::SeqCst)
     }
 
@@ -121,8 +98,7 @@ impl Skiplist {
             }
             let next_ptr: *mut Node = self.core.arena.get_mut(next_offset);
             let next = &*next_ptr;
-            let next_key = next.key(&self.core.arena);
-            let res = key.cmp(next_key);
+            let res = key.cmp(&next.key);
             if res == std::cmp::Ordering::Greater {
                 cursor = next_ptr;
                 continue;
@@ -166,7 +142,7 @@ impl Skiplist {
         &self,
         key: &[u8],
         mut before: *mut Node,
-        level: u32,
+        level: usize,
     ) -> (*mut Node, *mut Node) {
         loop {
             let next_offset = (&*before).next_offset(level);
@@ -175,8 +151,7 @@ impl Skiplist {
             }
             let next_ptr: *mut Node = self.core.arena.get_mut(next_offset);
             let next_node = &*next_ptr;
-            let next_key = next_node.key(&self.core.arena);
-            match key.cmp(next_key) {
+            match key.cmp(&next_node.key) {
                 std::cmp::Ordering::Equal => return (next_ptr, next_ptr),
                 std::cmp::Ordering::Less => return (before, next_ptr),
                 _ => before = next_ptr,
@@ -184,21 +159,24 @@ impl Skiplist {
         }
     }
 
-    pub fn put(&self, key: &[u8], value: &[u8]) {
+    pub fn put(&self, key: impl Into<Bytes>, value: impl Into<Bytes>) -> Option<(Bytes, Bytes)> {
+        let (key, value) = (key.into(), value.into());
         let mut list_height = self.height();
-        let mut prev = [ptr::null_mut(); MAX_HEIGHT as usize + 1];
-        let mut next = [ptr::null_mut(); MAX_HEIGHT as usize + 1];
-        prev[list_height as usize + 1] = self.core.head.as_ptr();
-        next[list_height as usize + 1] = ptr::null_mut();
-        for i in (0..=list_height as usize).rev() {
-            let (p, n) = unsafe { self.find_splice_for_level(key, prev[i + 1], i as u32) };
+        let mut prev = [ptr::null_mut(); MAX_HEIGHT + 1];
+        let mut next = [ptr::null_mut(); MAX_HEIGHT + 1];
+        prev[list_height + 1] = self.core.head.as_ptr();
+        next[list_height + 1] = ptr::null_mut();
+        for i in (0..=list_height).rev() {
+            let (p, n) = unsafe { self.find_splice_for_level(&key, prev[i + 1], i) };
             prev[i] = p;
             next[i] = n;
             if p == n {
                 unsafe {
-                    (&*p).set_value(&self.core.arena, value);
+                    if (*p).value != value {
+                        return Some((key, value));
+                    }
                 }
-                return;
+                return None;
             }
         }
 
@@ -216,13 +194,12 @@ impl Skiplist {
             }
         }
         let x: &mut Node = unsafe { &mut *self.core.arena.get_mut(node_offset) };
-        for i in 0..=height as usize {
+        for i in 0..=height {
             loop {
                 if prev[i].is_null() {
                     assert!(i > 1);
-                    let (p, n) = unsafe {
-                        self.find_splice_for_level(key, self.core.head.as_ptr(), i as u32)
-                    };
+                    let (p, n) =
+                        unsafe { self.find_splice_for_level(&x.key, self.core.head.as_ptr(), i) };
                     prev[i] = p;
                     next[i] = n;
                     assert_ne!(p, n);
@@ -237,13 +214,18 @@ impl Skiplist {
                 ) {
                     Ok(_) => break,
                     Err(_) => {
-                        let (p, n) = unsafe { self.find_splice_for_level(key, prev[i], i as u32) };
+                        let (p, n) = unsafe { self.find_splice_for_level(&x.key, prev[i], i) };
                         if p == n {
                             assert_eq!(i, 0);
-                            unsafe {
-                                (&*p).set_value(&self.core.arena, value);
+                            if unsafe { &*p }.value != x.value {
+                                let key = mem::replace(&mut x.key, Bytes::new());
+                                let value = mem::replace(&mut x.value, Bytes::new());
+                                return Some((key, value));
                             }
-                            return;
+                            unsafe {
+                                ptr::drop_in_place(x);
+                            }
+                            return None;
                         }
                         prev[i] = p;
                         next[i] = n;
@@ -251,6 +233,7 @@ impl Skiplist {
                 }
             }
         }
+        None
     }
 
     pub fn is_empty(&self) -> bool {
@@ -292,16 +275,15 @@ impl Skiplist {
         }
     }
 
-    pub fn get(&self, key: &[u8]) -> Option<&[u8]> {
+    pub fn get(&self, key: &[u8]) -> Option<&Bytes> {
         let node = unsafe { self.find_near(key, false, true) };
         if node.is_null() {
             return None;
         }
-        let next_key = unsafe { (&*node).key(&self.core.arena) };
-        if next_key != key {
+        if unsafe { (&*node) }.key != *key {
             return None;
         }
-        unsafe { Some((&*node).value(&self.core.arena)) }
+        unsafe { Some(&(*node).value) }
     }
 
     pub fn iter_ref(&self) -> IterRef {
@@ -313,6 +295,25 @@ impl Skiplist {
 
     pub fn mem_size(&self) -> u32 {
         self.core.arena.len()
+    }
+}
+
+impl Drop for SkiplistCore {
+    fn drop(&mut self) {
+        let mut node = self.head.as_ptr();
+        loop {
+            let next = unsafe { (&*node).next_offset(0) };
+            if next != 0 {
+                let next_ptr = unsafe { self.arena.get_mut(next) };
+                unsafe {
+                    ptr::drop_in_place(node);
+                }
+                node = next_ptr;
+                continue;
+            }
+            unsafe { ptr::drop_in_place(node) };
+            return;
+        }
     }
 }
 
@@ -329,14 +330,14 @@ impl<'a> IterRef<'a> {
         !self.cursor.is_null()
     }
 
-    pub fn key(&self) -> &[u8] {
+    pub fn key(&self) -> &Bytes {
         assert!(self.valid());
-        unsafe { (&*self.cursor).key(&self.list.core.arena) }
+        unsafe { &(*self.cursor).key }
     }
 
-    pub fn value(&self) -> &[u8] {
+    pub fn value(&self) -> &Bytes {
         assert!(self.valid());
-        unsafe { (&*self.cursor).value(&self.list.core.arena) }
+        unsafe { &(*self.cursor).value }
     }
 
     pub fn next(&mut self) {
@@ -386,9 +387,9 @@ mod tests {
     fn test_find_near() {
         let list = Skiplist::with_capacity(1 << 20);
         for i in 0..1000 {
-            let key = format!("{:05}", i * 10 + 5);
-            let value = format!("{:05}", i);
-            list.put(key.as_bytes(), value.as_bytes());
+            let key = Bytes::from(format!("{:05}", i * 10 + 5));
+            let value = Bytes::from(format!("{:05}", i));
+            list.put(key, value);
         }
         let mut cases = vec![
             (
@@ -428,8 +429,7 @@ mod tests {
                 continue;
             }
             let e = exp.unwrap();
-            let val = unsafe { (&*res).key(&list.core.arena) };
-            assert_eq!(val, e, "{}", i);
+            assert_eq!(unsafe { &*res }.key, e, "{}", i);
         }
     }
 }

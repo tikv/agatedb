@@ -1,3 +1,4 @@
+use bytes::*;
 use criterion::*;
 use rand::prelude::*;
 use skiplist::*;
@@ -6,37 +7,47 @@ use std::sync::atomic::*;
 use std::sync::*;
 use std::thread;
 
-fn skiplist_round(rng: &mut ThreadRng, frac: usize, l: &Skiplist, key: &mut [u8], exp: &[u8]) {
-    let f: usize = rng.gen_range(0, 11);
-    rng.fill_bytes(key);
-    if f < frac {
-        if let Some(v) = l.get(&key) {
+fn skiplist_round(l: &Skiplist, case: &(Bytes, bool), exp: &Bytes) {
+    if case.1 {
+        if let Some(v) = l.get(&case.0) {
             assert_eq!(v, exp);
         }
     } else {
-        l.put(key, exp);
+        l.put(case.0.clone(), exp.clone());
     }
 }
 
 fn bench_read_write_skiplist_frac(b: &mut Bencher<'_>, frac: &usize) {
     let frac = *frac;
-    let value = b"00123";
+    let value = Bytes::from_static(b"00123");
     let list = Skiplist::with_capacity(512 << 20);
     let l = list.clone();
     let stop = Arc::new(AtomicBool::new(false));
     let s = stop.clone();
+    let v = value.clone();
     let j = thread::spawn(move || {
         let mut rng = rand::thread_rng();
-        let mut key = [0; 8];
         while !s.load(Ordering::SeqCst) {
-            skiplist_round(&mut rng, frac, &l, &mut key, value);
+            let mut key = vec![0; 8];
+            rng.fill_bytes(&mut key);
+            let f: usize = rng.gen_range(0, 11);
+            let case = (Bytes::from(key), f < frac);
+            skiplist_round(&l, &case, &v);
         }
     });
     let mut rng = rand::thread_rng();
-    let mut key = [0; 8];
-    b.iter(|| {
-        skiplist_round(&mut rng, frac, &list, &mut key, value);
-    });
+    b.iter_batched_ref(
+        || {
+            let mut key = vec![0; 8];
+            let f: usize = rng.gen_range(0, 11);
+            rng.fill_bytes(&mut key);
+            (Bytes::from(key), f < frac)
+        },
+        |case| {
+            skiplist_round(&list, case, &value);
+        },
+        BatchSize::SmallInput,
+    );
     stop.store(true, Ordering::SeqCst);
     j.join().unwrap();
 }
@@ -53,47 +64,49 @@ fn bench_read_write_skiplist(c: &mut Criterion) {
     group.finish();
 }
 
-fn map_round(
-    rng: &mut ThreadRng,
-    frac: usize,
-    m: &Mutex<HashMap<[u8; 8], [u8; 5]>>,
-    key: &mut [u8; 8],
-    exp: &[u8; 5],
-) {
-    let f: usize = rng.gen_range(0, 11);
-    rng.fill_bytes(key);
-    if f < frac {
+fn map_round(m: &Mutex<HashMap<Bytes, Bytes>>, case: &(Bytes, bool), exp: &Bytes) {
+    if case.1 {
         let rm = m.lock().unwrap();
-        let value = rm.get(key);
+        let value = rm.get(&case.0);
         if let Some(v) = value {
             assert_eq!(v, exp);
         }
     } else {
         let mut rm = m.lock().unwrap();
-        rm.insert(key.clone(), exp.clone());
+        rm.insert(case.0.clone(), exp.clone());
     }
 }
 
 fn bench_read_write_map_frac(b: &mut Bencher<'_>, frac: &usize) {
     let frac = *frac;
-    let value = b"00123";
+    let value = Bytes::from_static(b"00123");
     let map = Arc::new(Mutex::new(HashMap::with_capacity(512 << 10)));
     let m = map.clone();
     let stop = Arc::new(AtomicBool::new(false));
     let s = stop.clone();
 
+    let v = value.clone();
     let h = thread::spawn(move || {
         let mut rng = rand::thread_rng();
-        let mut key = [0; 8];
         while !s.load(Ordering::SeqCst) {
-            map_round(&mut rng, frac, &m, &mut key, value);
+            let mut key = vec![0; 8];
+            let f = rng.gen_range(0, 11);
+            rng.fill_bytes(&mut key);
+            let case = (Bytes::from(key), f < frac);
+            map_round(&m, &case, &v);
         }
     });
     let mut rng = rand::thread_rng();
-    let mut key = [0; 8];
-    b.iter(|| {
-        map_round(&mut rng, frac, &map, &mut key, value);
-    });
+    b.iter_batched_ref(
+        || {
+            let mut key = vec![0; 8];
+            let f = rng.gen_range(0, 11);
+            rng.fill_bytes(&mut key);
+            (Bytes::from(key), f < frac)
+        },
+        |case| map_round(&map, case, &value),
+        BatchSize::SmallInput,
+    );
     stop.store(true, Ordering::SeqCst);
     h.join().unwrap();
 }
@@ -112,24 +125,33 @@ fn bench_read_write_map(c: &mut Criterion) {
 
 fn bench_write_skiplist(c: &mut Criterion) {
     let list = Skiplist::with_capacity(512 << 20);
-    let value = b"00123";
+    let value = Bytes::from_static(b"00123");
     let l = list.clone();
     let stop = Arc::new(AtomicBool::new(false));
     let s = stop.clone();
+    let v = value.clone();
     let j = thread::spawn(move || {
         let mut rng = rand::thread_rng();
-        let mut key = [0; 8];
         while !s.load(Ordering::SeqCst) {
-            skiplist_round(&mut rng, 10, &l, &mut key, value);
+            let mut key = vec![0; 8];
+            rng.fill_bytes(&mut key);
+            let case = (Bytes::from(key), false);
+            skiplist_round(&l, &case, &v);
         }
     });
-    let mut key = [0; 8];
     let mut rng = rand::thread_rng();
     c.bench_function("skiplist_write", |b| {
-        b.iter(|| {
-            rng.fill_bytes(&mut key);
-            list.put(&key, value);
-        })
+        b.iter_batched(
+            || {
+                let mut key = vec![0; 8];
+                rng.fill_bytes(&mut key);
+                Bytes::from(key)
+            },
+            |key| {
+                list.put(key, value.clone());
+            },
+            BatchSize::SmallInput,
+        )
     });
     stop.store(true, Ordering::SeqCst);
     j.join().unwrap();

@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 rand = "0.7"
+bytes = "0.5"
 
 [dev-dependencies]
 yatp = { git = "https://github.com/tikv/yatp.git" }
