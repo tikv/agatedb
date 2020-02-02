@@ -2,17 +2,14 @@
 extern crate failure;
 
 mod db;
+mod entry;
 mod error;
-mod wal;
+pub mod format;
+mod levels;
 mod memtable;
+mod ops;
+mod wal;
 
-pub use error::{Error, Result};
 pub use db::{Agate, AgateOptions};
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
-}
+pub use error::{Error, Result};
+pub use skiplist::Skiplist;

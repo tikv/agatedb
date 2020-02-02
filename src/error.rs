@@ -7,6 +7,10 @@ pub enum Error {
     Config(String),
     #[fail(display = "IO error: {}", _0)]
     Io(#[fail(cause)] io::Error),
+    #[fail(display = "Empty key")]
+    EmptyKey,
+    #[fail(display = "{}", _0)]
+    TooLong(String),
 }
 
 impl From<io::Error> for Error {

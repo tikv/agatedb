@@ -1,13 +1,14 @@
+use super::memtable::MemTable;
+use super::{format, Error, Result};
 use crate::wal::Wal;
-use super::memtable::Memtable;
-use super::{Error, Result};
+use bytes::{Bytes, BytesMut};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub struct Core {
     wal: Wal,
-    memtable: Memtable,
+    memtable: MemTable,
 }
 
 #[derive(Clone)]
@@ -15,11 +16,23 @@ pub struct Agate {
     core: Arc<Core>,
 }
 
+impl Agate {
+    pub fn get_with_ts(&self, key: &[u8], ts: u64) -> Result<Option<Bytes>> {
+        let key = format::key_with_ts(key, ts);
+        let view = self.core.memtable.view();
+        if let Some(value) = view.get(&key) {
+            return Ok(Some(value.clone()));
+        }
+        unimplemented!()
+    }
+}
+
 #[derive(Default)]
 pub struct AgateOptions {
     create_if_not_exists: bool,
     wal_path: Option<PathBuf>,
-    memtable_size: usize,
+    table_size: u32,
+    max_table_count: usize,
 }
 
 impl AgateOptions {
@@ -33,8 +46,13 @@ impl AgateOptions {
         self
     }
 
-    pub fn memtable_size(&mut self, size: usize) -> &mut AgateOptions {
-        self.memtable_size = size;
+    pub fn table_size(&mut self, size: u32) -> &mut AgateOptions {
+        self.table_size = size;
+        self
+    }
+
+    pub fn max_table_count(&mut self, count: usize) -> &mut AgateOptions {
+        self.max_table_count = count;
         self
     }
 
@@ -47,40 +65,17 @@ impl AgateOptions {
             fs::create_dir_all(p)?;
         }
         let p = self.wal_path.take().unwrap_or_else(|| p.join("WAL"));
-        if self.memtable_size == 0 {
-            self.memtable_size = 32 * 1024 * 1024;
+        if self.table_size == 0 {
+            self.table_size = 32 * 1024 * 1024;
+        }
+        if self.max_table_count == 0 {
+            self.max_table_count = 24;
         }
         Ok(Agate {
             core: Arc::new(Core {
                 wal: Wal::open(p)?,
-                memtable: Memtable::with_capacity(self.memtable_size),
+                memtable: MemTable::with_capacity(self.table_size, self.max_table_count),
             }),
         })
-    }
-}
-
-#[repr(C)]
-pub(crate) enum OpType {
-    Put,
-    Delete,
-}
-
-pub(crate) struct Record<'a> {
-    op_type: OpType,
-    key: &'a [u8],
-    value: &'a [u8],
-}
-
-impl Agate {
-    pub fn put(&self, key: &[u8], value: &[u8]) {
-        self.write(OpType::Put, key, value)
-    }
-
-    pub fn delete(&self, key: &[u8]) {
-        self.write(OpType::Delete, key, b"")
-    }
-
-    fn write(&self, op_type: OpType, key: &[u8], value: &[u8]) {
-        self.core.wal.write()
     }
 }
