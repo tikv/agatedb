@@ -1,5 +1,6 @@
-use crate::arena::Arena;
-use crate::MAX_HEIGHT;
+use super::arena::Arena;
+use super::KeyComparitor;
+use super::MAX_HEIGHT;
 use bytes::Bytes;
 use rand::Rng;
 use std::ptr::NonNull;
@@ -49,12 +50,13 @@ struct SkiplistCore {
 }
 
 #[derive(Clone)]
-pub struct Skiplist {
+pub struct Skiplist<C> {
     core: Arc<SkiplistCore>,
+    c: C,
 }
 
-impl Skiplist {
-    pub fn with_capacity(arena_size: u32) -> Skiplist {
+impl<C> Skiplist<C> {
+    pub fn with_capacity(c: C, arena_size: u32) -> Skiplist<C> {
         let arena = Arena::with_capacity(arena_size);
         let head_offset = Node::alloc(&arena, Bytes::new(), Bytes::new(), MAX_HEIGHT - 1);
         let head = unsafe { NonNull::new_unchecked(arena.get_mut(head_offset)) };
@@ -64,6 +66,7 @@ impl Skiplist {
                 head,
                 arena,
             }),
+            c,
         }
     }
 
@@ -80,7 +83,9 @@ impl Skiplist {
     fn height(&self) -> usize {
         self.core.height.load(Ordering::SeqCst)
     }
+}
 
+impl<C: KeyComparitor> Skiplist<C> {
     unsafe fn find_near(&self, key: &[u8], less: bool, allow_equal: bool) -> *const Node {
         let mut cursor: *const Node = self.core.head.as_ptr();
         let mut level = self.height();
@@ -98,7 +103,7 @@ impl Skiplist {
             }
             let next_ptr: *mut Node = self.core.arena.get_mut(next_offset);
             let next = &*next_ptr;
-            let res = key.cmp(&next.key);
+            let res = self.c.compare_key(key, &next.key);
             if res == std::cmp::Ordering::Greater {
                 cursor = next_ptr;
                 continue;
@@ -151,7 +156,7 @@ impl Skiplist {
             }
             let next_ptr: *mut Node = self.core.arena.get_mut(next_offset);
             let next_node = &*next_ptr;
-            match key.cmp(&next_node.key) {
+            match self.c.compare_key(&key, &next_node.key) {
                 std::cmp::Ordering::Equal => return (next_ptr, next_ptr),
                 std::cmp::Ordering::Less => return (before, next_ptr),
                 _ => before = next_ptr,
@@ -280,13 +285,13 @@ impl Skiplist {
         if node.is_null() {
             return None;
         }
-        if unsafe { (&*node) }.key != *key {
-            return None;
+        if self.c.same_key(&unsafe { (&*node) }.key, key) {
+            return unsafe { Some(&(*node).value) };
         }
-        unsafe { Some(&(*node).value) }
+        None
     }
 
-    pub fn iter_ref(&self) -> IterRef {
+    pub fn iter_ref(&self) -> IterRef<'_, C> {
         IterRef {
             list: self,
             cursor: ptr::null(),
@@ -317,15 +322,15 @@ impl Drop for SkiplistCore {
     }
 }
 
-unsafe impl Send for Skiplist {}
-unsafe impl Sync for Skiplist {}
+unsafe impl<C: Send> Send for Skiplist<C> {}
+unsafe impl<C: Sync> Sync for Skiplist<C> {}
 
-pub struct IterRef<'a> {
-    list: &'a Skiplist,
+pub struct IterRef<'a, C> {
+    list: &'a Skiplist<C>,
     cursor: *const Node,
 }
 
-impl<'a> IterRef<'a> {
+impl<'a, C: KeyComparitor> IterRef<'a, C> {
     pub fn valid(&self) -> bool {
         !self.cursor.is_null()
     }
@@ -382,54 +387,52 @@ impl<'a> IterRef<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::FixedLengthSuffixComparitor;
 
     #[test]
     fn test_find_near() {
-        let list = Skiplist::with_capacity(1 << 20);
+        let comp = FixedLengthSuffixComparitor::new(8);
+        let list = Skiplist::with_capacity(comp, 1 << 20);
         for i in 0..1000 {
-            let key = Bytes::from(format!("{:05}", i * 10 + 5));
+            let key = Bytes::from(format!("{:05}{:08}", i * 10 + 5, 0));
             let value = Bytes::from(format!("{:05}", i));
             list.put(key, value);
         }
         let mut cases = vec![
-            (
-                b"00001" as &'static [u8],
-                false,
-                false,
-                Some(b"00005" as &'static [u8]),
-            ),
-            (b"00001", false, true, Some(b"00005")),
-            (b"00001", true, false, None),
-            (b"00001", true, true, None),
-            (b"00005", false, false, Some(b"00015")),
-            (b"00005", false, true, Some(b"00005")),
-            (b"00005", true, false, None),
-            (b"00005", true, true, Some(b"00005")),
-            (b"05555", false, false, Some(b"05565")),
-            (b"05555", false, true, Some(b"05555")),
-            (b"05555", true, false, Some(b"05545")),
-            (b"05555", true, true, Some(b"05555")),
-            (b"05558", false, false, Some(b"05565")),
-            (b"05558", false, true, Some(b"05565")),
-            (b"05558", true, false, Some(b"05555")),
-            (b"05558", true, true, Some(b"05555")),
-            (b"09995", false, false, None),
-            (b"09995", false, true, Some(b"09995")),
-            (b"09995", true, false, Some(b"09985")),
-            (b"09995", true, true, Some(b"09995")),
-            (b"59995", false, false, None),
-            (b"59995", false, true, None),
-            (b"59995", true, false, Some(b"09995")),
-            (b"59995", true, true, Some(b"09995")),
+            ("00001", false, false, Some("00005")),
+            ("00001", false, true, Some("00005")),
+            ("00001", true, false, None),
+            ("00001", true, true, None),
+            ("00005", false, false, Some("00015")),
+            ("00005", false, true, Some("00005")),
+            ("00005", true, false, None),
+            ("00005", true, true, Some("00005")),
+            ("05555", false, false, Some("05565")),
+            ("05555", false, true, Some("05555")),
+            ("05555", true, false, Some("05545")),
+            ("05555", true, true, Some("05555")),
+            ("05558", false, false, Some("05565")),
+            ("05558", false, true, Some("05565")),
+            ("05558", true, false, Some("05555")),
+            ("05558", true, true, Some("05555")),
+            ("09995", false, false, None),
+            ("09995", false, true, Some("09995")),
+            ("09995", true, false, Some("09985")),
+            ("09995", true, true, Some("09995")),
+            ("59995", false, false, None),
+            ("59995", false, true, None),
+            ("59995", true, false, Some("09995")),
+            ("59995", true, true, Some("09995")),
         ];
         for (i, (key, less, allow_equal, exp)) in cases.drain(..).enumerate() {
-            let res = unsafe { list.find_near(key, less, allow_equal) };
+            let seek_key = Bytes::from(format!("{}{:08}", key, 0));
+            let res = unsafe { list.find_near(&seek_key, less, allow_equal) };
             if exp.is_none() {
                 assert!(res.is_null(), "{}", i);
                 continue;
             }
-            let e = exp.unwrap();
-            assert_eq!(unsafe { &*res }.key, e, "{}", i);
+            let e = format!("{}{:08}", exp.unwrap(), 0);
+            assert_eq!(&unsafe { &*res }.key, e.as_bytes(), "{}", i);
         }
     }
 }

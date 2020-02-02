@@ -12,10 +12,15 @@ fn new_value(v: usize) -> Bytes {
     Bytes::from(format!("{:05}", v))
 }
 
+fn key_with_ts(key: &str, ts: u64) -> Bytes {
+    Bytes::from(format!("{}{:08}", key, ts))
+}
+
 #[test]
 fn test_empty() {
-    let key = b"aaa".to_vec();
-    let list = Skiplist::with_capacity(ARENA_SIZE);
+    let key = key_with_ts("aaa", 0);
+    let comp = FixedLengthSuffixComparitor::new(8);
+    let list = Skiplist::with_capacity(comp, ARENA_SIZE);
     let v = list.get(&key);
     assert!(v.is_none());
 
@@ -32,35 +37,37 @@ fn test_empty() {
 
 #[test]
 fn test_basic() {
-    let list = Skiplist::with_capacity(ARENA_SIZE);
+    let comp = FixedLengthSuffixComparitor::new(8);
+    let list = Skiplist::with_capacity(comp, ARENA_SIZE);
     let table = vec![
-        (b"key1" as &'static [u8], new_value(42)),
-        (b"key2", new_value(52)),
-        (b"key3", new_value(62)),
-        (b"key5", Bytes::from(format!("{:0102400}", 1))),
-        (b"key4", new_value(72)),
+        ("key1", new_value(42)),
+        ("key2", new_value(52)),
+        ("key3", new_value(62)),
+        ("key5", Bytes::from(format!("{:0102400}", 1))),
+        ("key4", new_value(72)),
     ];
 
     for (key, value) in &table {
-        list.put(Bytes::from_static(key), value.clone());
+        list.put(key_with_ts(*key, 0), value.clone());
     }
 
-    assert_eq!(list.get(b"key"), None);
+    assert_eq!(list.get(&key_with_ts("key", 0)), None);
     assert_eq!(list.len(), 5);
     assert!(!list.is_empty());
     for (key, value) in &table {
-        let tag = unsafe { str::from_utf8_unchecked(key) };
-        assert_eq!(list.get(key), Some(value), "{}", tag);
+        let get_key = key_with_ts(*key, 0);
+        assert_eq!(list.get(&get_key), Some(value), "{}", key);
     }
 }
 
 fn test_concurrent_basic(n: usize, cap: u32, value_len: usize) {
     let pool = yatp::Builder::new("concurrent_basic").build_callback_pool();
-    let list = Skiplist::with_capacity(cap);
+    let comp = FixedLengthSuffixComparitor::new(8);
+    let list = Skiplist::with_capacity(comp, cap);
     let kvs: Vec<_> = (0..n)
         .map(|i| {
             (
-                Bytes::from(format!("{:05}", i)),
+                key_with_ts(format!("{:05}", i).as_str(), 0),
                 Bytes::from(format!("{1:00$}", value_len, i)),
             )
         })
@@ -107,13 +114,14 @@ fn test_one_key() {
     let n = 100;
     let write_pool = yatp::Builder::new("one_key").build_callback_pool();
     let read_pool = yatp::Builder::new("one_key").build_callback_pool();
-    let list = Skiplist::with_capacity(ARENA_SIZE);
-    let key = b"thekey";
+    let comp = FixedLengthSuffixComparitor::new(8);
+    let list = Skiplist::with_capacity(comp, ARENA_SIZE);
+    let key = key_with_ts("thekey", 0);
     let (tx, rx) = mpsc::channel();
     for i in 0..n {
         let tx = tx.clone();
         let list = list.clone();
-        let key = Bytes::from_static(key);
+        let key = key.clone();
         let value = new_value(i);
         write_pool.spawn(move |_: &mut Handle<'_>| {
             list.put(key, value);
@@ -125,8 +133,9 @@ fn test_one_key() {
         let tx = tx.clone();
         let list = list.clone();
         let mark = mark.clone();
+        let key = key.clone();
         read_pool.spawn(move |_: &mut Handle<'_>| {
-            let val = list.get(key);
+            let val = list.get(&key);
             if val.is_none() {
                 return;
             }
@@ -148,13 +157,14 @@ fn test_one_key() {
 #[test]
 fn test_iterator_next() {
     let n = 100;
-    let list = Skiplist::with_capacity(ARENA_SIZE);
+    let comp = FixedLengthSuffixComparitor::new(8);
+    let list = Skiplist::with_capacity(comp, ARENA_SIZE);
     let mut iter_ref = list.iter_ref();
     assert!(!iter_ref.valid());
     iter_ref.seek_to_first();
     assert!(!iter_ref.valid());
     for i in (0..n).rev() {
-        let key = Bytes::from(format!("{:05}", i));
+        let key = key_with_ts(format!("{:05}", i).as_str(), 0);
         list.put(key, new_value(i));
     }
     iter_ref.seek_to_first();
@@ -170,13 +180,14 @@ fn test_iterator_next() {
 #[test]
 fn test_iterator_prev() {
     let n = 100;
-    let list = Skiplist::with_capacity(ARENA_SIZE);
+    let comp = FixedLengthSuffixComparitor::new(8);
+    let list = Skiplist::with_capacity(comp, ARENA_SIZE);
     let mut iter_ref = list.iter_ref();
     assert!(!iter_ref.valid());
     iter_ref.seek_to_last();
     assert!(!iter_ref.valid());
     for i in (0..n).rev() {
-        let key = Bytes::from(format!("{:05}", i));
+        let key = key_with_ts(format!("{:05}", i).as_str(), 0);
         list.put(key, new_value(i));
     }
     iter_ref.seek_to_last();
@@ -192,14 +203,15 @@ fn test_iterator_prev() {
 #[test]
 fn test_iterator_seek() {
     let n = 100;
-    let list = Skiplist::with_capacity(ARENA_SIZE);
+    let comp = FixedLengthSuffixComparitor::new(8);
+    let list = Skiplist::with_capacity(comp, ARENA_SIZE);
     let mut iter_ref = list.iter_ref();
     assert!(!iter_ref.valid());
     iter_ref.seek_to_first();
     assert!(!iter_ref.valid());
     for i in (0..n).rev() {
         let v = i * 10 + 1000;
-        let key = Bytes::from(format!("{:05}", v));
+        let key = key_with_ts(format!("{:05}", v).as_str(), 0);
         list.put(key, new_value(v));
     }
     iter_ref.seek_to_first();
@@ -207,19 +219,20 @@ fn test_iterator_seek() {
     assert_eq!(iter_ref.value(), b"01000" as &[u8]);
 
     let cases = vec![
-        (b"00000", Some(b"01000"), None),
-        (b"01000", Some(b"01000"), Some(b"01000")),
-        (b"01005", Some(b"01010"), Some(b"01000")),
-        (b"01010", Some(b"01010"), Some(b"01010")),
-        (b"99999", None, Some(b"01990")),
+        ("00000", Some(b"01000"), None),
+        ("01000", Some(b"01000"), Some(b"01000")),
+        ("01005", Some(b"01010"), Some(b"01000")),
+        ("01010", Some(b"01010"), Some(b"01010")),
+        ("99999", None, Some(b"01990")),
     ];
     for (key, seek_expect, for_prev_expect) in cases {
-        iter_ref.seek(key);
+        let key = key_with_ts(key, 0);
+        iter_ref.seek(&key);
         assert_eq!(iter_ref.valid(), seek_expect.is_some());
         if let Some(v) = seek_expect {
             assert_eq!(iter_ref.value(), &v[..]);
         }
-        iter_ref.seek_for_prev(key);
+        iter_ref.seek_for_prev(&key);
         assert_eq!(iter_ref.valid(), for_prev_expect.is_some());
         if let Some(v) = for_prev_expect {
             assert_eq!(iter_ref.value(), &v[..]);
