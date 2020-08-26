@@ -1,22 +1,26 @@
 use std::io;
 use std::result;
 
-#[derive(Debug, Fail)]
+use thiserror::Error;
+
+#[derive(Debug, Error)]
 pub enum Error {
-    #[fail(display = "Invalid Configuration: {}", _0)]
+    #[error("Invalid Configuration: {0}")]
     Config(String),
-    #[fail(display = "IO error: {}", _0)]
-    Io(#[fail(cause)] io::Error),
-    #[fail(display = "Empty key")]
+    #[error("IO error: {0}")]
+    Io(#[source] Box<io::Error>),
+    #[error("Empty key")]
     EmptyKey,
-    #[fail(display = "{}", _0)]
+    #[error("{0}")]
     TooLong(String),
+    #[error("Invalid checksum")]
+    InvalidChecksum(String),
 }
 
 impl From<io::Error> for Error {
     #[inline]
     fn from(e: io::Error) -> Error {
-        Error::Io(e)
+        Error::Io(Box::new(e))
     }
 }
 
