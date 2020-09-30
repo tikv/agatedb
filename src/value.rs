@@ -1,4 +1,4 @@
-use bytes::{Bytes, BytesMut, BufMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use std::mem::MaybeUninit;
 
 pub struct Value {
@@ -73,7 +73,7 @@ impl Value {
     pub fn encoded_size(&self) -> u32 {
         let l = self.value.len() + 2;
         if self.expires_at == 0 {
-            return l as u32 + 1
+            return l as u32 + 1;
         }
         (l + var_size(self.expires_at)) as u32
     }

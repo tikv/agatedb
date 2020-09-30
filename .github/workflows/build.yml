@@ -1,0 +1,72 @@
+on:
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - master
+  
+name: CI
+
+jobs:
+  test:
+    name: Lint and Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        name: Checkout 🛎️
+      - uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-test
+      - uses: actions-rs/toolchain@v1
+        name: Setup Cargo Toolchain 🛎️
+        with:
+          components: rustfmt, clippy
+          toolchain: nightly
+      - uses: actions-rs/cargo@v1
+        name: Check Code Format 🔧
+        with:
+          command: fmt
+          args: -- --check
+      - name: Install Protoc 🛎️
+        uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
+      - name: Install protobuf-codegen 🛎️
+        run: cargo install protobuf-codegen --version ~2.10
+      - name: Check Protobuf Files 🔧
+        run: |
+          make proto
+          git diff --exit-code
+      - uses: actions-rs/cargo@v1
+        name: Running Tests 🚀
+        with:
+          command: test
+          args: --all-features --workspace
+  bench:
+    name: Build and Bench
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        name: Checkout 🛎️
+      - uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-bench
+      - uses: actions-rs/toolchain@v1
+        name: Setup Cargo Toolchain 🛎️
+        with:
+          components: rustfmt, clippy
+          toolchain: nightly
+      - uses: actions-rs/cargo@v1
+        name: Benchmark 🚀
+        with:
+          command: bench
+          args: --all-features --workspace

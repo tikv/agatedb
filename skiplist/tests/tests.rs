@@ -147,8 +147,8 @@ fn test_one_key() {
         });
     }
     for _ in 0..n {
-        rx.recv_timeout(Duration::from_secs(3)).unwrap();
-        rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        rx.recv_timeout(Duration::from_secs(10)).unwrap();
     }
     assert_eq!(list.len(), 1);
     assert!(mark.load(Ordering::SeqCst));

@@ -1,5 +1,5 @@
-mod db;
 mod checksum;
+mod db;
 mod entry;
 mod error;
 pub mod format;
@@ -7,7 +7,7 @@ mod levels;
 mod memtable;
 mod ops;
 mod opt;
-mod table;
+// mod table;
 mod util;
 mod value;
 mod wal;

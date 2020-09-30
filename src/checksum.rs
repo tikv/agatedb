@@ -1,24 +1,27 @@
-use proto::meta::{Checksum_Algorithm, Checksum};
-use crc::crc32;
 use crate::{Error, Result};
+use crc::crc32;
+use proto::meta::{Checksum, Checksum_Algorithm};
 
 pub fn calculate_checksum(data: &[u8], algo: Checksum_Algorithm) -> u64 {
     match algo {
         Checksum_Algorithm::CRC32C => crc32::checksum_castagnoli(data) as u64,
-        Checksum_Algorithm::XXHash64 => xxhash::checksum(data)
+        Checksum_Algorithm::XXHash64 => xxhash::checksum(data),
     }
 }
 
 pub fn verify_checksum(data: &[u8], expected: &Checksum) -> Result<()> {
     let actual = calculate_checksum(data, expected.get_algo());
     if actual == expected.sum {
-        return Ok(())
+        return Ok(());
     }
-    Err(Error::InvalidChecksum(format!("checksum not correct, expected {:?}, got {}", expected, actual)))
+    Err(Error::InvalidChecksum(format!(
+        "checksum not correct, expected {:?}, got {}",
+        expected, actual
+    )))
 }
 
 mod xxhash {
-    use std::{u64, ptr};
+    use std::{ptr, u64};
 
     const PRIME1: u64 = 11400714785074694791;
     const PRIME2: u64 = 14029467366897019727;
@@ -94,12 +97,12 @@ mod xxhash {
             i += 8;
             h ^= round(0, u64(bytes.as_ptr()));
             h = add(mul(h.rotate_left(27), PRIME1), PRIME4);
-        
+
             if i + 8 <= end {
                 i += 8;
                 h ^= round(0, unsafe { u64(bytes.as_ptr().add(8)) });
                 h = add(mul(h.rotate_left(27), PRIME1), PRIME4);
-        
+
                 if i + 8 <= end {
                     i += 8;
                     h ^= round(0, unsafe { u64(bytes.as_ptr().add(16)) });
