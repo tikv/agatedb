@@ -1,6 +1,6 @@
 use crate::{Error, Result};
 use crc::crc32;
-use proto::meta::{Checksum, checksum::Algorithm as ChecksumAlgorithm};
+use proto::meta::{checksum::Algorithm as ChecksumAlgorithm, Checksum};
 
 pub fn calculate_checksum(data: &[u8], algo: ChecksumAlgorithm) -> u64 {
     match algo {
