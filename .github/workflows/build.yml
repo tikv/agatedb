@@ -32,16 +32,6 @@ jobs:
         with:
           command: fmt
           args: -- --check
-      - name: Install Protoc 🛎️
-        uses: arduino/setup-protoc@v1
-        with:
-          version: '3.x'
-      - name: Install protobuf-codegen 🛎️
-        run: cargo install protobuf-codegen --version ~2.10
-      - name: Check Protobuf Files 🔧
-        run: |
-          make proto
-          git diff --exit-code
       - uses: actions-rs/cargo@v1
         name: Running Tests 🚀
         with:

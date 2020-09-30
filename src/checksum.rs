@@ -1,16 +1,16 @@
 use crate::{Error, Result};
 use crc::crc32;
-use proto::meta::{Checksum, Checksum_Algorithm};
+use proto::meta::{Checksum, checksum::Algorithm as ChecksumAlgorithm};
 
-pub fn calculate_checksum(data: &[u8], algo: Checksum_Algorithm) -> u64 {
+pub fn calculate_checksum(data: &[u8], algo: ChecksumAlgorithm) -> u64 {
     match algo {
-        Checksum_Algorithm::CRC32C => crc32::checksum_castagnoli(data) as u64,
-        Checksum_Algorithm::XXHash64 => xxhash::checksum(data),
+        ChecksumAlgorithm::Crc32c => crc32::checksum_castagnoli(data) as u64,
+        ChecksumAlgorithm::XxHash64 => xxhash::checksum(data),
     }
 }
 
 pub fn verify_checksum(data: &[u8], expected: &Checksum) -> Result<()> {
-    let actual = calculate_checksum(data, expected.get_algo());
+    let actual = calculate_checksum(data, ChecksumAlgorithm::from_i32(expected.algo).unwrap());
     if actual == expected.sum {
         return Ok(());
     }
