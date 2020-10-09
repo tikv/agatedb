@@ -147,10 +147,10 @@ fn test_one_key() {
         });
     }
     for i in 0..n {
-        if let Err(_) = rx.recv_timeout(Duration::from_secs(10)) {
+        if let Err(_) = rx.recv_timeout(Duration::from_secs(1)) {
             panic!("timeout on receiving {} msg", i);
         }
-        if let Err(_) = rx.recv_timeout(Duration::from_secs(10)) {
+        if let Err(_) = rx.recv_timeout(Duration::from_secs(1)) {
             panic!("timeout on receiving {} msg", i);
         }
     }
