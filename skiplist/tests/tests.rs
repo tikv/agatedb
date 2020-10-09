@@ -146,15 +146,16 @@ fn test_one_key() {
             tx.send("r").unwrap();
         });
     }
+    drop(tx);
     write_pool.shutdown();
     read_pool.shutdown();
     let mut r = 0;
     let mut w = 0;
     for _ in 0..(n * 2) {
-        match rx.recv() {
+        match rx.recv_timeout(Duration::from_secs(3)) {
             Ok("w") => w += 1,
             Ok("r") => r += 1,
-            Err(_) => panic!("timeout on receiving r{} w{} msg", r, w),
+            Err(err) => panic!("timeout on receiving r{} w{} msg {:?}", r, w, err),
             _ => panic!("unexpected value"),
         }
     }
