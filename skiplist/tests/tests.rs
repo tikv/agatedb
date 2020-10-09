@@ -151,7 +151,7 @@ fn test_one_key() {
     let mut r = 0;
     let mut w = 0;
     for _ in 0..(n * 2) {
-        match rx.recv_timeout(Duration::from_secs(1)) {
+        match rx.recv() {
             Ok("w") => w += 1,
             Ok("r") => r += 1,
             Err(_) => panic!("timeout on receiving r{} w{} msg", r, w),
