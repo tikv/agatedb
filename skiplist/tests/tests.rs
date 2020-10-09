@@ -112,7 +112,8 @@ fn test_concurrent_basic_big_value() {
 #[test]
 fn test_one_key() {
     let n = 100;
-    let pool = yatp::Builder::new("one_key_unified").build_callback_pool();
+    let write_pool = yatp::Builder::new("one_key_write").build_callback_pool();
+    let read_pool = yatp::Builder::new("one_key_read").build_callback_pool();
     let comp = FixedLengthSuffixComparitor::new(8);
     let list = Skiplist::with_capacity(comp, ARENA_SIZE);
     let key = key_with_ts("thekey", 0);
@@ -122,7 +123,7 @@ fn test_one_key() {
         let list = list.clone();
         let key = key.clone();
         let value = new_value(i);
-        pool.spawn(move |_: &mut Handle<'_>| {
+        write_pool.spawn(move |_: &mut Handle<'_>| {
             list.put(key, value);
             tx.send("w").unwrap();
         })
@@ -133,7 +134,7 @@ fn test_one_key() {
         let list = list.clone();
         let mark = mark.clone();
         let key = key.clone();
-        pool.spawn(move |_: &mut Handle<'_>| {
+        read_pool.spawn(move |_: &mut Handle<'_>| {
             let val = list.get(&key);
             if val.is_none() {
                 return;
