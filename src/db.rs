@@ -1,7 +1,7 @@
 use super::memtable::MemTable;
 use super::{format, Error, Result};
 use crate::wal::Wal;
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

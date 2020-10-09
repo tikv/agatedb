@@ -1,5 +1,5 @@
 mod builder;
-
+/*
 use std::fs;
 use bytes::Bytes;
 use proto::meta::{TableIndex, Checksum, Checksum_Algorithm, BlockOffset};
@@ -115,3 +115,4 @@ impl Table {
         
     }
 }
+*/

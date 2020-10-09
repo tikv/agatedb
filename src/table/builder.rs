@@ -1,8 +1,8 @@
 use bytes::{Bytes, BytesMut, BufMut, Buf};
-use proto::meta::{TableIndex, Checksum, Checksum_Algorithm, BlockOffset};
+use proto::meta::{TableIndex, Checksum, checksum::Algorithm as Checksum_Algorithm, BlockOffset};
 use std::{u16, u32};
 use crate::value::Value;
-use protobuf::Message;
+use prost::Message;
 use crate::{util, checksum};
 use crate::opt::Options;
 

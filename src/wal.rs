@@ -1,6 +1,4 @@
 use super::Result;
-use bytes::{BufMut, Bytes, BytesMut};
-use crc::crc32::{Digest, IEEE};
 use std::fs::{File, OpenOptions};
 use std::mem::MaybeUninit;
 use std::path::PathBuf;
