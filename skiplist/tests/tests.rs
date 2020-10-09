@@ -112,8 +112,8 @@ fn test_concurrent_basic_big_value() {
 #[test]
 fn test_one_key() {
     let n = 100;
-    let write_pool = yatp::Builder::new("one_key_w").build_callback_pool();
-    let read_pool = yatp::Builder::new("one_key_r").build_callback_pool();
+    let write_pool = yatp::Builder::new("one_key_write").build_callback_pool();
+    let read_pool = yatp::Builder::new("one_key_read").build_callback_pool();
     let comp = FixedLengthSuffixComparitor::new(8);
     let list = Skiplist::with_capacity(comp, ARENA_SIZE);
     let key = key_with_ts("thekey", 0);
