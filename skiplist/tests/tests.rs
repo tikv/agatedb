@@ -146,9 +146,13 @@ fn test_one_key() {
             tx.send(()).unwrap();
         });
     }
-    for _ in 0..n {
-        rx.recv_timeout(Duration::from_secs(10)).unwrap();
-        rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    for i in 0..n {
+        if let Err(_) = rx.recv_timeout(Duration::from_secs(10)) {
+            panic!("timeout on receiving {} msg", i);
+        }
+        if let Err(_) = rx.recv_timeout(Duration::from_secs(10)) {
+            panic!("timeout on receiving {} msg", i);
+        }
     }
     assert_eq!(list.len(), 1);
     assert!(mark.load(Ordering::SeqCst));
