@@ -3,9 +3,9 @@ use crate::opt::Options;
 use crate::value::Value;
 use crate::{checksum, util};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use prost::Message;
 use proto::meta::{checksum::Algorithm as ChecksumAlg, BlockOffset, Checksum, TableIndex};
 use std::{u16, u32};
-use prost::Message;
 
 #[repr(C)]
 struct Header {
@@ -141,7 +141,7 @@ impl Builder {
                                  4 + // count of all entry offsets
                                  8 + // checksum bytes
                                  4; // checksum length
-        let estimated_size = block_size + 
+        let estimated_size = block_size +
                                   4 + // index length
                                   5 * self.table_index.offsets.len() as u32; // TODO: why 5?
         estimated_size as u64 > capacity
@@ -165,7 +165,7 @@ impl Builder {
     fn build_checksum(&self, data: &[u8]) -> Checksum {
         Checksum {
             sum: checksum::calculate_checksum(data, ChecksumAlg::Crc32c),
-            algo: ChecksumAlg::Crc32c as i32
+            algo: ChecksumAlg::Crc32c as i32,
         }
     }
 

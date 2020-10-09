@@ -112,7 +112,7 @@ impl Table {
 
     fn init_biggest_and_smallest(&mut self) -> Result<()> {
         self.read_index()?;
-        
+
     }
 }
 */

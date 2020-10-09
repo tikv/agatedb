@@ -1,5 +1,5 @@
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use std::{u64, ptr};
+use bytes::{BufMut, Bytes, BytesMut};
+use std::{ptr, u64};
 
 pub fn key_with_ts(key: impl Into<BytesMut>, ts: u64) -> Bytes {
     let mut key = key.into();
@@ -29,7 +29,7 @@ pub fn user_key(key: &[u8]) -> &[u8] {
 }
 
 pub mod legacy {
-    use bytes::{BufMut, Bytes, BytesMut};
+    use bytes::{Buf, BufMut, Bytes, BytesMut};
     use std::ptr;
     use std::u64;
 
