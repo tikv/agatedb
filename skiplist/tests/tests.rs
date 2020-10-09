@@ -146,6 +146,8 @@ fn test_one_key() {
             tx.send("r").unwrap();
         });
     }
+    write_pool.shutdown();
+    read_pool.shutdown();
     let mut r = 0;
     let mut w = 0;
     for _ in 0..(n * 2) {
