@@ -128,7 +128,7 @@ fn bench_read_write_map(c: &mut Criterion) {
 
 fn bench_write_skiplist(c: &mut Criterion) {
     let comp = FixedLengthSuffixComparitor::new(8);
-    let list = Skiplist::with_capacity(comp, 512 << 20);
+    let list = Skiplist::with_capacity(comp, 512 << 21);
     let value = Bytes::from_static(b"00123");
     let l = list.clone();
     let stop = Arc::new(AtomicBool::new(false));
@@ -144,7 +144,9 @@ fn bench_write_skiplist(c: &mut Criterion) {
     let mut rng = rand::thread_rng();
     c.bench_function("skiplist_write", |b| {
         b.iter_batched(
-            || random_key(&mut rng),
+            || {
+                random_key(&mut rng)
+            },
             |key| {
                 list.put(key, value.clone());
             },
