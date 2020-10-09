@@ -3,6 +3,7 @@ use skiplist::*;
 use std::str;
 use std::sync::atomic::*;
 use std::sync::*;
+use std::thread::yield_now;
 use std::time::Duration;
 use yatp::task::callback::Handle;
 
@@ -111,13 +112,14 @@ fn test_concurrent_basic_big_value() {
 
 #[test]
 fn test_one_key() {
-    let n = 100;
-    let write_pool = yatp::Builder::new("one_key").build_callback_pool();
-    let read_pool = yatp::Builder::new("one_key").build_callback_pool();
+    let n = 10000;
+    let write_pool = yatp::Builder::new("one_key_write").build_callback_pool();
+    let read_pool = yatp::Builder::new("one_key_read").build_callback_pool();
     let comp = FixedLengthSuffixComparitor::new(8);
     let list = Skiplist::with_capacity(comp, ARENA_SIZE);
     let key = key_with_ts("thekey", 0);
     let (tx, rx) = mpsc::channel();
+    list.put(key.clone(), new_value(0));
     for i in 0..n {
         let tx = tx.clone();
         let list = list.clone();
@@ -125,7 +127,8 @@ fn test_one_key() {
         let value = new_value(i);
         write_pool.spawn(move |_: &mut Handle<'_>| {
             list.put(key, value);
-            tx.send(()).unwrap();
+            tx.send("w").unwrap();
+            yield_now();
         })
     }
     let mark = Arc::new(AtomicBool::new(false));
@@ -143,12 +146,19 @@ fn test_one_key() {
             let val: usize = s.parse().unwrap();
             assert!(val < n);
             mark.store(true, Ordering::SeqCst);
-            tx.send(()).unwrap();
+            tx.send("r").unwrap();
+            yield_now();
         });
     }
-    for _ in 0..n {
-        rx.recv_timeout(Duration::from_secs(10)).unwrap();
-        rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let mut r = 0;
+    let mut w = 0;
+    for _ in 0..(n * 2) {
+        match rx.recv_timeout(Duration::from_secs(3)) {
+            Ok("w") => w += 1,
+            Ok("r") => r += 1,
+            Err(err) => panic!("timeout on receiving r{} w{} msg {:?}", r, w, err),
+            _ => panic!("unexpected value"),
+        }
     }
     assert_eq!(list.len(), 1);
     assert!(mark.load(Ordering::SeqCst));
