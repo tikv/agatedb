@@ -144,9 +144,7 @@ fn bench_write_skiplist(c: &mut Criterion) {
     let mut rng = rand::thread_rng();
     c.bench_function("skiplist_write", |b| {
         b.iter_batched(
-            || {
-                random_key(&mut rng)
-            },
+            || random_key(&mut rng),
             |key| {
                 list.put(key, value.clone());
             },
