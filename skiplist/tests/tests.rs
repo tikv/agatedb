@@ -125,7 +125,7 @@ fn test_one_key() {
         let value = new_value(i);
         write_pool.spawn(move |_: &mut Handle<'_>| {
             list.put(key, value);
-            tx.send(()).unwrap();
+            tx.send("w").unwrap();
         })
     }
     let mark = Arc::new(AtomicBool::new(false));
@@ -143,15 +143,17 @@ fn test_one_key() {
             let val: usize = s.parse().unwrap();
             assert!(val < n);
             mark.store(true, Ordering::SeqCst);
-            tx.send(()).unwrap();
+            tx.send("r").unwrap();
         });
     }
-    for i in 0..n {
-        if let Err(_) = rx.recv_timeout(Duration::from_secs(1)) {
-            panic!("timeout on receiving {} msg", i);
-        }
-        if let Err(_) = rx.recv_timeout(Duration::from_secs(1)) {
-            panic!("timeout on receiving {} msg", i);
+    let mut r = 0;
+    let mut w = 0;
+    for _ in 0..(n * 2) {
+        match rx.recv_timeout(Duration::from_secs(1)) {
+            Ok("w") => w += 1,
+            Ok("r") => r += 1,
+            Err(_) => panic!("timeout on receiving r{} w{} msg", r, w),
+            _ => panic!("unexpected value"),
         }
     }
     assert_eq!(list.len(), 1);
