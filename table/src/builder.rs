@@ -14,7 +14,7 @@ struct Header {
 
 impl Header {
     fn encode(&self, bytes: &mut BytesMut) {
-        bytes.put_u32_le(self.overlap as u32 << 16 | self.diff as u32);
+        bytes.put_u32_le((self.overlap as u32) << 16 | self.diff as u32);
     }
 
     fn decode(&mut self, bytes: &mut Bytes) {

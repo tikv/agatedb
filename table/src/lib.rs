@@ -1,13 +1,12 @@
-mod builder;
+// mod builder;
+mod opt;
+mod checksum;
 
-use std::fs;
+use std::{fs, path::PathBuf, sync::Arc};
 use bytes::Bytes;
-use proto::meta::{TableIndex, Checksum, Checksum_Algorithm, BlockOffset};
-use crate::opt::Options;
-use proto::meta::BlockOffset;
-use std::io::Error;
-use crate::Result;
-use crate::checksum;
+use proto::meta::{TableIndex, Checksum, checksum::Algorithm as Checksum_Algorithm, BlockOffset};
+use opt::Options;
+use common::{Result, Error};
 use std::path::Path;
 
 struct File {
@@ -31,7 +30,7 @@ pub struct TableInner {
 }
 
 pub struct Table {
-    inner: Arc<Table>,
+    inner: Arc<TableInner>,
 }
 
 impl Drop for TableInner {
@@ -42,7 +41,8 @@ impl Drop for TableInner {
         };
         f.file.set_len(0).unwrap();
         drop(f.file);
-        fs::remove_file(&f.path).unwrap();
+        // TODO: remove file
+        // fs::remove_file(&f.path).unwrap();
     }
 }
 
@@ -50,7 +50,6 @@ pub struct Block {
     offset: usize,
     data: Bytes,
     checksum: Vec<u8>,
-    checksum: u64,
     entries_index_start: usize,
     entry_offsets: Vec<u32>,
     checksum_len: usize,
@@ -58,19 +57,20 @@ pub struct Block {
 
 impl Block {
     fn size(&self) -> u64 {
-        3 * mem::size_of::<usize>() as u64 + self.data.len() as u64 + self.checksum.len() as u64 + self.entry_offsets.len() as u64 * mem::size_of::<u32>() as u64
+        3 * std::mem::size_of::<usize>() as u64 + self.data.len() as u64 + self.checksum.len() as u64 + self.entry_offsets.len() as u64 * std::mem::size_of::<u32>() as u64
     }
 
     fn verify_checksum(&self) -> Result<()> {
-        let mut chksum = CheckSum::default();
-        chksum.merge_from_bytes(&self.checksum)?;
+        let mut chksum = Checksum::default();
+        unimplemented!();
+        // chksum.merge_from_bytes(&self.checksum)?;
         checksum::verify_checksum(&self.data, &chksum)
     }
 }
 
 fn parse_file_id(name: &str) -> (u64, bool) {
     if !name.ends_with(".sst") {
-        (0, false)
+        return (0, false);
     }
     match name[..name.len() - 4].parse() {
         Ok(id) => (id, true),
@@ -84,12 +84,12 @@ impl Table {
         let file_name = path.base_name();
         let (id, ok) = parse_file_id(file_name);
         if !ok {
-            return Err();
+            return Err("failed to parse file id");
         }
         let meta = f.metadata()?;
         let table_size = meta.len();
         let mut t = Table {
-            inner: Arc::new(Table {
+            inner: Arc::new(TableInner {
                 file: Some(File {
                     name: path.to_buf(),
                     file: f,
@@ -108,10 +108,15 @@ impl Table {
             }),
         };
 
+        t.init_biggest_and_smallest()?;
+
+        // TODO: verify checksum
+
+        Ok(t)
     }
 
     fn init_biggest_and_smallest(&mut self) -> Result<()> {
         self.read_index()?;
-        
+        // TODO: complete this function
     }
 }

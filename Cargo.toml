@@ -7,10 +7,11 @@ edition = "2018"
 [dependencies]
 thiserror = "1.0"
 bytes = "0.5"
-crc = "1.8"
 rand = "0.7"
 proto = { path = "proto" }
 skiplist = { path = "skiplist" }
+table = { path = "table" }
+common = { path = "common" }
 memmap = "0.7"
 farmhash = "1.1"
 prost = "0.6"
@@ -19,4 +20,6 @@ prost = "0.6"
 members = [
     "proto",
     "skiplist",
+    "table",
+    "common"
 ]

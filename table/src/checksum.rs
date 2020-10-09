@@ -1,4 +1,4 @@
-use crate::{Error, Result};
+use common::{Error, Result};
 use crc::crc32;
 use proto::meta::{checksum::Algorithm as ChecksumAlgorithm, Checksum};
 

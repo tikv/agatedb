@@ -1,0 +1,20 @@
+[package]
+name = "table"
+version = "0.1.0"
+authors = ["Jay Lee <busyjaylee@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+rand = "0.7"
+bytes = "0.5"
+proto = { path = "../proto" }
+common = { path = "../common" }
+crc = "1.8"
+
+[dev-dependencies]
+yatp = { git = "https://github.com/tikv/yatp.git" }
+criterion = "0.3"
+
+[[bench]]
+name = "bench"
+harness = false

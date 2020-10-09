@@ -1,0 +1,12 @@
+[package]
+name = "common"
+version = "0.1.0"
+authors = ["Jay Lee <busyjaylee@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+thiserror = "1.0"
+
+[dev-dependencies]
+yatp = { git = "https://github.com/tikv/yatp.git" }
+criterion = "0.3"
