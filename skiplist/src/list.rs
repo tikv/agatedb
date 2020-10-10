@@ -211,7 +211,7 @@ impl<C: KeyComparitor> Skiplist<C> {
                 }
                 let next_offset = self.core.arena.offset(next[i]);
                 x.tower[i].store(next_offset, Ordering::SeqCst);
-                match unsafe { (&*prev[i]) }.tower[i].compare_exchange(
+                match unsafe { &*prev[i] }.tower[i].compare_exchange(
                     next_offset,
                     node_offset,
                     Ordering::SeqCst,
@@ -285,7 +285,7 @@ impl<C: KeyComparitor> Skiplist<C> {
         if node.is_null() {
             return None;
         }
-        if self.c.same_key(&unsafe { (&*node) }.key, key) {
+        if self.c.same_key(&unsafe { &*node }.key, key) {
             return unsafe { Some(&(*node).value) };
         }
         None
