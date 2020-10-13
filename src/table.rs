@@ -2,36 +2,43 @@ mod builder;
 
 use crate::checksum;
 use crate::opt::Options;
+use crate::Error;
 use crate::Result;
 use bytes::Bytes;
-use proto::meta::BlockOffset;
-use proto::meta::{BlockOffset, Checksum, Checksum_Algorithm, TableIndex};
+use proto::meta::{checksum::Algorithm as ChecksumAlgorithm, BlockOffset, Checksum, TableIndex};
 use std::fs;
-use crate::Error;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-struct File {
-    name: PathBuf,
-    file: fs::File,
+enum MmapFile {
+    File { name: PathBuf, file: fs::File },
+    Memory { data: Vec<u8> },
+}
+
+impl MmapFile {
+    pub fn is_in_memory(&self) -> bool {
+        match self {
+            Self::File { .. } => false,
+            Self::Memory { .. } => true,
+        }
+    }
 }
 
 pub struct TableInner {
-    file: Option<File>,
+    file: MmapFile,
     table_size: usize,
     smallest: Bytes,
     biggest: Bytes,
     id: u64,
-    checksum: u64,
+    checksum: Bytes,
     estimated_size: u64,
     index_start: usize,
     index_len: usize,
-    is_in_memory: bool,
     opt: Options,
 }
 
 pub struct Table {
-    inner: Arc<Table>,
+    inner: Arc<TableInner>,
 }
 
 /*
@@ -59,65 +66,83 @@ pub struct Block {
 
 impl Block {
     fn size(&self) -> u64 {
-        3 * mem::size_of::<usize>() as u64
+        3 * std::mem::size_of::<usize>() as u64
             + self.data.len() as u64
             + self.checksum.len() as u64
-            + self.entry_offsets.len() as u64 * mem::size_of::<u32>() as u64
+            + self.entry_offsets.len() as u64 * std::mem::size_of::<u32>() as u64
     }
 
     fn verify_checksum(&self) -> Result<()> {
-        let chksum = prost::Message::decode(self.data)?;
+        let chksum = prost::Message::decode(self.data.clone())?;
         checksum::verify_checksum(&self.data, &chksum)
     }
 }
 
-fn parse_file_id(name: &str) -> (u64, bool) {
+fn parse_file_id(name: &str) -> Result<u64> {
     if !name.ends_with(".sst") {
-        return (0, false);
+        return Err(Error::InvalidFilename(name.to_string()));
     }
     match name[..name.len() - 4].parse() {
-        Ok(id) => (id, true),
-        Err(_) => return (0, false),
+        Ok(id) => Ok(id),
+        Err(_) => Err(Error::InvalidFilename(name.to_string())),
     }
 }
 
-/*
 impl Table {
     pub fn open(path: &Path, opt: Options) -> Result<Table> {
-        let f = fs::File::open(path)?;
-        let file_name = path.base_name();
-        let (id, ok) = parse_file_id(file_name);
-        if !ok {
-            return Err();
-        }
+        let f = fs::File::create(path)?;
+        let file_name = path.file_name().unwrap().to_str().unwrap();
+        let id = parse_file_id(file_name)?;
         let meta = f.metadata()?;
         let table_size = meta.len();
-        let mut t = Table {
+        Ok(Table {
             inner: Arc::new(TableInner {
-                file: Some(File {
-                    name: path.to_buf(),
+                file: MmapFile::File {
                     file: f,
-                }),
-                table_size,
+                    name: path.to_path_buf(),
+                },
+                table_size: table_size as usize,
                 smallest: Bytes::new(),
                 biggest: Bytes::new(),
                 id,
-                checksum: 0,
+                checksum: Bytes::new(),
                 estimated_size: 0,
                 index_start: 0,
                 index_len: 0,
-                is_in_memory: false,
                 opt,
             }),
-        };
+        })
+    }
+
+    pub fn open_in_memory(data: Vec<u8>, id: u64, opt: Options) -> Result<Table> {
+        let table_size = data.len();
+        Ok(Table {
+            inner: Arc::new(TableInner {
+                file: MmapFile::Memory { data },
+                opt,
+                table_size,
+                id,
+                smallest: Bytes::new(),
+                biggest: Bytes::new(),
+                checksum: Bytes::new(),
+                estimated_size: 0,
+                index_start: 0,
+                index_len: 0,
+            })
+        })
+    }
+
+    fn is_in_memory(&self) -> bool {
+        self.inner.file.is_in_memory()
     }
 
     fn max_version(&self) -> u64 {
-        self.fetch_index()?.max_version()
+        unimplemented!()
+        // self.fetch_index()?.max_version()
     }
 
     fn init_biggest_and_smallest(&mut self) -> Result<()> {
-        self.read_index()?;
+        // self.read_index()?;
+        unimplemented!()
     }
 }
-*/
