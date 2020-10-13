@@ -36,12 +36,26 @@ jobs:
         env:
           RUSTFLAGS: "-Zsanitizer=address"
       - uses: actions-rs/cargo@v1
-        name: Running Tests with Leak, Memory and Thread Sanitizer 🚀
+        name: Running Tests with Leak Sanitizer 🚀
         with:
           command: test
           args: --all-features -p skiplist -Zbuild-std --target x86_64-unknown-linux-gnu
         env:
-          RUSTFLAGS: "-Zsanitizer=leak,memory,thread"
+          RUSTFLAGS: "-Zsanitizer=leak"
+      - uses: actions-rs/cargo@v1
+        name: Running Tests with Memory Sanitizer 🚀
+        with:
+          command: test
+          args: --all-features -p skiplist -Zbuild-std --target x86_64-unknown-linux-gnu
+        env:
+          RUSTFLAGS: "-Zsanitizer=memory"
+      - uses: actions-rs/cargo@v1
+        name: Running Tests with Thread Sanitizer 🚀
+        with:
+          command: test
+          args: --all-features -p skiplist -Zbuild-std --target x86_64-unknown-linux-gnu
+        env:
+          RUSTFLAGS: "-Zsanitizer=thread"
   skl_bench:
     name: Build and Bench Skiplist
     runs-on: ubuntu-latest
@@ -69,9 +83,23 @@ jobs:
         env:
           RUSTFLAGS: "-Zsanitizer=address"
       - uses: actions-rs/cargo@v1
-        name: Bench with Leak, Memory and Thread Sanitizer 🚀
+        name: Bench with Leak Sanitizer 🚀
         with:
           command: bench
           args: --all-features -p skiplist -Zbuild-std --target x86_64-unknown-linux-gnu
         env:
-          RUSTFLAGS: "-Zsanitizer=leak,memory,thread"
+          RUSTFLAGS: "-Zsanitizer=leak"
+      - uses: actions-rs/cargo@v1
+        name: Bench with Memory Sanitizer 🚀
+        with:
+          command: bench
+          args: --all-features -p skiplist -Zbuild-std --target x86_64-unknown-linux-gnu
+        env:
+          RUSTFLAGS: "-Zsanitizer=memory"
+      - uses: actions-rs/cargo@v1
+        name: Bench with Thread Sanitizer 🚀
+        with:
+          command: bench
+          args: --all-features -p skiplist -Zbuild-std --target x86_64-unknown-linux-gnu
+        env:
+          RUSTFLAGS: "-Zsanitizer=thread"
