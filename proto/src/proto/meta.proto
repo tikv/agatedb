@@ -56,6 +56,8 @@ message TableIndex {
   repeated BlockOffset offsets = 1;
   bytes bloom_filter = 2;
   uint32 estimated_size = 3;
+  uint64 max_version = 4;
+  uint32 key_count = 5;
 }
 
 message Checksum {
