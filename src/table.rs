@@ -1,14 +1,15 @@
 mod builder;
-/*
-use std::fs;
-use bytes::Bytes;
-use proto::meta::{TableIndex, Checksum, Checksum_Algorithm, BlockOffset};
-use crate::opt::Options;
-use proto::meta::BlockOffset;
-use std::io::Error;
-use crate::Result;
+
 use crate::checksum;
+use crate::opt::Options;
+use crate::Result;
+use bytes::Bytes;
+use proto::meta::BlockOffset;
+use proto::meta::{BlockOffset, Checksum, Checksum_Algorithm, TableIndex};
+use std::fs;
+use crate::Error;
 use std::path::Path;
+use std::sync::Arc;
 
 struct File {
     name: PathBuf,
@@ -27,13 +28,13 @@ pub struct TableInner {
     index_len: usize,
     is_in_memory: bool,
     opt: Options,
-    no_of_blocks: usize,
 }
 
 pub struct Table {
     inner: Arc<Table>,
 }
 
+/*
 impl Drop for TableInner {
     fn drop(&mut self) {
         let f = match self.file.take() {
@@ -45,12 +46,12 @@ impl Drop for TableInner {
         fs::remove_file(&f.path).unwrap();
     }
 }
+*/
 
 pub struct Block {
     offset: usize,
     data: Bytes,
     checksum: Vec<u8>,
-    checksum: u64,
     entries_index_start: usize,
     entry_offsets: Vec<u32>,
     checksum_len: usize,
@@ -58,19 +59,21 @@ pub struct Block {
 
 impl Block {
     fn size(&self) -> u64 {
-        3 * mem::size_of::<usize>() as u64 + self.data.len() as u64 + self.checksum.len() as u64 + self.entry_offsets.len() as u64 * mem::size_of::<u32>() as u64
+        3 * mem::size_of::<usize>() as u64
+            + self.data.len() as u64
+            + self.checksum.len() as u64
+            + self.entry_offsets.len() as u64 * mem::size_of::<u32>() as u64
     }
 
     fn verify_checksum(&self) -> Result<()> {
-        let mut chksum = CheckSum::default();
-        chksum.merge_from_bytes(&self.checksum)?;
+        let chksum = prost::Message::decode(self.data)?;
         checksum::verify_checksum(&self.data, &chksum)
     }
 }
 
 fn parse_file_id(name: &str) -> (u64, bool) {
     if !name.ends_with(".sst") {
-        (0, false)
+        return (0, false);
     }
     match name[..name.len() - 4].parse() {
         Ok(id) => (id, true),
@@ -78,6 +81,7 @@ fn parse_file_id(name: &str) -> (u64, bool) {
     }
 }
 
+/*
 impl Table {
     pub fn open(path: &Path, opt: Options) -> Result<Table> {
         let f = fs::File::open(path)?;
@@ -89,7 +93,7 @@ impl Table {
         let meta = f.metadata()?;
         let table_size = meta.len();
         let mut t = Table {
-            inner: Arc::new(Table {
+            inner: Arc::new(TableInner {
                 file: Some(File {
                     name: path.to_buf(),
                     file: f,
@@ -104,15 +108,16 @@ impl Table {
                 index_len: 0,
                 is_in_memory: false,
                 opt,
-                no_of_blocks: 0,
             }),
         };
+    }
 
+    fn max_version(&self) -> u64 {
+        self.fetch_index()?.max_version()
     }
 
     fn init_biggest_and_smallest(&mut self) -> Result<()> {
         self.read_index()?;
-
     }
 }
 */
