@@ -21,11 +21,11 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-test
+          key: ${{ runner.os }}-cargo-sanitizer-test
       - uses: actions-rs/toolchain@v1
         name: Setup Cargo Toolchain 🛎️
         with:
-          components: rustfmt, clippy
+          components: rustfmt, clippy, rust-src
           toolchain: nightly
           default: true
       - uses: actions-rs/cargo@v1
@@ -54,10 +54,11 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-bench
+          key: ${{ runner.os }}-cargo-sanitizer-bench
       - uses: actions-rs/toolchain@v1
         name: Setup Cargo Toolchain 🛎️
         with:
+          components: rust-src
           toolchain: nightly
           default: true
       - uses: actions-rs/cargo@v1
