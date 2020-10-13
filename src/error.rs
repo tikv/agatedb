@@ -18,7 +18,9 @@ pub enum Error {
     #[error("Invalid filename")]
     InvalidFilename(String),
     #[error("Invalid prost data: {0}")]
-    Decode(#[source] Box<prost::DecodeError>)
+    Decode(#[source] Box<prost::DecodeError>),
+    #[error("{0}")]
+    TableRead(String),
 }
 
 impl From<io::Error> for Error {
