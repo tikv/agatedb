@@ -8,6 +8,13 @@ use std::sync::atomic::*;
 use std::sync::*;
 use std::thread;
 
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
 fn skiplist_round(l: &Skiplist<FixedLengthSuffixComparitor>, case: &(Bytes, bool), exp: &Bytes) {
     if case.1 {
         if let Some(v) = l.get(&case.0) {
