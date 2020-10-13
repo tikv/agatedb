@@ -2,9 +2,13 @@ on:
   push:
     branches:
     - master
+    paths:
+    - 'skiplist/**'
   pull_request:
     branches:
     - master
+    paths:
+    - 'skiplist/**'
   
 name: CI with Sanitizer
 
