@@ -27,6 +27,7 @@ jobs:
         with:
           components: rustfmt, clippy
           toolchain: nightly
+          default: true
       - uses: actions-rs/cargo@v1
         name: Running Tests with Address Sanitizer 🚀
         with:
@@ -57,8 +58,8 @@ jobs:
       - uses: actions-rs/toolchain@v1
         name: Setup Cargo Toolchain 🛎️
         with:
-          components: rustfmt, clippy
           toolchain: nightly
+          default: true
       - uses: actions-rs/cargo@v1
         name: Bench with Address Sanitizer 🚀
         with:

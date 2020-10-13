@@ -27,6 +27,7 @@ jobs:
         with:
           components: rustfmt, clippy
           toolchain: nightly
+          default: true
       - uses: actions-rs/cargo@v1
         name: Check Code Format 🔧
         with:
@@ -53,8 +54,8 @@ jobs:
       - uses: actions-rs/toolchain@v1
         name: Setup Cargo Toolchain 🛎️
         with:
-          components: rustfmt, clippy
           toolchain: nightly
+          default: true
       - uses: actions-rs/cargo@v1
         name: Benchmark 🚀
         with:
