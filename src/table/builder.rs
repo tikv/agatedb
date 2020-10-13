@@ -177,3 +177,68 @@ impl Builder {
         self.buf.put_u32(len as u32);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::{distributions::Alphanumeric, Rng};
+    use tempdir::TempDir;
+    use crate::format::key_with_ts;
+
+    fn rand_string() -> String {
+        rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(10)
+            .collect::<String>()
+    }
+
+    const TEST_KEYS_COUNT: usize = 100000;
+
+    #[test]
+    fn test_table_index() {
+        // TODO: use cache
+        let opts = Options {
+            block_size: 4 * 1024,
+            bloom_false_positive: 0.01,
+            table_size: 30 << 20,
+        };
+
+        let mut builder = Builder::new(opts);
+        let tmp_dir = TempDir::new("agatedb").unwrap();
+        let filaname = tmp_dir.path().join(rand_string());
+
+        let mut block_first_keys = vec![];
+        
+        for i in 0..TEST_KEYS_COUNT {
+            let k = key_with_ts(format!("{:016x}", i).as_str(), (i + 1) as u64);
+            let v = Bytes::from(format!("{}", i));
+            let vs = Value::new(v);
+            if i == 0 {
+                block_first_keys.push(k.clone());
+            } else if builder.should_finish_block(&k, &vs) {
+                block_first_keys.push(k.clone());
+            }
+            builder.add(&k, vs, 0);
+        }
+
+        // TODO: complete this test after finishing table API
+    }
+
+    #[test]
+    fn test_bloom_filter() {
+        // TODO: finish this test after finishing iterator and table API
+    }
+
+    #[test]
+    fn test_empty_builder() {
+        let opt = Options {
+            bloom_false_positive: 0.1,
+            block_size: 0,
+            table_size: 0
+        };
+
+        let mut b = Builder::new(opt);
+
+        b.finish();
+    }
+}

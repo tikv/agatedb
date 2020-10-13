@@ -1,4 +1,4 @@
-mod builder;
+pub mod builder;
 /*
 use std::fs;
 use bytes::Bytes;
