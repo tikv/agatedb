@@ -1,8 +1,5 @@
-run:
-	cargo run
 
-run_release:
-	cargo run --release
+SANITIZER_FLAGS=-Zsanitizer=address
 
 fmt:
 	cargo fmt
@@ -13,13 +10,13 @@ clippy:
 test:
 	cargo test --all-features --workspace
 
+test_sanitizer:
+	RUSTFLAGS="$(SANITIZER_FLAGS)" cargo test --all-features --workspace
+
 bench:
 	cargo bench --all-features --workspace
 
-ci: fmt clippy test run_release
-
-proto: proto/proto/meta.proto proto/proto/rustproto.proto
-	protoc proto/proto/meta.proto -Iproto/proto --rust_out=proto/src/
+ci: fmt clippy test
 
 clean:
 	cargo clean
