@@ -183,15 +183,7 @@ impl Builder {
 mod tests {
     use super::*;
     use crate::format::key_with_ts;
-    use rand::{distributions::Alphanumeric, Rng};
     use tempdir::TempDir;
-
-    fn rand_string() -> String {
-        rand::thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(10)
-            .collect::<String>()
-    }
 
     const TEST_KEYS_COUNT: usize = 100000;
 
