@@ -58,7 +58,7 @@ fn decode_var(bytes: &[u8]) -> (u64, usize) {
 fn encode_var(bytes: &mut [u8], mut data: u64) -> usize {
     let mut i = 0;
     while data >= 0x128 && i < bytes.len() {
-        bytes[i] = (data as u8 & 0x7f);
+        bytes[i] = data as u8 & 0x7f;
         i += 1;
         data >>= 7;
     }

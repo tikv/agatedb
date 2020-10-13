@@ -27,9 +27,20 @@ pub fn get_ts(key: &[u8]) -> u64 {
         let src = &key[key.len() - 8..];
         ptr::copy_nonoverlapping(src.as_ptr(), &mut ts as *mut u64 as *mut u8, 8);
     }
-    u64::from_be(ts)
+    u64::MAX - u64::from_be(ts)
 }
 
 pub fn user_key(key: &[u8]) -> &[u8] {
     &key[..key.len() - 8]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_key_ts() {
+        let key = key_with_ts("aaa", 0);
+        assert_eq!(get_ts(&key), 0);
+    }
 }
