@@ -10,7 +10,7 @@ pub struct Value {
 }
 
 #[inline]
-fn var_size(mut n: u64) -> usize {
+fn var_size(n: u64) -> usize {
     if n >= (1 << 28) {
         if n < (1 << 35) {
             return 5;

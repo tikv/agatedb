@@ -1,4 +1,3 @@
-use crate::format::get_ts;
 use crate::opt::Options;
 use crate::value::Value;
 use crate::{checksum, util};
