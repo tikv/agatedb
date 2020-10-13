@@ -31,14 +31,14 @@ jobs:
         name: Running Tests with Address Sanitizer 🚀
         with:
           command: test
-          args: --all-features -p skiplist
+          args: --all-features -p skiplist -Zbuild-std --target x86_64-unknown-linux-gnu
         env:
           RUSTFLAGS: "-Zsanitizer=address"
       - uses: actions-rs/cargo@v1
         name: Running Tests with Leak, Memory and Thread Sanitizer 🚀
         with:
           command: test
-          args: --all-features -p skiplist
+          args: --all-features -p skiplist -Zbuild-std --target x86_64-unknown-linux-gnu
         env:
           RUSTFLAGS: "-Zsanitizer=leak,memory,thread"
   skl_bench:
@@ -63,13 +63,13 @@ jobs:
         name: Bench with Address Sanitizer 🚀
         with:
           command: bench
-          args: --all-features -p skiplist
+          args: --all-features -p skiplist -Zbuild-std --target x86_64-unknown-linux-gnu
         env:
           RUSTFLAGS: "-Zsanitizer=address"
       - uses: actions-rs/cargo@v1
         name: Bench with Leak, Memory and Thread Sanitizer 🚀
         with:
           command: bench
-          args: --all-features -p skiplist
+          args: --all-features -p skiplist -Zbuild-std --target x86_64-unknown-linux-gnu
         env:
           RUSTFLAGS: "-Zsanitizer=leak,memory,thread"
