@@ -39,7 +39,7 @@ impl Builder {
     pub fn new(options: Options) -> Builder {
         Builder {
             // approximately 16MB index + table size
-            buf: BytesMut::with_capacity(16 << 20 + options.table_size),
+            buf: BytesMut::with_capacity((16 << 20) + options.table_size as usize),
             table_index: TableIndex::default(),
             key_hashes: Vec::with_capacity(1024),
             base_key: Bytes::new(),
@@ -206,7 +206,7 @@ mod tests {
 
         let mut builder = Builder::new(opts);
         let tmp_dir = TempDir::new("agatedb").unwrap();
-        let filaname = tmp_dir.path().join(rand_string());
+        let _filename = tmp_dir.path().join(rand_string());
 
         let mut block_first_keys = vec![];
 

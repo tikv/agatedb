@@ -1,9 +1,4 @@
-use agatedb::{
-    format::{get_ts, key_with_ts},
-    opt::Options,
-    table::builder::Builder,
-    value::Value,
-};
+use agatedb::{get_ts, key_with_ts, TableBuilder, TableOptions, Value};
 use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, Criterion};
 use rand::{distributions::Alphanumeric, Rng};
@@ -15,7 +10,6 @@ use tikv_jemallocator::Jemalloc;
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
-fn criterion_benchmark(c: &mut Criterion) {
 fn rand_value() -> String {
     rand::thread_rng()
         .sample_iter(&Alphanumeric)
@@ -44,14 +38,14 @@ fn bench_table_builder(c: &mut Criterion) {
 
         let vs = Value::new(Bytes::from(rand_value()));
 
-        let opt = Options {
+        let opt = TableOptions {
             block_size: 4 * 1024,
             bloom_false_positive: 0.01,
             table_size: 5 << 20,
         };
 
         b.iter(|| {
-            let mut builder = Builder::new(opt.clone());
+            let mut builder = TableBuilder::new(opt.clone());
             for j in 0..KEY_COUNT {
                 builder.add(&key_list[j], vs.clone(), 0);
             }
