@@ -15,6 +15,8 @@ pub enum Error {
     TooLong(String),
     #[error("Invalid checksum")]
     InvalidChecksum(String),
+    #[error("Invalid prost data")]
+    Decode(#[source] Box<prost::DecodeError>)
 }
 
 impl From<io::Error> for Error {
