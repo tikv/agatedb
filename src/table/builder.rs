@@ -38,7 +38,8 @@ pub struct Builder {
 impl Builder {
     pub fn new(options: Options) -> Builder {
         Builder {
-            buf: BytesMut::with_capacity(1 << 20),
+            // approximately 16MB index + table size
+            buf: BytesMut::with_capacity(16 << 20 + options.table_size),
             table_index: TableIndex::default(),
             key_hashes: Vec::with_capacity(1024),
             base_key: Bytes::new(),
