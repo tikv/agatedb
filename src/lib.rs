@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 mod checksum;
 mod db;
 mod entry;

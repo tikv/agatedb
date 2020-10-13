@@ -12,6 +12,9 @@ bytes = "0.5"
 yatp = { git = "https://github.com/tikv/yatp.git" }
 criterion = "0.3"
 
+[target.'cfg(not(target_env = "msvc"))'.dev-dependencies]
+tikv-jemallocator = "0.4.0"
+
 [[bench]]
 name = "bench"
 harness = false

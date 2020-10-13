@@ -1,8 +1,6 @@
 use super::Result;
 use std::fs::{File, OpenOptions};
-use std::mem::MaybeUninit;
 use std::path::PathBuf;
-use std::ptr;
 
 struct Header {
     key_len: usize,
