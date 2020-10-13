@@ -181,9 +181,9 @@ impl Builder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::format::key_with_ts;
     use rand::{distributions::Alphanumeric, Rng};
     use tempdir::TempDir;
-    use crate::format::key_with_ts;
 
     fn rand_string() -> String {
         rand::thread_rng()
@@ -208,7 +208,7 @@ mod tests {
         let filaname = tmp_dir.path().join(rand_string());
 
         let mut block_first_keys = vec![];
-        
+
         for i in 0..TEST_KEYS_COUNT {
             let k = key_with_ts(format!("{:016x}", i).as_str(), (i + 1) as u64);
             let v = Bytes::from(format!("{}", i));
@@ -234,7 +234,7 @@ mod tests {
         let opt = Options {
             bloom_false_positive: 0.1,
             block_size: 0,
-            table_size: 0
+            table_size: 0,
         };
 
         let mut b = Builder::new(opt);
