@@ -205,8 +205,7 @@ mod tests {
         };
 
         let mut builder = Builder::new(opts);
-        let tmp_dir = TempDir::new("agatedb").unwrap();
-        let _filename = tmp_dir.path().join(rand_string());
+        let _tmp_dir = TempDir::new("agatedb").unwrap();
 
         let mut block_first_keys = vec![];
 
