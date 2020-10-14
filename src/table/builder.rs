@@ -38,7 +38,8 @@ pub struct Builder {
 impl Builder {
     pub fn new(options: Options) -> Builder {
         Builder {
-            buf: BytesMut::with_capacity(1 << 20),
+            // approximately 16MB index + table size
+            buf: BytesMut::with_capacity((16 << 20) + options.table_size as usize),
             table_index: TableIndex::default(),
             key_hashes: Vec::with_capacity(1024),
             base_key: Bytes::new(),
@@ -175,5 +176,61 @@ impl Builder {
         assert!(len < u32::MAX as usize);
         self.buf.put_slice(&res);
         self.buf.put_u32(len as u32);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::format::key_with_ts;
+    use tempdir::TempDir;
+
+    const TEST_KEYS_COUNT: usize = 100000;
+
+    #[test]
+    fn test_table_index() {
+        // TODO: use cache
+        let opts = Options {
+            block_size: 4 * 1024,
+            bloom_false_positive: 0.01,
+            table_size: 30 << 20,
+        };
+
+        let mut builder = Builder::new(opts);
+        let _tmp_dir = TempDir::new("agatedb").unwrap();
+
+        let mut block_first_keys = vec![];
+
+        for i in 0..TEST_KEYS_COUNT {
+            let k = key_with_ts(format!("{:016x}", i).as_str(), (i + 1) as u64);
+            let v = Bytes::from(format!("{}", i));
+            let vs = Value::new(v);
+            if i == 0 {
+                block_first_keys.push(k.clone());
+            } else if builder.should_finish_block(&k, &vs) {
+                block_first_keys.push(k.clone());
+            }
+            builder.add(&k, vs, 0);
+        }
+
+        // TODO: complete this test after finishing table API
+    }
+
+    #[test]
+    fn test_bloom_filter() {
+        // TODO: finish this test after finishing iterator and table API
+    }
+
+    #[test]
+    fn test_empty_builder() {
+        let opt = Options {
+            bloom_false_positive: 0.1,
+            block_size: 0,
+            table_size: 0,
+        };
+
+        let mut b = Builder::new(opt);
+
+        b.finish();
     }
 }

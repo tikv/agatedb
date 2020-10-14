@@ -1,6 +1,7 @@
 use bytes::{BufMut, Bytes, BytesMut};
 use std::mem::MaybeUninit;
 
+#[derive(Default, Debug, Clone)]
 pub struct Value {
     meta: u8,
     user_meta: u8,
@@ -70,6 +71,13 @@ fn encode_var(bytes: &mut [u8], mut data: u64) -> usize {
 }
 
 impl Value {
+    pub fn new(value: Bytes) -> Self {
+        Self {
+            value,
+            ..Self::default()
+        }
+    }
+
     pub fn encoded_size(&self) -> u32 {
         let l = self.value.len() + 2;
         if self.expires_at == 0 {
