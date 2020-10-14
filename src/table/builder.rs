@@ -4,20 +4,22 @@ use crate::{checksum, util};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use prost::Message;
 use proto::meta::{checksum::Algorithm as ChecksumAlg, BlockOffset, Checksum, TableIndex};
-use std::{u16, u32};
 
 #[repr(C)]
-struct Header {
-    overlap: u16,
-    diff: u16,
+#[derive(Default)]
+pub struct Header {
+    pub overlap: u16,
+    pub diff: u16,
 }
 
+pub const HEADER_SIZE: usize = std::mem::size_of::<Header>();
+
 impl Header {
-    fn encode(&self, bytes: &mut BytesMut) {
+    pub fn encode(&self, bytes: &mut BytesMut) {
         bytes.put_u32_le((self.overlap as u32) << 16 | self.diff as u32);
     }
 
-    fn decode(&mut self, bytes: &mut Bytes) {
+    pub fn decode(&mut self, bytes: &mut Bytes) {
         let h = bytes.get_u32_le();
         self.overlap = (h >> 16) as u16;
         self.diff = h as u16;
