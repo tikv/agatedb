@@ -1,4 +1,4 @@
-mod builder;
+pub(crate) mod builder;
 mod iterator;
 
 use crate::checksum;
@@ -6,6 +6,7 @@ use crate::opt::Options;
 use crate::Error;
 use crate::Result;
 use bytes::{Buf, Bytes};
+use iterator::{Iterator as TableIterator, ITERATOR_NOCACHE, ITERATOR_REVERSED};
 use prost::Message;
 use proto::meta::{checksum::Algorithm as ChecksumAlgorithm, BlockOffset, Checksum, TableIndex};
 use std::fs;
@@ -92,6 +93,15 @@ fn parse_file_id(name: &str) -> Result<u64> {
     }
 }
 
+
+/// `AsRef<TableInner>` is only used in `init_biggest_and_smallest`
+/// to construct a table iterator from `&TableInner`.
+impl AsRef<TableInner> for TableInner {
+    fn as_ref(&self) -> &TableInner {
+        self
+    }
+}
+
 impl TableInner {
     pub fn open(path: &Path, opt: Options) -> Result<TableInner> {
         let f = fs::File::create(path)?;
@@ -137,13 +147,15 @@ impl TableInner {
     fn init_biggest_and_smallest(&mut self) -> Result<()> {
         let ko = self.init_index()?;
         self.smallest = Bytes::from(ko.key.clone());
-        // let mut it = self.new_iterator(REVERSED | NOCACHE);
-        // it.rewind();
-        // if !it.valid() {
-        //     return Err(Error::TableRead(format!("failed to initialize biggest for table {}", self.filename())));
-        // }
-        // self.biggest = Bytes::from(it.key());
-        unimplemented!();
+        let mut it = TableIterator::new(&self, ITERATOR_REVERSED | ITERATOR_NOCACHE);
+        it.rewind();
+        if !it.valid() {
+            return Err(Error::TableRead(format!(
+                "failed to initialize biggest for table {}",
+                self.filename()
+            )));
+        }
+        self.biggest = it.key().clone();
         Ok(())
     }
 
@@ -187,6 +199,17 @@ impl TableInner {
     }
 
     fn key_splits(&mut self, n: usize, prefix: Bytes) -> Vec<String> {
+        if n == 0 {
+            return vec![];
+        }
+
+        let output_len = self.offsets_length();
+        let jump = output_len/ n;
+        let jump = if jump == 0 { 1 } else { jump};
+
+        let block_offset = BlockOffset::default();
+        // let res = vec![];
+
         unimplemented!()
     }
 
@@ -208,15 +231,16 @@ impl TableInner {
         if idx >= self.offsets_length() {
             return Err(Error::TableRead("block out of index".to_string()));
         }
-
-        let ko = self.offsets(idx).ok_or(Error::TableRead(format!(
+        let block_offset = self.offsets(idx).ok_or(Error::TableRead(format!(
             "failed to get offset block {}",
             idx
         )))?;
         let blk = Block {
-            offset: ko.offset as usize,
+            offset: block_offset.offset as usize,
             ..Block::default()
         };
+
+        let data = self.read(blk.offset, block_offset.len)?;
 
         unimplemented!();
 
@@ -237,7 +261,7 @@ impl TableInner {
 
     fn filename(&self) -> String {
         match &self.file {
-            MmapFile::Memory { .. } => "".to_string(),
+            MmapFile::Memory { .. } => "<memtable>".to_string(),
             MmapFile::File { name, .. } => name.to_string_lossy().into_owned(),
         }
     }

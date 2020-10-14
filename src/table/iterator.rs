@@ -1,5 +1,5 @@
 use super::builder::{Header, HEADER_SIZE};
-use super::{Block, Table};
+use super::{Block, TableInner};
 use crate::util;
 use crate::value::Value;
 use crate::{Error, Result};
@@ -163,30 +163,28 @@ impl BlockIterator {
     pub fn prev(&mut self) {
         self.set_idx(self.idx - 1);
     }
-
-    pub fn key(&self) -> &Bytes {
-        &self.key
-    }
-
-    pub fn value(&self) -> &Bytes {
-        &self.val
-    }
 }
 
 // TODO: use `bitfield` if there are too many variants
-const ITERATOR_REVERSED: usize = 1 << 1;
-const ITERATOR_NOCACHE: usize = 1 << 2;
+pub const ITERATOR_REVERSED: usize = 1 << 1;
+pub const ITERATOR_NOCACHE: usize = 1 << 2;
 
-pub struct Iterator {
-    table: Arc<Table>,
-    bpos: usize,
+/// An iterator over SST.
+/// 
+/// Here we use generic because when initializaing a
+/// table object, we need to get smallest and biggest
+/// elements by using an iterator over `&TableInner`.
+/// At that time, we could not build an `Arc<TableInner>`.
+pub struct Iterator<T: AsRef<TableInner>> {
+    table: T,
+    bpos: isize,
     block_iterator: Option<BlockIterator>,
     err: IteratorError,
     opt: usize,
 }
 
-impl Iterator {
-    pub fn new(table: Arc<Table>, opt: usize) -> Self {
+impl<T: AsRef<TableInner>> Iterator<T> {
+    pub fn new(table: T, opt: usize) -> Self {
         Self {
             table,
             bpos: 0,
@@ -210,13 +208,13 @@ impl Iterator {
     }
 
     pub fn seek_to_first(&mut self) {
-        let num_blocks = self.table.offsets_length();
+        let num_blocks = self.table.as_ref().offsets_length();
         if num_blocks == 0 {
             self.err = IteratorError::EOF;
             return;
         }
         self.bpos = 0;
-        match self.table.block(self.bpos, self.use_cache()) {
+        match self.table.as_ref().block(self.bpos as usize, self.use_cache()) {
             Ok(block) => {
                 let mut block_iterator = BlockIterator::new(block);
                 block_iterator.seek_to_first();
@@ -228,13 +226,13 @@ impl Iterator {
     }
 
     pub fn seek_to_last(&mut self) {
-        let num_blocks = self.table.offsets_length();
+        let num_blocks = self.table.as_ref().offsets_length();
         if num_blocks == 0 {
             self.err = IteratorError::EOF;
             return;
         }
-        self.bpos = num_blocks - 1;
-        match self.table.block(self.bpos, self.use_cache()) {
+        self.bpos = num_blocks as isize - 1;
+        match self.table.as_ref().block(self.bpos as usize, self.use_cache()) {
             Ok(block) => {
                 let mut block_iterator = BlockIterator::new(block);
                 block_iterator.seek_to_last();
@@ -246,8 +244,8 @@ impl Iterator {
     }
 
     fn seek_helper(&mut self, block_idx: usize, key: &Bytes) {
-        self.bpos = block_idx;
-        match self.table.block(self.bpos, self.use_cache()) {
+        self.bpos = block_idx as isize;
+        match self.table.as_ref().block(self.bpos as usize, self.use_cache()) {
             Ok(block) => {
                 let mut block_iterator = BlockIterator::new(block);
                 block_iterator.seek(key, SeekPos::Origin);
@@ -265,9 +263,9 @@ impl Iterator {
             _ => {}
         }
 
-        let idx = util::search(self.table.offsets_length(), |idx| {
+        let idx = util::search(self.table.as_ref().offsets_length(), |idx| {
             use std::cmp::Ordering::*;
-            let block_offset = self.table.offsets(idx).unwrap();
+            let block_offset = self.table.as_ref().offsets(idx).unwrap();
             match Comparator.compare_key(&block_offset.key, &key) {
                 Less => false,
                 _ => true,
@@ -281,7 +279,7 @@ impl Iterator {
 
         self.seek_helper(idx - 1, key);
         if self.err.is_eof() {
-            if idx == self.table.offsets_length() {
+            if idx == self.table.as_ref().offsets_length() {
                 return;
             }
             self.seek_helper(idx, key);
@@ -304,25 +302,68 @@ impl Iterator {
     fn next_inner(&mut self) {
         self.err = IteratorError::NoError;
 
-        if self.bpos > self.table.offsets_length() {
+        if self.bpos as usize > self.table.as_ref().offsets_length() {
             self.err = IteratorError::EOF;
             return;
         }
 
-        if self.block_iterator.as_ref().unwrap().data.is_empty() {}
+        if self.block_iterator.as_ref().unwrap().data.is_empty() {
+            match self.table.as_ref().block(self.bpos as usize, self.use_cache()) {
+                Ok(block) => {
+                    let mut block_iterator = BlockIterator::new(block);
+                    block_iterator.seek_to_first();
+                    self.err = block_iterator.err.clone();
+                    self.block_iterator = Some(block_iterator);
+                }
+                Err(err) => self.err = IteratorError::Error(err.to_string()),
+            }
+        } else {
+            let bi = self.block_iterator.as_mut().unwrap();
+            bi.next();
+            if !bi.valid() {
+                self.bpos += 1;
+                bi.data = Bytes::new();
+                self.next_inner();
+            }
+        }
     }
 
     fn prev_inner(&mut self) {
-        unimplemented!()
+        self.err = IteratorError::NoError;
+
+        if self.bpos < 0 {
+            self.err = IteratorError::EOF;
+            return;
+        }
+
+        if self.block_iterator.as_ref().unwrap().data.is_empty() {
+            match self.table.as_ref().block(self.bpos as usize, self.use_cache()) {
+                Ok(block) => {
+                    let mut block_iterator = BlockIterator::new(block);
+                    block_iterator.seek_to_last();
+                    self.err = block_iterator.err.clone();
+                    self.block_iterator = Some(block_iterator);
+                }
+                Err(err) => self.err = IteratorError::Error(err.to_string()),
+            }
+        } else {
+            let bi = self.block_iterator.as_mut().unwrap();
+            bi.prev();
+            if !bi.valid() {
+                self.bpos -= 1;
+                bi.data = Bytes::new();
+                self.prev_inner();
+            }
+        }
     }
 
     pub fn key(&self) -> &Bytes {
-        self.block_iterator.as_ref().unwrap().key()
+        &self.block_iterator.as_ref().unwrap().key
     }
 
     pub fn value(&self) -> Value {
         let mut value = Value::default();
-        value.decode(self.block_iterator.as_ref().unwrap().value());
+        value.decode(&self.block_iterator.as_ref().unwrap().val);
         value
     }
 
