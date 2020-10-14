@@ -1,0 +1,87 @@
+on:
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - master
+    
+  name: Test
+  
+  jobs:
+    test:
+      name: Lint and Test
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v2
+          name: Checkout 🛎️
+        - uses: actions/cache@v2
+          with:
+            path: |
+              ~/.cargo/registry
+              ~/.cargo/git
+              target
+            key: ${{ runner.os }}-cargo-test
+        - uses: actions-rs/toolchain@v1
+          name: Setup Cargo Toolchain 🛎️
+          with:
+            components: rustfmt, clippy
+            toolchain: nightly
+            default: true
+        - uses: actions-rs/cargo@v1
+          name: Check Code Format 🔧
+          with:
+            command: fmt
+            args: -- --check
+        - uses: actions-rs/cargo@v1
+          name: Running Tests 🚀
+          with:
+            command: test
+            args: --all-features --workspace
+    sanitizer_test:
+      name: Test with Sanitizer
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v2
+          name: Checkout 🛎️
+        - uses: actions/cache@v2
+          with:
+            path: |
+              ~/.cargo/registry
+              ~/.cargo/git
+              target
+            key: ${{ runner.os }}-cargo-sanitizer-test
+        - uses: actions-rs/toolchain@v1
+          name: Setup Cargo Toolchain 🛎️
+          with:
+            components: rustfmt, clippy, rust-src
+            toolchain: nightly
+            default: true
+        - uses: actions-rs/cargo@v1
+          name: Running Tests with Address Sanitizer 🚀
+          with:
+            command: test
+            args: --all-features -Zbuild-std --target x86_64-unknown-linux-gnu
+          env:
+            RUSTFLAGS: "-Zsanitizer=address"
+        - uses: actions-rs/cargo@v1
+          name: Running Tests with Leak Sanitizer 🚀
+          with:
+            command: test
+            args: --all-features -Zbuild-std --target x86_64-unknown-linux-gnu
+          env:
+            RUSTFLAGS: "-Zsanitizer=leak"
+        - uses: actions-rs/cargo@v1
+          name: Running Tests with Memory Sanitizer 🚀
+          with:
+            command: test
+            args: --all-features -Zbuild-std --target x86_64-unknown-linux-gnu
+          env:
+            RUSTFLAGS: "-Zsanitizer=memory"
+        - uses: actions-rs/cargo@v1
+          name: Running Tests with Thread Sanitizer 🚀
+          with:
+            command: test
+            args: --all-features -Zbuild-std --target x86_64-unknown-linux-gnu
+          env:
+            RUSTFLAGS: "-Zsanitizer=thread"
