@@ -1,6 +1,7 @@
 use bytes::{BufMut, Bytes, BytesMut};
 use std::mem::MaybeUninit;
 
+#[derive(Default)]
 pub struct Value {
     meta: u8,
     user_meta: u8,

@@ -5,12 +5,12 @@ use crate::checksum;
 use crate::opt::Options;
 use crate::Error;
 use crate::Result;
-use bytes::{Bytes, Buf};
+use bytes::{Buf, Bytes};
+use prost::Message;
 use proto::meta::{checksum::Algorithm as ChecksumAlgorithm, BlockOffset, Checksum, TableIndex};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use prost::Message;
 
 enum MmapFile {
     File { name: PathBuf, file: fs::File },
@@ -149,13 +149,15 @@ impl TableInner {
 
     fn init_index(&mut self) -> Result<&BlockOffset> {
         let mut read_pos = self.table_size;
-        
+
         // read checksum length from last 4 bytes
         read_pos -= 4;
         let mut buf = self.read(read_pos, 4)?;
         let checksum_len = buf.get_u32() as usize;
         if (checksum_len as i32) < 0 {
-            return Err(Error::TableRead("checksum length less than zero".to_string()));
+            return Err(Error::TableRead(
+                "checksum length less than zero".to_string(),
+            ));
         }
 
         // read checksum
@@ -201,12 +203,16 @@ impl TableInner {
         self.fetch_index().offsets.get(idx)
     }
 
-    fn block(&self, idx: usize) -> Result<Arc<Block>> { // TODO: support cache
+    fn block(&self, idx: usize, use_cache: bool) -> Result<Arc<Block>> {
+        // TODO: support cache
         if idx >= self.offsets_length() {
             return Err(Error::TableRead("block out of index".to_string()));
         }
 
-        let ko = self.offsets(idx).ok_or(Error::TableRead(format!("failed to get offset block {}", idx)))?;
+        let ko = self.offsets(idx).ok_or(Error::TableRead(format!(
+            "failed to get offset block {}",
+            idx
+        )))?;
         let blk = Block {
             offset: ko.offset as usize,
             ..Block::default()
@@ -231,8 +237,8 @@ impl TableInner {
 
     fn filename(&self) -> String {
         match &self.file {
-            MmapFile::Memory {..} => "".to_string(),
-            MmapFile::File { name, ..} => name.to_string_lossy().into_owned()
+            MmapFile::Memory { .. } => "".to_string(),
+            MmapFile::File { name, .. } => name.to_string_lossy().into_owned(),
         }
     }
 
@@ -261,5 +267,13 @@ impl Table {
 
     pub(crate) fn offsets_length(&self) -> usize {
         self.inner.offsets_length()
+    }
+
+    pub(crate) fn offsets(&self, idx: usize) -> Option<&BlockOffset> {
+        self.inner.offsets(idx)
+    }
+
+    pub(crate) fn block(&self, block_pos: usize, use_cache: bool) -> Result<Arc<Block>> {
+        self.inner.block(block_pos, use_cache)
     }
 }

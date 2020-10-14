@@ -1,18 +1,40 @@
 use super::builder::{Header, HEADER_SIZE};
 use super::{Block, Table};
+use crate::util;
+use crate::value::Value;
 use crate::{Error, Result};
 use bytes::Bytes;
+use proto::meta::BlockOffset;
 use skiplist::{FixedLengthSuffixComparitor, KeyComparitor};
 use std::sync::Arc;
-use crate::value::Value;
 
 static Comparator: FixedLengthSuffixComparitor = FixedLengthSuffixComparitor::new(8);
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 enum IteratorError {
     NoError,
     EOF,
-    Error(Error)
+    // TODO: As we need to clone Error from block iterator to table iterator,
+    // we had to save `crate::Error` as String. In the future, we could let all
+    // seek-related function to return a `Result<()>` instead of saving an
+    // error inside struct.
+    Error(String),
+}
+
+impl IteratorError {
+    pub fn is_err(&self) -> bool {
+        match self {
+            IteratorError::NoError => false,
+            _ => true,
+        }
+    }
+
+    pub fn is_eof(&self) -> bool {
+        match self {
+            IteratorError::EOF => true,
+            _ => false,
+        }
+    }
 }
 
 enum SeekPos {
@@ -35,13 +57,14 @@ struct BlockIterator {
 
 impl BlockIterator {
     pub fn new(block: Arc<Block>) -> Self {
+        let data = block.data.slice(..block.entries_index_start);
         Self {
             block,
             err: IteratorError::NoError,
             base_key: Bytes::new(),
             key: Bytes::new(),
             val: Bytes::new(),
-            data: block.data.slice(..block.entries_index_start),
+            data,
             perv_overlap: 0,
             idx: 0,
         }
@@ -97,38 +120,20 @@ impl BlockIterator {
     }
 
     pub fn valid(&self) -> bool {
-        self.err == IteratorError::NoError
+        !self.err.is_err()
     }
 
-    pub fn error(&self) -> IteratorError {
-        self.err.clone()
+    pub fn error(&self) -> &IteratorError {
+        &self.err
     }
 
-    // simple rewrite of golang sort.Search
-    fn search<F>(n: usize, mut f: F) -> usize
-    where
-        F: FnMut(usize) -> bool,
-    {
-        let mut i = 0;
-        let mut j = n;
-        while i < j {
-            let h = (i + j) >> 1;
-            if !f(h) {
-                i = h + 1;
-            } else {
-                j = h;
-            }
-        }
-        i
-    }
-
-    pub fn seek(&mut self, key: Bytes, whence: SeekPos) {
+    pub fn seek(&mut self, key: &Bytes, whence: SeekPos) {
         self.err = IteratorError::NoError;
         let start_index = match whence {
             SeekPos::Origin => 0,
             SeekPos::Current => self.idx,
         };
-        let found_entry_idx = Self::search(self.entry_offsets().len(), |idx| {
+        let found_entry_idx = util::search(self.entry_offsets().len(), |idx| {
             use std::cmp::Ordering::*;
             if idx < start_index {
                 return false;
@@ -158,6 +163,14 @@ impl BlockIterator {
     pub fn prev(&mut self) {
         self.set_idx(self.idx - 1);
     }
+
+    pub fn key(&self) -> &Bytes {
+        &self.key
+    }
+
+    pub fn value(&self) -> &Bytes {
+        &self.val
+    }
 }
 
 // TODO: use `bitfield` if there are too many variants
@@ -179,7 +192,7 @@ impl Iterator {
             bpos: 0,
             block_iterator: None,
             err: IteratorError::NoError,
-            opt
+            opt,
         }
     }
 
@@ -189,7 +202,7 @@ impl Iterator {
     }
 
     pub fn valid(&self) -> bool {
-        self.err == IteratorError::NoError
+        !self.err.is_err()
     }
 
     pub fn use_cache(&self) -> bool {
@@ -202,59 +215,138 @@ impl Iterator {
             self.err = IteratorError::EOF;
             return;
         }
-        self.bpos = num_blocks - 1;
+        self.bpos = 0;
         match self.table.block(self.bpos, self.use_cache()) {
             Ok(block) => {
-                let block_iterator = BlockIterator::new(block);
-                block_iterator.seek_to_last();
-                self.err = block_iterator.err;
-                self.block_iterator = block_iterator;
-            },
-            Err(err) => self.err = IteratorError::Error(err)
+                let mut block_iterator = BlockIterator::new(block);
+                block_iterator.seek_to_first();
+                self.err = block_iterator.err.clone();
+                self.block_iterator = Some(block_iterator);
+            }
+            Err(err) => self.err = IteratorError::Error(err.to_string()),
         }
     }
 
-    fn seek_helper(&self, block_idx: usize, key: Bytes) {
-        unimplemented!()
+    pub fn seek_to_last(&mut self) {
+        let num_blocks = self.table.offsets_length();
+        if num_blocks == 0 {
+            self.err = IteratorError::EOF;
+            return;
+        }
+        self.bpos = num_blocks - 1;
+        match self.table.block(self.bpos, self.use_cache()) {
+            Ok(block) => {
+                let mut block_iterator = BlockIterator::new(block);
+                block_iterator.seek_to_last();
+                self.err = block_iterator.err.clone();
+                self.block_iterator = Some(block_iterator);
+            }
+            Err(err) => self.err = IteratorError::Error(err.to_string()),
+        }
     }
 
-    fn seek_from(&mut self, key: Bytes, whence: usize) {
-        unimplemented!()
+    fn seek_helper(&mut self, block_idx: usize, key: &Bytes) {
+        self.bpos = block_idx;
+        match self.table.block(self.bpos, self.use_cache()) {
+            Ok(block) => {
+                let mut block_iterator = BlockIterator::new(block);
+                block_iterator.seek(key, SeekPos::Origin);
+                self.err = block_iterator.err.clone();
+                self.block_iterator = Some(block_iterator);
+            }
+            Err(err) => self.err = IteratorError::Error(err.to_string()),
+        }
     }
 
-    fn seek_inner(&mut self, key: Bytes) {
-        unimplemented!()
+    fn seek_from(&mut self, key: &Bytes, whence: SeekPos) {
+        self.err = IteratorError::NoError;
+        match whence {
+            SeekPos::Origin => self.reset(),
+            _ => {}
+        }
+
+        let idx = util::search(self.table.offsets_length(), |idx| {
+            use std::cmp::Ordering::*;
+            let block_offset = self.table.offsets(idx).unwrap();
+            match Comparator.compare_key(&block_offset.key, &key) {
+                Less => false,
+                _ => true,
+            }
+        });
+
+        if idx == 0 {
+            self.seek_helper(0, key);
+            return;
+        }
+
+        self.seek_helper(idx - 1, key);
+        if self.err.is_eof() {
+            if idx == self.table.offsets_length() {
+                return;
+            }
+            self.seek_helper(idx, key);
+        }
     }
 
-    fn seek_for_prev(&mut self, key: Bytes) {
-        unimplemented!()
+    // seek_inner will reset iterator and seek to >= key.
+    fn seek_inner(&mut self, key: &Bytes) {
+        self.seek_from(key, SeekPos::Origin);
+    }
+
+    // seek_for_prev will reset iterator and seek to <= key.
+    fn seek_for_prev(&mut self, key: &Bytes) {
+        self.seek_from(key, SeekPos::Origin);
+        if self.key() != key {
+            self.prev_inner();
+        }
     }
 
     fn next_inner(&mut self) {
-        unimplemented!()
+        self.err = IteratorError::NoError;
+
+        if self.bpos > self.table.offsets_length() {
+            self.err = IteratorError::EOF;
+            return;
+        }
+
+        if self.block_iterator.as_ref().unwrap().data.is_empty() {}
     }
 
     fn prev_inner(&mut self) {
         unimplemented!()
     }
 
-    pub fn key(&self) -> Bytes {
-        unimplemented!()
+    pub fn key(&self) -> &Bytes {
+        self.block_iterator.as_ref().unwrap().key()
     }
 
-    pub fn value(&self) -> &Value {
-        unimplemented!()
+    pub fn value(&self) -> Value {
+        let mut value = Value::default();
+        value.decode(self.block_iterator.as_ref().unwrap().value());
+        value
     }
 
     pub fn next(&mut self) {
-        unimplemented!()
+        if self.opt & ITERATOR_REVERSED == 0 {
+            self.next_inner();
+        } else {
+            self.prev_inner();
+        }
     }
 
     pub fn rewind(&mut self) {
-        unimplemented!()
+        if self.opt & ITERATOR_REVERSED == 0 {
+            self.seek_to_first();
+        } else {
+            self.seek_to_last();
+        }
     }
 
-    pub fn seek(&mut self) {
-        unimplemented!()
+    pub fn seek(&mut self, key: &Bytes) {
+        if self.opt & ITERATOR_REVERSED == 0 {
+            self.seek_inner(key);
+        } else {
+            self.seek_for_prev(key);
+        }
     }
 }
