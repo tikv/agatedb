@@ -2,13 +2,11 @@ use super::builder::{Header, HEADER_SIZE};
 use super::{Block, TableInner};
 use crate::util;
 use crate::value::Value;
-use crate::{Error, Result};
 use bytes::Bytes;
-use proto::meta::BlockOffset;
 use skiplist::{FixedLengthSuffixComparitor, KeyComparitor};
 use std::sync::Arc;
 
-static Comparator: FixedLengthSuffixComparitor = FixedLengthSuffixComparitor::new(8);
+static COMPARATOR: FixedLengthSuffixComparitor = FixedLengthSuffixComparitor::new(8);
 
 #[derive(Clone)]
 enum IteratorError {
@@ -139,7 +137,7 @@ impl BlockIterator {
                 return false;
             }
             self.set_idx(idx);
-            match Comparator.compare_key(&self.key, &key) {
+            match COMPARATOR.compare_key(&self.key, &key) {
                 Less => false,
                 _ => true,
             }
@@ -170,7 +168,7 @@ pub const ITERATOR_REVERSED: usize = 1 << 1;
 pub const ITERATOR_NOCACHE: usize = 1 << 2;
 
 /// An iterator over SST.
-/// 
+///
 /// Here we use generic because when initializaing a
 /// table object, we need to get smallest and biggest
 /// elements by using an iterator over `&TableInner`.
@@ -214,7 +212,11 @@ impl<T: AsRef<TableInner>> Iterator<T> {
             return;
         }
         self.bpos = 0;
-        match self.table.as_ref().block(self.bpos as usize, self.use_cache()) {
+        match self
+            .table
+            .as_ref()
+            .block(self.bpos as usize, self.use_cache())
+        {
             Ok(block) => {
                 let mut block_iterator = BlockIterator::new(block);
                 block_iterator.seek_to_first();
@@ -232,7 +234,11 @@ impl<T: AsRef<TableInner>> Iterator<T> {
             return;
         }
         self.bpos = num_blocks as isize - 1;
-        match self.table.as_ref().block(self.bpos as usize, self.use_cache()) {
+        match self
+            .table
+            .as_ref()
+            .block(self.bpos as usize, self.use_cache())
+        {
             Ok(block) => {
                 let mut block_iterator = BlockIterator::new(block);
                 block_iterator.seek_to_last();
@@ -245,7 +251,11 @@ impl<T: AsRef<TableInner>> Iterator<T> {
 
     fn seek_helper(&mut self, block_idx: usize, key: &Bytes) {
         self.bpos = block_idx as isize;
-        match self.table.as_ref().block(self.bpos as usize, self.use_cache()) {
+        match self
+            .table
+            .as_ref()
+            .block(self.bpos as usize, self.use_cache())
+        {
             Ok(block) => {
                 let mut block_iterator = BlockIterator::new(block);
                 block_iterator.seek(key, SeekPos::Origin);
@@ -266,7 +276,7 @@ impl<T: AsRef<TableInner>> Iterator<T> {
         let idx = util::search(self.table.as_ref().offsets_length(), |idx| {
             use std::cmp::Ordering::*;
             let block_offset = self.table.as_ref().offsets(idx).unwrap();
-            match Comparator.compare_key(&block_offset.key, &key) {
+            match COMPARATOR.compare_key(&block_offset.key, &key) {
                 Less => false,
                 _ => true,
             }
@@ -308,7 +318,11 @@ impl<T: AsRef<TableInner>> Iterator<T> {
         }
 
         if self.block_iterator.as_ref().unwrap().data.is_empty() {
-            match self.table.as_ref().block(self.bpos as usize, self.use_cache()) {
+            match self
+                .table
+                .as_ref()
+                .block(self.bpos as usize, self.use_cache())
+            {
                 Ok(block) => {
                     let mut block_iterator = BlockIterator::new(block);
                     block_iterator.seek_to_first();
@@ -337,7 +351,11 @@ impl<T: AsRef<TableInner>> Iterator<T> {
         }
 
         if self.block_iterator.as_ref().unwrap().data.is_empty() {
-            match self.table.as_ref().block(self.bpos as usize, self.use_cache()) {
+            match self
+                .table
+                .as_ref()
+                .block(self.bpos as usize, self.use_cache())
+            {
                 Ok(block) => {
                     let mut block_iterator = BlockIterator::new(block);
                     block_iterator.seek_to_last();

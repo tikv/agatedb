@@ -5,17 +5,26 @@ use crate::checksum;
 use crate::opt::Options;
 use crate::Error;
 use crate::Result;
-use bytes::{Buf, Bytes};
+use bytes::{Buf, Bytes, BytesMut};
 use iterator::{Iterator as TableIterator, ITERATOR_NOCACHE, ITERATOR_REVERSED};
 use prost::Message;
-use proto::meta::{checksum::Algorithm as ChecksumAlgorithm, BlockOffset, Checksum, TableIndex};
+use proto::meta::{BlockOffset, Checksum, TableIndex};
 use std::fs;
+use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::Mutex;
 
+// TODO: use a mmap library instead of handling I/O on our own
 enum MmapFile {
-    File { name: PathBuf, file: fs::File },
-    Memory { data: Vec<u8> },
+    File {
+        name: PathBuf,
+        // TODO: remove this mutex and allow multi-thread read
+        file: Mutex<fs::File>,
+    },
+    Memory {
+        data: Bytes,
+    },
 }
 
 impl MmapFile {
@@ -63,7 +72,7 @@ impl Drop for TableInner {
 pub struct Block {
     offset: usize,
     data: Bytes,
-    checksum: Vec<u8>,
+    checksum: Bytes,
     entries_index_start: usize,
     entry_offsets: Vec<u32>,
     checksum_len: usize,
@@ -93,7 +102,6 @@ fn parse_file_id(name: &str) -> Result<u64> {
     }
 }
 
-
 /// `AsRef<TableInner>` is only used in `init_biggest_and_smallest`
 /// to construct a table iterator from `&TableInner`.
 impl AsRef<TableInner> for TableInner {
@@ -111,7 +119,7 @@ impl TableInner {
         let table_size = meta.len();
         Ok(TableInner {
             file: MmapFile::File {
-                file: f,
+                file: Mutex::new(f),
                 name: path.to_path_buf(),
             },
             table_size: table_size as usize,
@@ -127,7 +135,7 @@ impl TableInner {
         })
     }
 
-    pub fn open_in_memory(data: Vec<u8>, id: u64, opt: Options) -> Result<TableInner> {
+    pub fn open_in_memory(data: Bytes, id: u64, opt: Options) -> Result<TableInner> {
         let table_size = data.len();
         Ok(TableInner {
             file: MmapFile::Memory { data },
@@ -198,16 +206,16 @@ impl TableInner {
         Ok(&self.index.offsets[0])
     }
 
-    fn key_splits(&mut self, n: usize, prefix: Bytes) -> Vec<String> {
+    fn key_splits(&mut self, n: usize, _prefix: Bytes) -> Vec<String> {
         if n == 0 {
             return vec![];
         }
 
         let output_len = self.offsets_length();
-        let jump = output_len/ n;
-        let jump = if jump == 0 { 1 } else { jump};
+        let jump = output_len / n;
+        let _jump = if jump == 0 { 1 } else { jump };
 
-        let block_offset = BlockOffset::default();
+        let _block_offset = BlockOffset::default();
         // let res = vec![];
 
         unimplemented!()
@@ -226,7 +234,7 @@ impl TableInner {
         self.fetch_index().offsets.get(idx)
     }
 
-    fn block(&self, idx: usize, use_cache: bool) -> Result<Arc<Block>> {
+    fn block(&self, idx: usize, _use_cache: bool) -> Result<Arc<Block>> {
         // TODO: support cache
         if idx >= self.offsets_length() {
             return Err(Error::TableRead("block out of index".to_string()));
@@ -235,34 +243,129 @@ impl TableInner {
             "failed to get offset block {}",
             idx
         )))?;
-        let blk = Block {
-            offset: block_offset.offset as usize,
-            ..Block::default()
-        };
 
-        let data = self.read(blk.offset, block_offset.len)?;
+        let offset = block_offset.offset as usize;
+        let data = self.read(offset, block_offset.len as usize)?;
 
-        unimplemented!();
+        let mut read_pos = data.len() - 4; // first read checksum length
+        let checksum_len = data.slice(read_pos..read_pos + 4).get_u32() as usize;
 
-        Ok(Arc::new(blk))
+        if checksum_len > data.len() {
+            return Err(Error::TableRead("invalid checksum length".to_string()));
+        }
+
+        // read checksum
+        read_pos -= checksum_len;
+        let checksum = data.slice(read_pos..read_pos + checksum_len);
+
+        // read num entries
+        read_pos -= 4;
+        let num_entries = data.slice(read_pos..read_pos + 4).get_u32() as usize;
+        let entries_index_start = read_pos - num_entries * 4;
+        let entries_index_end = entries_index_start + num_entries * 4;
+
+        let mut entry_offsets_ptr = data.slice(entries_index_start..entries_index_end);
+        let mut entry_offsets = Vec::with_capacity(num_entries);
+        for _ in 0..num_entries {
+            entry_offsets.push(entry_offsets_ptr.get_u32());
+        }
+
+        Ok(Arc::new(Block {
+            offset,
+            entries_index_start,
+            data: data.slice(..read_pos + 4),
+            entry_offsets,
+            checksum_len,
+            checksum,
+        }))
     }
 
-    fn read_table_index(&mut self) -> Result<TableIndex> {
-        unimplemented!();
+    fn index_key(&self) -> u64 {
+        self.id
     }
 
-    fn read(&mut self, offset: usize, size: usize) -> Result<Bytes> {
-        self.bytes(offset, size)
+    pub fn key_count(&self) -> u32 {
+        self.fetch_index().key_count
     }
 
-    fn bytes(&mut self, offset: usize, size: usize) -> Result<Bytes> {
-        unimplemented!()
+    pub fn index_size(&self) -> usize {
+        self.index_len
     }
 
-    fn filename(&self) -> String {
+    pub fn bloom_filter_size(&self) -> usize {
+        self.fetch_index().bloom_filter.len()
+    }
+
+    pub fn size(&self) -> u64 {
+        self.table_size as u64
+    }
+
+    pub fn smallest(&self) -> &Bytes {
+        &self.smallest
+    }
+
+    pub fn biggest(&self) -> &Bytes {
+        &self.biggest
+    }
+
+    pub fn filename(&self) -> String {
         match &self.file {
             MmapFile::Memory { .. } => "<memtable>".to_string(),
             MmapFile::File { name, .. } => name.to_string_lossy().into_owned(),
+        }
+    }
+
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    pub fn does_not_have(_hash: u32) -> bool {
+        false
+        // TODO: add bloom filter
+    }
+
+    fn read_bloom_filter(&self) {
+        unimplemented!()
+    }
+
+    fn read_table_index(&self) -> Result<TableIndex> {
+        let data = self.read(self.index_start, self.index_len)?;
+        // TODO: prefetch
+        let result = Message::decode(data)?;
+        Ok(result)
+    }
+
+    fn verify_checksum(&self) -> Result<()> {
+        let table_index = self.fetch_index();
+        for i in 0..table_index.offsets.len() {
+            let block = self.block(i, true)?;
+            // TODO: table opts
+            block.verify_checksum()?;
+        }
+        Ok(())
+    }
+
+    fn read(&self, offset: usize, size: usize) -> Result<Bytes> {
+        self.bytes(offset, size)
+    }
+
+    fn bytes(&self, offset: usize, size: usize) -> Result<Bytes> {
+        match &self.file {
+            MmapFile::Memory { data } => {
+                if offset + size >= data.len() {
+                    Err(Error::TableRead("out of range".to_string()))
+                } else {
+                    Ok(data.slice(offset..offset + size))
+                }
+            }
+            MmapFile::File { file, .. } => {
+                let mut file = file.lock().unwrap();
+                file.seek(std::io::SeekFrom::Start(offset as u64))?;
+                let mut buf = BytesMut::with_capacity(size);
+                buf.reserve(size);
+                file.read(&mut buf)?;
+                Ok(buf.freeze())
+            }
         }
     }
 
@@ -283,7 +386,7 @@ impl Table {
         })
     }
 
-    pub fn open_in_memory(data: Vec<u8>, id: u64, opt: Options) -> Result<Table> {
+    pub fn open_in_memory(data: Bytes, id: u64, opt: Options) -> Result<Table> {
         TableInner::open_in_memory(data, id, opt).map(|table| Table {
             inner: Arc::new(table),
         })
