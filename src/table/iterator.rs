@@ -1,15 +1,18 @@
 use super::builder::{Header, HEADER_SIZE};
-use super::Block;
+use super::{Block, Table};
 use crate::{Error, Result};
 use bytes::Bytes;
 use skiplist::{FixedLengthSuffixComparitor, KeyComparitor};
 use std::sync::Arc;
+use crate::value::Value;
 
 static Comparator: FixedLengthSuffixComparitor = FixedLengthSuffixComparitor::new(8);
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 enum IteratorError {
+    NoError,
     EOF,
+    Error(Error)
 }
 
 enum SeekPos {
@@ -27,18 +30,18 @@ struct BlockIterator {
     // TODO: use `&'a Block` if possible
     block: Arc<Block>,
     perv_overlap: u16,
-    err: Option<IteratorError>,
+    err: IteratorError,
 }
 
 impl BlockIterator {
-    pub fn new(&mut self, block: Arc<Block>) -> Self {
+    pub fn new(block: Arc<Block>) -> Self {
         Self {
             block,
-            err: None,
+            err: IteratorError::NoError,
             base_key: Bytes::new(),
             key: Bytes::new(),
             val: Bytes::new(),
-            data: self.block.data.slice(..self.block.entries_index_start),
+            data: block.data.slice(..block.entries_index_start),
             perv_overlap: 0,
             idx: 0,
         }
@@ -52,11 +55,11 @@ impl BlockIterator {
     fn set_idx(&mut self, i: usize) {
         self.idx = i;
         if i >= self.entry_offsets().len() {
-            self.err = Some(IteratorError::EOF);
+            self.err = IteratorError::EOF;
             return;
         }
 
-        self.err = None;
+        self.err = IteratorError::NoError;
         let start_offset = self.entry_offsets()[i] as u32;
 
         if self.base_key.is_empty() {
@@ -93,11 +96,11 @@ impl BlockIterator {
         self.val = entry_data.slice(value_off..);
     }
 
-    fn valid(&self) -> bool {
-        self.err.is_none()
+    pub fn valid(&self) -> bool {
+        self.err == IteratorError::NoError
     }
 
-    fn error(&self) -> Option<IteratorError> {
+    pub fn error(&self) -> IteratorError {
         self.err.clone()
     }
 
@@ -119,8 +122,8 @@ impl BlockIterator {
         i
     }
 
-    fn seek(&mut self, key: Bytes, whence: SeekPos) {
-        self.err = None;
+    pub fn seek(&mut self, key: Bytes, whence: SeekPos) {
+        self.err = IteratorError::NoError;
         let start_index = match whence {
             SeekPos::Origin => 0,
             SeekPos::Current => self.idx,
@@ -140,19 +143,118 @@ impl BlockIterator {
         self.set_idx(found_entry_idx);
     }
 
-    fn seek_to_first(&mut self) {
+    pub fn seek_to_first(&mut self) {
         self.set_idx(0);
     }
 
-    fn seek_to_last(&mut self) {
+    pub fn seek_to_last(&mut self) {
         self.set_idx(self.entry_offsets().len() - 1);
     }
 
-    fn next(&mut self) {
+    pub fn next(&mut self) {
         self.set_idx(self.idx + 1);
     }
 
-    fn prev(&mut self) {
+    pub fn prev(&mut self) {
         self.set_idx(self.idx - 1);
+    }
+}
+
+// TODO: use `bitfield` if there are too many variants
+const ITERATOR_REVERSED: usize = 1 << 1;
+const ITERATOR_NOCACHE: usize = 1 << 2;
+
+pub struct Iterator {
+    table: Arc<Table>,
+    bpos: usize,
+    block_iterator: Option<BlockIterator>,
+    err: IteratorError,
+    opt: usize,
+}
+
+impl Iterator {
+    pub fn new(table: Arc<Table>, opt: usize) -> Self {
+        Self {
+            table,
+            bpos: 0,
+            block_iterator: None,
+            err: IteratorError::NoError,
+            opt
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.bpos = 0;
+        self.err = IteratorError::NoError;
+    }
+
+    pub fn valid(&self) -> bool {
+        self.err == IteratorError::NoError
+    }
+
+    pub fn use_cache(&self) -> bool {
+        self.opt & ITERATOR_NOCACHE == 0
+    }
+
+    pub fn seek_to_first(&mut self) {
+        let num_blocks = self.table.offsets_length();
+        if num_blocks == 0 {
+            self.err = IteratorError::EOF;
+            return;
+        }
+        self.bpos = num_blocks - 1;
+        match self.table.block(self.bpos, self.use_cache()) {
+            Ok(block) => {
+                let block_iterator = BlockIterator::new(block);
+                block_iterator.seek_to_last();
+                self.err = block_iterator.err;
+                self.block_iterator = block_iterator;
+            },
+            Err(err) => self.err = IteratorError::Error(err)
+        }
+    }
+
+    fn seek_helper(&self, block_idx: usize, key: Bytes) {
+        unimplemented!()
+    }
+
+    fn seek_from(&mut self, key: Bytes, whence: usize) {
+        unimplemented!()
+    }
+
+    fn seek_inner(&mut self, key: Bytes) {
+        unimplemented!()
+    }
+
+    fn seek_for_prev(&mut self, key: Bytes) {
+        unimplemented!()
+    }
+
+    fn next_inner(&mut self) {
+        unimplemented!()
+    }
+
+    fn prev_inner(&mut self) {
+        unimplemented!()
+    }
+
+    pub fn key(&self) -> Bytes {
+        unimplemented!()
+    }
+
+    pub fn value(&self) -> &Value {
+        unimplemented!()
+    }
+
+    pub fn next(&mut self) {
+        unimplemented!()
+    }
+
+    pub fn rewind(&mut self) {
+        unimplemented!()
+    }
+
+    pub fn seek(&mut self) {
+        unimplemented!()
     }
 }

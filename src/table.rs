@@ -258,4 +258,8 @@ impl Table {
             inner: Arc::new(table),
         })
     }
+
+    pub(crate) fn offsets_length(&self) -> usize {
+        self.inner.offsets_length()
+    }
 }
