@@ -11,7 +11,7 @@ pub struct FixedLengthSuffixComparitor {
 }
 
 impl FixedLengthSuffixComparitor {
-    pub fn new(len: usize) -> FixedLengthSuffixComparitor {
+    pub const fn new(len: usize) -> FixedLengthSuffixComparitor {
         FixedLengthSuffixComparitor { len }
     }
 }
