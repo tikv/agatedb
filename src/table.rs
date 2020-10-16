@@ -123,7 +123,7 @@ impl TableInner {
             opts,
         };
         inner.init_biggest_and_smallest()?;
-        // TODO: verify checksum
+        inner.verify_checksum()?;
         Ok(inner)
     }
 
@@ -144,6 +144,7 @@ impl TableInner {
             index_len: 0,
         };
         inner.init_biggest_and_smallest()?;
+        inner.verify_checksum()?;
         Ok(inner)
     }
 
@@ -331,7 +332,7 @@ impl TableInner {
         let table_index = self.fetch_index();
         for i in 0..table_index.offsets.len() {
             let block = self.block(i, true)?;
-            // TODO: table opts
+            // TODO: use table opts to determine whether to verify checksum now
             block.verify_checksum()?;
         }
         Ok(())
