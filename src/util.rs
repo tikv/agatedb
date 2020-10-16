@@ -1,4 +1,6 @@
+pub use skiplist::{FixedLengthSuffixComparitor, KeyComparitor};
 use std::{cmp, ptr};
+pub static COMPARATOR: FixedLengthSuffixComparitor = FixedLengthSuffixComparitor::new(8);
 
 unsafe fn u64(ptr: *const u8) -> u64 {
     ptr::read_unaligned(ptr as *const u64)

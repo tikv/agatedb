@@ -1,12 +1,9 @@
 use super::builder::{Header, HEADER_SIZE};
 use super::{Block, TableInner};
-use crate::util;
+use crate::util::{self, KeyComparitor, COMPARATOR};
 use crate::value::Value;
 use bytes::Bytes;
-use skiplist::{FixedLengthSuffixComparitor, KeyComparitor};
 use std::sync::Arc;
-
-static COMPARATOR: FixedLengthSuffixComparitor = FixedLengthSuffixComparitor::new(8);
 
 #[derive(Clone, Debug)]
 pub enum IteratorError {
@@ -42,7 +39,7 @@ enum SeekPos {
 
 // TODO: support custom comparator
 struct BlockIterator {
-    idx: usize,
+    idx: isize,
     base_key: Bytes,
     key: Bytes,
     val: Bytes,
@@ -73,15 +70,15 @@ impl BlockIterator {
         &self.block.entry_offsets
     }
 
-    fn set_idx(&mut self, i: usize) {
+    fn set_idx(&mut self, i: isize) {
         self.idx = i;
-        if i >= self.entry_offsets().len() {
+        if i >= self.entry_offsets().len() as isize || i < 0 {
             self.err = IteratorError::EOF;
             return;
         }
 
         self.err = IteratorError::NoError;
-        let start_offset = self.entry_offsets()[i] as u32;
+        let start_offset = self.entry_offsets()[i as usize] as u32;
 
         if self.base_key.is_empty() {
             let mut base_header = Header::default();
@@ -92,10 +89,10 @@ impl BlockIterator {
                 .slice(HEADER_SIZE..HEADER_SIZE + base_header.diff as usize);
         }
 
-        let end_offset = if self.idx + 1 == self.entry_offsets().len() {
+        let end_offset = if self.idx + 1 == self.entry_offsets().len() as isize {
             self.data.len()
         } else {
-            self.entry_offsets()[self.idx + 1] as usize
+            self.entry_offsets()[self.idx as usize + 1] as usize
         };
 
         let mut entry_data = self.data.slice(start_offset as usize..end_offset as usize);
@@ -135,17 +132,17 @@ impl BlockIterator {
         };
         let found_entry_idx = util::search(self.entry_offsets().len(), |idx| {
             use std::cmp::Ordering::*;
-            if idx < start_index {
+            if idx < start_index as usize {
                 return false;
             }
-            self.set_idx(idx);
+            self.set_idx(idx as isize);
             match COMPARATOR.compare_key(&self.key, &key) {
                 Less => false,
                 _ => true,
             }
         });
 
-        self.set_idx(found_entry_idx);
+        self.set_idx(found_entry_idx as isize);
     }
 
     pub fn seek_to_first(&mut self) {
@@ -153,7 +150,7 @@ impl BlockIterator {
     }
 
     pub fn seek_to_last(&mut self) {
-        self.set_idx(self.entry_offsets().len() - 1);
+        self.set_idx(self.entry_offsets().len() as isize - 1);
     }
 
     pub fn next(&mut self) {
@@ -304,7 +301,7 @@ impl<T: AsRef<TableInner>> Iterator<T> {
     }
 
     // seek_for_prev will reset iterator and seek to <= key.
-    fn seek_for_prev(&mut self, key: &Bytes) {
+    pub fn seek_for_prev(&mut self, key: &Bytes) {
         self.seek_from(key, SeekPos::Origin);
         if self.key() != key {
             self.prev_inner();
@@ -392,6 +389,14 @@ impl<T: AsRef<TableInner>> Iterator<T> {
             self.next_inner();
         } else {
             self.prev_inner();
+        }
+    }
+
+    pub(crate) fn prev(&mut self) {
+        if self.opt & ITERATOR_REVERSED == 0 {
+            self.prev_inner();
+        } else {
+            self.next_inner();
         }
     }
 

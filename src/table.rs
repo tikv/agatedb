@@ -350,7 +350,7 @@ impl TableInner {
         unimplemented!()
     }
 
-    fn read_table_index(&self) -> Result<TableIndex> {
+    pub(crate) fn read_table_index(&self) -> Result<TableIndex> {
         let data = self.read(self.index_start, self.index_len)?;
         // TODO: prefetch
         let result = Message::decode(data)?;
@@ -439,20 +439,27 @@ impl Table {
     pub fn new_iterator(&self, opt: usize) -> TableIterator<Arc<TableInner>> {
         TableIterator::new(self.inner.clone(), opt)
     }
+
+    pub fn max_version(&self) -> u64 {
+        self.inner.max_version()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::format::key_with_ts;
+    use crate::format::{key_with_ts, user_key};
     use crate::value::Value;
     use builder::Builder;
-    use iterator::Iterator;
-    use rand::Rng;
     use tempdir::TempDir;
 
-    fn key(prefix: impl Into<Bytes>, i: usize) -> Bytes {
-        Bytes::from(format!("{:?}{:04}", prefix.into(), i))
+    fn key(prefix: &[u8], i: usize) -> Bytes {
+        Bytes::from([prefix, format!("{:04}", i).as_bytes()].concat())
+    }
+
+    #[test]
+    fn test_generate_key() {
+        assert_eq!(key(b"key", 233), Bytes::from("key0233"));
     }
 
     fn get_test_table_options() -> Options {
@@ -463,7 +470,7 @@ mod tests {
         }
     }
 
-    fn build_test_table(prefix: impl Into<Bytes> + Clone, n: usize, mut opts: Options) -> Table {
+    fn build_test_table(prefix: &[u8], n: usize, mut opts: Options) -> Table {
         if opts.block_size == 0 {
             opts.block_size = 4 * 1024;
         }
@@ -472,8 +479,8 @@ mod tests {
         let mut kv_pairs = vec![];
 
         for i in 0..n {
-            let k = key(prefix.clone().into(), i);
-            let v = Bytes::from(format!("{}", i));
+            let k = key(prefix, i);
+            let v = Bytes::from(i.to_string());
             kv_pairs.push((k, v));
         }
 
@@ -484,37 +491,142 @@ mod tests {
         let mut builder = Builder::new(opts.clone());
         let tmp_dir = TempDir::new("agatedb").unwrap();
         // let tmp_dir = Path::new("data/");
-        let _filename = tmp_dir.path().join(format!("1.sst"));
+        let filename = tmp_dir.path().join("1.sst".to_string());
 
         kv_pairs.sort_by(|x, y| x.0.cmp(&y.0));
 
         for (k, v) in kv_pairs {
-            builder.add(&key_with_ts(&k[..], 0), Value::new_with_meta(v, 233, 0), 0);
+            builder.add(&key_with_ts(&k[..], 0), Value::new_with_meta(v, b'A', 0), 0);
         }
         let data = builder.finish();
-        // TODO: save to file
-        // Table::create(&filename, data, opts).unwrap()
-        Table::open_in_memory(data, 233, opts).unwrap()
+
+        Table::create(&filename, data, opts).unwrap()
+        // you can also test in-memory table
+        // Table::open_in_memory(data, 233, opts).unwrap()
     }
 
     #[test]
     fn test_table_iterator() {
         for n in 99..=101 {
             let opts = get_test_table_options();
-            let table = build_test_table("key", n, opts);
-            let mut iter = table.new_iterator(0);
-            iter.rewind();
+            let table = build_test_table(b"key", n, opts);
+            let mut it = table.new_iterator(0);
+            it.rewind();
             let mut count = 0;
-            while iter.valid() {
-                let v = iter.value();
-                let k = iter.key();
-                assert_eq!(format!("{}", count), v.value);
-                assert_eq!(key_with_ts(&key("key", count)[..], 0), k);
+            while it.valid() {
+                let v = it.value();
+                let k = it.key();
+                assert_eq!(count.to_string(), v.value);
+                assert_eq!(key_with_ts(&key(b"key", count)[..], 0), k);
                 count += 1;
-                iter.next();
+                it.next();
             }
-
             assert_eq!(count, n);
+        }
+    }
+
+    #[test]
+    fn test_seek_to_first() {
+        for n in vec![99, 100, 101, 199, 200, 250, 9999, 10000] {
+            let opts = get_test_table_options();
+            let table = build_test_table(b"key", n, opts);
+            let mut it = table.new_iterator(0);
+            it.seek_to_first();
+            assert!(it.valid());
+            assert_eq!(it.value().value, "0");
+            assert_eq!(it.value().meta, b'A');
+        }
+    }
+
+    #[test]
+    fn test_seek_to_last() {
+        for n in vec![99, 100, 101, 199, 200, 250, 9999, 10000] {
+            let opts = get_test_table_options();
+            let table = build_test_table(b"key", n, opts);
+            let mut it = table.new_iterator(0);
+            it.seek_to_last();
+            assert!(it.valid());
+            assert_eq!(it.value().value, (n - 1).to_string());
+            assert_eq!(it.value().meta, b'A');
+            it.prev();
+            assert!(it.valid());
+            assert_eq!(it.value().value, (n - 2).to_string());
+            assert_eq!(it.value().meta, b'A');
+        }
+    }
+
+    #[test]
+    fn test_seek() {
+        let opts = get_test_table_options();
+        let table = build_test_table(b"k", 10000, opts);
+        let mut it = table.new_iterator(0);
+
+        let data = vec![
+            (b"abc".to_vec(), true, b"k0000".to_vec()),
+            (b"k0100".to_vec(), true, b"k0100".to_vec()),
+            (b"k0100b".to_vec(), true, b"k0101".to_vec()),
+            (b"k1234".to_vec(), true, b"k1234".to_vec()),
+            (b"k1234b".to_vec(), true, b"k1235".to_vec()),
+            (b"k9999".to_vec(), true, b"k9999".to_vec()),
+            (b"z".to_vec(), false, b"".to_vec()),
+        ];
+
+        for (input, valid, out) in data {
+            it.seek(&key_with_ts(input.as_slice(), 0));
+            assert_eq!(it.valid(), valid);
+            if !valid {
+                continue;
+            }
+            // compare Bytes to make output more readable
+            assert_eq!(Bytes::copy_from_slice(user_key(it.key())), Bytes::from(out));
+        }
+    }
+
+    #[test]
+    fn test_seek_for_prev() {
+        let opts = get_test_table_options();
+        let table = build_test_table(b"k", 10000, opts);
+        let mut it = table.new_iterator(0);
+
+        let data = vec![
+            ("abc", false, ""),
+            ("k0100", true, "k0100"),
+            ("k0100b", true, "k0100"), // Test case where we jump to next block.
+            ("k1234", true, "k1234"),
+            ("k1234b", true, "k1234"),
+            ("k9999", true, "k9999"),
+            ("z", true, "k9999"),
+        ];
+
+        for (input, valid, out) in data {
+            it.seek_for_prev(&key_with_ts(input.as_bytes(), 0));
+            assert_eq!(it.valid(), valid);
+            if !valid {
+                continue;
+            }
+            // compare Bytes to make output more readable
+            assert_eq!(Bytes::copy_from_slice(user_key(it.key())), Bytes::from(out));
+        }
+    }
+
+    #[test]
+    fn test_iterate_from_start() {
+        for n in vec![99, 100, 101, 199, 200, 250, 9999, 10000] {
+            let opts = get_test_table_options();
+            let table = build_test_table(b"key", n, opts);
+            let mut it = table.new_iterator(0);
+            it.reset();
+            it.seek_to_first();
+            assert!(it.valid());
+
+            let mut count = 0;
+            while it.valid() {
+                let v = it.value();
+                assert_eq!(count.to_string(), v.value);
+                assert_eq!(b'A', v.meta);
+                it.next();
+                count += 1;
+            }
         }
     }
 }
