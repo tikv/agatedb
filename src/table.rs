@@ -10,7 +10,7 @@ use iterator::{Iterator as TableIterator, ITERATOR_NOCACHE, ITERATOR_REVERSED};
 use prost::Message;
 use proto::meta::{BlockOffset, Checksum, TableIndex};
 use std::fs;
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -111,13 +111,29 @@ impl AsRef<TableInner> for TableInner {
 }
 
 impl TableInner {
+    pub fn create(path: &Path, data: Bytes, opt: Options) -> Result<TableInner> {
+        let mut f = fs::OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .open(path)?;
+        f.write(&data)?;
+        // TODO: pass file object directly to open
+        drop(f);
+        Self::open(path, opt)
+    }
+
     pub fn open(path: &Path, opt: Options) -> Result<TableInner> {
-        let f = fs::File::create(path)?;
+        let f = fs::OpenOptions::new()
+            .read(true)
+            .write(false)
+            .create(false)
+            .open(path)?;
         let file_name = path.file_name().unwrap().to_str().unwrap();
         let id = parse_file_id(file_name)?;
         let meta = f.metadata()?;
         let table_size = meta.len();
-        Ok(TableInner {
+        let mut inner = TableInner {
             file: MmapFile::File {
                 file: Mutex::new(f),
                 name: path.to_path_buf(),
@@ -132,12 +148,15 @@ impl TableInner {
             index_start: 0,
             index_len: 0,
             opt,
-        })
+        };
+        inner.init_biggest_and_smallest()?;
+        // TODO: verify checksum
+        Ok(inner)
     }
 
     pub fn open_in_memory(data: Bytes, id: u64, opt: Options) -> Result<TableInner> {
         let table_size = data.len();
-        Ok(TableInner {
+        let mut inner = TableInner {
             file: MmapFile::Memory { data },
             opt,
             table_size,
@@ -149,7 +168,9 @@ impl TableInner {
             index: TableIndex::default(),
             index_start: 0,
             index_len: 0,
-        })
+        };
+        inner.init_biggest_and_smallest()?;
+        Ok(inner)
     }
 
     fn init_biggest_and_smallest(&mut self) -> Result<()> {
@@ -261,6 +282,7 @@ impl TableInner {
         // read num entries
         read_pos -= 4;
         let num_entries = data.slice(read_pos..read_pos + 4).get_u32() as usize;
+
         let entries_index_start = read_pos - num_entries * 4;
         let entries_index_end = entries_index_start + num_entries * 4;
 
@@ -352,8 +374,13 @@ impl TableInner {
     fn bytes(&self, offset: usize, size: usize) -> Result<Bytes> {
         match &self.file {
             MmapFile::Memory { data } => {
-                if offset + size >= data.len() {
-                    Err(Error::TableRead("out of range".to_string()))
+                if offset + size > data.len() {
+                    Err(Error::TableRead(format!(
+                        "out of range, offset={}, size={}, len={}",
+                        offset,
+                        size,
+                        data.len()
+                    )))
                 } else {
                     Ok(data.slice(offset..offset + size))
                 }
@@ -380,15 +407,20 @@ impl TableInner {
 }
 
 impl Table {
+    pub fn create(path: &Path, data: Bytes, opt: Options) -> Result<Table> {
+        Ok(Table {
+            inner: Arc::new(TableInner::create(path, data, opt)?),
+        })
+    }
     pub fn open(path: &Path, opt: Options) -> Result<Table> {
-        TableInner::open(path, opt).map(|table| Table {
-            inner: Arc::new(table),
+        Ok(Table {
+            inner: Arc::new(TableInner::open(path, opt)?),
         })
     }
 
     pub fn open_in_memory(data: Bytes, id: u64, opt: Options) -> Result<Table> {
-        TableInner::open_in_memory(data, id, opt).map(|table| Table {
-            inner: Arc::new(table),
+        Ok(Table {
+            inner: Arc::new(TableInner::open_in_memory(data, id, opt)?),
         })
     }
 
@@ -402,5 +434,87 @@ impl Table {
 
     pub(crate) fn block(&self, block_pos: usize, use_cache: bool) -> Result<Arc<Block>> {
         self.inner.block(block_pos, use_cache)
+    }
+
+    pub fn new_iterator(&self, opt: usize) -> TableIterator<Arc<TableInner>> {
+        TableIterator::new(self.inner.clone(), opt)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::format::key_with_ts;
+    use crate::value::Value;
+    use builder::Builder;
+    use iterator::Iterator;
+    use rand::Rng;
+    use tempdir::TempDir;
+
+    fn key(prefix: impl Into<Bytes>, i: usize) -> Bytes {
+        Bytes::from(format!("{:?}{:04}", prefix.into(), i))
+    }
+
+    fn get_test_table_options() -> Options {
+        Options {
+            block_size: 4 * 1024,
+            table_size: 0,
+            bloom_false_positive: 0.01,
+        }
+    }
+
+    fn build_test_table(prefix: impl Into<Bytes> + Clone, n: usize, mut opts: Options) -> Table {
+        if opts.block_size == 0 {
+            opts.block_size = 4 * 1024;
+        }
+        assert!(n <= 10000);
+
+        let mut kv_pairs = vec![];
+
+        for i in 0..n {
+            let k = key(prefix.clone().into(), i);
+            let v = Bytes::from(format!("{}", i));
+            kv_pairs.push((k, v));
+        }
+
+        build_table(kv_pairs, opts)
+    }
+
+    fn build_table(mut kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> Table {
+        let mut builder = Builder::new(opts.clone());
+        let tmp_dir = TempDir::new("agatedb").unwrap();
+        // let tmp_dir = Path::new("data/");
+        let _filename = tmp_dir.path().join(format!("1.sst"));
+
+        kv_pairs.sort_by(|x, y| x.0.cmp(&y.0));
+
+        for (k, v) in kv_pairs {
+            builder.add(&key_with_ts(&k[..], 0), Value::new_with_meta(v, 233, 0), 0);
+        }
+        let data = builder.finish();
+        // TODO: save to file
+        // Table::create(&filename, data, opts).unwrap()
+        Table::open_in_memory(data, 233, opts).unwrap()
+    }
+
+    #[test]
+    fn test_table_iterator() {
+        for n in 99..=101 {
+            let opts = get_test_table_options();
+            let table = build_test_table("key", n, opts);
+            let mut iter = table.new_iterator(0);
+            iter.rewind();
+            let mut count = 0;
+            while iter.valid() {
+                let v = iter.value();
+                let k = iter.key();
+                assert_eq!(format!("{}", count), v.value);
+                assert_eq!(key_with_ts(&key("key", count)[..], 0), k);
+                count += 1;
+                iter.next();
+            }
+
+            assert_eq!(count, n);
+        }
     }
 }

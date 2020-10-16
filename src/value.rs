@@ -3,11 +3,11 @@ use std::mem::MaybeUninit;
 
 #[derive(Default, Debug, Clone)]
 pub struct Value {
-    meta: u8,
-    user_meta: u8,
-    expires_at: u64,
-    value: Bytes,
-    version: u64,
+    pub(crate) meta: u8,
+    pub(crate) user_meta: u8,
+    pub(crate) expires_at: u64,
+    pub(crate) value: Bytes,
+    pub(crate) version: u64,
 }
 
 #[inline]
@@ -74,6 +74,15 @@ impl Value {
     pub fn new(value: Bytes) -> Self {
         Self {
             value,
+            ..Self::default()
+        }
+    }
+
+    pub fn new_with_meta(value: Bytes, meta: u8, user_meta: u8) -> Self {
+        Self {
+            value,
+            meta,
+            user_meta,
             ..Self::default()
         }
     }

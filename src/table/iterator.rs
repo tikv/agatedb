@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 static COMPARATOR: FixedLengthSuffixComparitor = FixedLengthSuffixComparitor::new(8);
 
-#[derive(Clone)]
-enum IteratorError {
+#[derive(Clone, Debug)]
+pub enum IteratorError {
     NoError,
     EOF,
     // TODO: As we need to clone Error from block iterator to table iterator,
@@ -85,7 +85,8 @@ impl BlockIterator {
 
         if self.base_key.is_empty() {
             let mut base_header = Header::default();
-            base_header.decode(&mut self.data);
+            base_header.decode(&mut self.data.slice(..));
+            // TODO: combine this decode with header decode to avoid slice ptr copy
             self.base_key = self
                 .data
                 .slice(HEADER_SIZE..HEADER_SIZE + base_header.diff as usize);
@@ -101,20 +102,21 @@ impl BlockIterator {
         let mut header = Header::default();
         header.decode(&mut entry_data);
 
-        if header.overlap > self.perv_overlap {
-            self.key = Bytes::from(
-                [
-                    &self.key[..self.perv_overlap as usize],
-                    &self.base_key[self.perv_overlap as usize..header.overlap as usize],
-                ]
-                .concat(),
-            );
-        }
-        self.perv_overlap = header.overlap;
-        let value_off = HEADER_SIZE + header.diff as usize;
-        let diff_key = &entry_data[HEADER_SIZE..value_off];
-        self.key = Bytes::from([&self.key[..header.overlap as usize], diff_key].concat());
-        self.val = entry_data.slice(value_off..);
+        // TODO: optimize base_key copy
+        // if header.overlap > self.perv_overlap {
+        //     self.key = Bytes::from(
+        //         [
+        //             &self.key[..self.perv_overlap as usize],
+        //             &self.base_key[self.perv_overlap as usize..header.overlap as usize],
+        //         ]
+        //         .concat(),
+        //     );
+        // }
+        // self.perv_overlap = header.overlap;
+
+        let diff_key = &entry_data[..header.diff as usize];
+        self.key = Bytes::from([&self.base_key[..header.overlap as usize], diff_key].concat());
+        self.val = entry_data.slice(header.diff as usize..);
     }
 
     pub fn valid(&self) -> bool {
@@ -407,5 +409,9 @@ impl<T: AsRef<TableInner>> Iterator<T> {
         } else {
             self.seek_for_prev(key);
         }
+    }
+
+    pub fn error(&self) -> &IteratorError {
+        &self.err
     }
 }

@@ -84,6 +84,7 @@ impl Builder {
         h.encode(&mut self.buf);
         self.buf.put_slice(diff_key);
         v.encode(&mut self.buf);
+
         let sst_size = v.encoded_size() as usize + diff_key.len() + 4;
         self.table_index.estimated_size += sst_size as u32 + vlog_len;
     }
@@ -93,9 +94,9 @@ impl Builder {
             return;
         }
         for offset in &self.entry_offsets {
-            self.buf.put_u32_le(*offset);
+            self.buf.put_u32(*offset);
         }
-        self.buf.put_u32_le(self.entry_offsets.len() as u32);
+        self.buf.put_u32(self.entry_offsets.len() as u32);
 
         let cs = self.build_checksum(&self.buf[self.base_offset as usize..]);
         self.write_checksum(cs);
@@ -121,7 +122,11 @@ impl Builder {
             8 + // sum64 in checksum proto
             4; // checksum length
         assert!(entries_offsets_size < u32::MAX as usize);
-        let estimated_size = (self.buf.len() as u32) - self.base_offset + 6 /* header size for entry */ + key.len() as u32 + value.encoded_size() as u32 + entries_offsets_size as u32;
+        let estimated_size = (self.buf.len() as u32)
+            - self.base_offset + 6 /* header size for entry */
+            + key.len() as u32
+            + value.encoded_size() as u32
+            + entries_offsets_size as u32;
         assert!(self.buf.len() + (estimated_size as usize) < u32::MAX as usize);
         estimated_size > self.options.block_size as u32
     }
@@ -155,10 +160,13 @@ impl Builder {
             return Bytes::new();
         }
         let mut bytes = BytesMut::new();
+        // TODO: move boundaries and build index
+        // append index to buffer
         self.table_index.encode(&mut bytes).unwrap();
         assert!(bytes.len() < u32::MAX as usize);
         self.buf.put_slice(&bytes);
-        self.buf.put_u32_le(bytes.len() as u32);
+        self.buf.put_u32(bytes.len() as u32);
+        // append checksum
         let cs = self.build_checksum(&bytes);
         self.write_checksum(cs);
         self.buf.clone().freeze()
@@ -234,5 +242,19 @@ mod tests {
         let mut b = Builder::new(opt);
 
         b.finish();
+    }
+
+    #[test]
+    fn test_header_encode_decode() {
+        let mut header = Header {
+            overlap: 23333,
+            diff: 23334,
+        };
+        let mut buf = BytesMut::new();
+        header.encode(&mut buf);
+        let mut buf = buf.freeze();
+        header.decode(&mut buf);
+        assert_eq!(header.overlap, 23333);
+        assert_eq!(header.diff, 23334);
     }
 }
