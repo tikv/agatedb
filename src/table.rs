@@ -5,7 +5,7 @@ use crate::checksum;
 use crate::opt::Options;
 use crate::Error;
 use crate::Result;
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, Bytes};
 use iterator::{Iterator as TableIterator, ITERATOR_NOCACHE, ITERATOR_REVERSED};
 use prost::Message;
 use proto::meta::{BlockOffset, Checksum, TableIndex};
@@ -388,10 +388,10 @@ impl TableInner {
             MmapFile::File { file, .. } => {
                 let mut file = file.lock().unwrap();
                 file.seek(std::io::SeekFrom::Start(offset as u64))?;
-                let mut buf = BytesMut::with_capacity(size);
-                buf.reserve(size);
-                file.read(&mut buf)?;
-                Ok(buf.freeze())
+                let mut buf = vec![0; size];
+                file.read_exact(&mut buf)?;
+                assert_eq!(buf.len(), size);
+                Ok(Bytes::from(buf))
             }
         }
     }
