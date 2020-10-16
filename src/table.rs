@@ -457,6 +457,10 @@ mod tests {
         Bytes::from([prefix, format!("{:04}", i).as_bytes()].concat())
     }
 
+    fn key_isize(prefix: &[u8], i: isize) -> Bytes {
+        Bytes::from([prefix, format!("{:04}", i).as_bytes()].concat())
+    }
+
     #[test]
     fn test_generate_key() {
         assert_eq!(key(b"key", 233), Bytes::from("key0233"));
@@ -628,5 +632,163 @@ mod tests {
                 count += 1;
             }
         }
+    }
+
+    #[test]
+    fn test_iterate_from_end() {
+        for n in vec![99, 100, 101, 199, 200, 250, 9999, 10000] {
+            let opts = get_test_table_options();
+            let table = build_test_table(b"key", n, opts);
+            let mut it = table.new_iterator(0);
+            it.reset();
+            it.seek(&key_with_ts(b"zzzzzz" as &[u8], 0));
+            assert!(!it.valid());
+
+            for i in (0..n).rev() {
+                it.prev();
+                assert!(it.valid());
+                let v = it.value();
+                assert_eq!(i.to_string(), v.value);
+                assert_eq!(b'A', v.meta);
+            }
+            it.prev();
+            assert!(!it.valid())
+        }
+    }
+
+    #[test]
+    fn test_table() {
+        let opts = get_test_table_options();
+        let table = build_test_table(b"key", 10000, opts);
+        let mut it = table.new_iterator(0);
+        let mut kid = 1010;
+        let seek = key_with_ts(&key(b"key", kid)[..], 0);
+        it.seek(&seek);
+        while it.valid() {
+            assert_eq!(user_key(it.key()), &key(b"key", kid)[..]);
+            kid += 1;
+            it.next();
+        }
+        assert_eq!(kid, 10000);
+
+        it.seek(&key_with_ts(&key(b"key", 99999)[..], 0));
+        assert!(!it.valid());
+
+        it.seek(&key_with_ts(&key_isize(b"key", -1)[..], 0));
+        assert!(it.valid());
+
+        assert_eq!(user_key(it.key()), key(b"key", 0));
+    }
+
+    #[test]
+    fn test_iterate_back_and_forth() {
+        let opts = get_test_table_options();
+        let table = build_test_table(b"key", 10000, opts);
+        let mut it = table.new_iterator(0);
+        let seek = key_with_ts(&key(b"key", 1010)[..], 0);
+
+        it.seek(&seek);
+        assert!(it.valid());
+        assert_eq!(it.key(), &seek);
+
+        it.prev();
+        it.prev();
+        assert!(it.valid());
+        assert_eq!(user_key(it.key()), &key(b"key", 1008)[..]);
+
+        it.next();
+        it.next();
+        assert!(it.valid());
+        assert_eq!(user_key(it.key()), &key(b"key", 1010)[..]);
+
+        it.seek(&key_with_ts(&key(b"key", 2000)[..], 0));
+        assert!(it.valid());
+        assert_eq!(user_key(it.key()), &key(b"key", 2000)[..]);
+
+        it.prev();
+        assert!(it.valid());
+        assert_eq!(user_key(it.key()), &key(b"key", 1999)[..]);
+
+        it.seek_to_first();
+        assert!(it.valid());
+        assert_eq!(user_key(it.key()), &key(b"key", 0)[..]);
+    }
+
+    #[test]
+    fn test_uni_iterator() {
+        let opts = get_test_table_options();
+        let table = build_test_table(b"key", 10000, opts);
+        {
+            let mut it = table.new_iterator(0);
+            it.rewind();
+            let mut count = 0;
+            while it.valid() {
+                let v = it.value();
+                assert_eq!(count.to_string(), v.value);
+                assert_eq!(b'A', v.meta);
+                it.next();
+                count += 1;
+            }
+            assert_eq!(count, 10000);
+        }
+        {
+            let mut it = table.new_iterator(ITERATOR_REVERSED);
+            it.rewind();
+            let mut count = 0;
+            while it.valid() {
+                let v = it.value();
+                assert_eq!((10000 - 1 - count).to_string(), v.value);
+                assert_eq!(b'A', v.meta);
+                it.next();
+                count += 1;
+            }
+            assert_eq!(count, 10000);
+        }
+    }
+
+    // TODO: concat iterators and merge iterators
+
+    fn value(i: usize) -> Bytes {
+        Bytes::from(format!("{:01048576}", i)) // 1MB value
+    }
+
+    #[test]
+    fn test_table_big_values() {
+        let n: usize = 100;
+        let opts = Options {
+            block_size: 4 * 1024,
+            bloom_false_positive: 0.01,
+            table_size: (n as u64) * (1 << 20),
+        };
+        let mut builder = Builder::new(opts.clone());
+
+        for i in 0..n {
+            let key = key_with_ts(&key(b"", i)[..], i as u64 + 1);
+            let vs = Value::new(value(i));
+            builder.add(&key, vs, 0);
+        }
+
+        let tmp_dir = TempDir::new("agatedb").unwrap();
+        let filename = tmp_dir.path().join("1.sst".to_string());
+
+        let table = Table::create(&filename, builder.finish(), opts).unwrap();
+
+        let mut it = table.new_iterator(0);
+        assert!(it.valid());
+
+        let mut count = 0;
+        it.rewind();
+
+        while it.valid() {
+            assert_eq!(key(b"", count), user_key(it.key()));
+            assert_eq!(value(count), it.value().value);
+            it.next();
+            count += 1;
+        }
+
+        assert!(!it.valid());
+        assert_eq!(n, count);
+        // TODO: support max_version in table
+        // assert_eq!(n, table.max_version());
     }
 }
