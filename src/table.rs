@@ -1,7 +1,6 @@
 mod builder;
 mod iterator;
 
-use crate::checksum;
 use crate::opt::Options;
 use crate::Error;
 use crate::Result;
