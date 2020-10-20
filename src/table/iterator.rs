@@ -52,7 +52,7 @@ impl BlockIterator {
             block,
             err: IteratorError::NoError,
             base_key: Bytes::new(),
-            key: Bytes::new(),
+            key: BytesMut::new(),
             val: Bytes::new(),
             data,
             perv_overlap: 0,
@@ -64,7 +64,6 @@ impl BlockIterator {
     fn entry_offsets(&self) -> &[u32] {
         &self.block.entry_offsets
     }
-
     fn set_idx(&mut self, i: isize) {
         self.idx = i;
         if i >= self.entry_offsets().len() as isize || i < 0 {
@@ -73,44 +72,41 @@ impl BlockIterator {
         }
 
         self.err = IteratorError::NoError;
+        let start_offset = self.entry_offsets()[i as usize] as u32;
 
-        // if base key is not available, retrieve it from first key-value pair in block
         if self.base_key.is_empty() {
             let mut base_header = Header::default();
-            base_header.decode(&self.data);
+            base_header.decode(&mut self.data.slice(..));
             // TODO: combine this decode with header decode to avoid slice ptr copy
             self.base_key = self
                 .data
                 .slice(HEADER_SIZE..HEADER_SIZE + base_header.diff as usize);
         }
 
-        let start_offset = self.entry_offsets()[i as usize] as u32;
-        let end_offset = self
-            .entry_offsets()
-            .get(self.idx as usize + 1)
-            .map(|x| *x as usize)
-            .unwrap_or(self.data.len()); // if this is last block, use data length as end offset
+        let end_offset = if self.idx + 1 == self.entry_offsets().len() as isize {
+            self.data.len()
+        } else {
+            self.entry_offsets()[self.idx as usize + 1] as usize
+        };
 
         let mut entry_data = self.data.slice(start_offset as usize..end_offset as usize);
         let mut header = Header::default();
         header.decode(&mut entry_data);
-        
-        // if header.overlap > self.perv_overlap {
-        //     self.key = Bytes::from(
-        //         [
-        //             &self.key[..self.perv_overlap as usize],
-        //             &self.base_key[self.perv_overlap as usize..header.overlap as usize],
-        //         ]
-        //         .concat(),
-        //     );
-        // }
-        // self.perv_overlap = header.overlap;
+
+        // TODO: merge this truncate with the following key truncate
+        if header.overlap > self.perv_overlap {
+            self.key.truncate(self.perv_overlap as usize);
+            self.key.extend_from_slice(
+                &self.base_key[self.perv_overlap as usize..header.overlap as usize],
+            );
+        }
+        self.perv_overlap = header.overlap;
 
         let diff_key = &entry_data[..header.diff as usize];
-        self.key = Bytes::from([&self.base_key[..header.overlap as usize], diff_key].concat());
+        self.key.truncate(header.overlap as usize);
+        self.key.extend_from_slice(diff_key);
         self.val = entry_data.slice(header.diff as usize..);
     }
-
     /// Check if last operation of iterator is error
     /// TODO: use `Result<()>` for all iterator operation and remove this if possible
     pub fn valid(&self) -> bool {
