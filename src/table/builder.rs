@@ -160,7 +160,7 @@ impl Builder {
             return Bytes::new();
         }
         let mut bytes = BytesMut::new();
-        // TODO: move boundaries and build index
+        // TODO: move boundaries and build index if we need to encrypt or compress
         // append index to buffer
         self.table_index.encode(&mut bytes).unwrap();
         assert!(bytes.len() < u32::MAX as usize);
@@ -169,6 +169,7 @@ impl Builder {
         // append checksum
         let cs = self.build_checksum(&bytes);
         self.write_checksum(cs);
+        // TODO: eliminate clone if we do not need builder any more after finish
         self.buf.clone().freeze()
     }
 
