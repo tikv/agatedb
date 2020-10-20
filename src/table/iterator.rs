@@ -8,7 +8,6 @@ use std::sync::Arc;
 /// Errors that may encounter during iterator operation
 #[derive(Clone, Debug)]
 pub enum IteratorError {
-    NoError,
     EOF,
     // TODO: As we need to clone Error from block iterator to table iterator,
     // we had to save `crate::Error` as String. In the future, we could let all
@@ -18,11 +17,6 @@ pub enum IteratorError {
 }
 
 impl IteratorError {
-    /// Check if iterator has error
-    pub fn is_err(&self) -> bool {
-        !matches!(self, IteratorError::NoError)
-    }
-
     /// Check if iterator has reached its end
     pub fn is_eof(&self) -> bool {
         matches!(self, IteratorError::EOF)
@@ -54,7 +48,7 @@ struct BlockIterator {
     /// previous one faster
     perv_overlap: u16,
     /// iterator error in last operation
-    err: IteratorError,
+    err: Option<IteratorError>,
 }
 
 impl BlockIterator {
@@ -62,7 +56,7 @@ impl BlockIterator {
         let data = block.data.slice(..block.entries_index_start);
         Self {
             block,
-            err: IteratorError::NoError,
+            err: None,
             base_key: Bytes::new(),
             key: BytesMut::new(),
             val: Bytes::new(),
@@ -80,11 +74,11 @@ impl BlockIterator {
     fn set_idx(&mut self, i: isize) {
         self.idx = i;
         if i >= self.entry_offsets().len() as isize || i < 0 {
-            self.err = IteratorError::EOF;
+            self.err = Some(IteratorError::EOF);
             return;
         }
 
-        self.err = IteratorError::NoError;
+        self.err = None;
         let start_offset = self.entry_offsets()[i as usize] as u32;
 
         if self.base_key.is_empty() {
@@ -123,17 +117,17 @@ impl BlockIterator {
     /// Check if last operation of iterator is error
     /// TODO: use `Result<()>` for all iterator operation and remove this if possible
     pub fn valid(&self) -> bool {
-        !self.err.is_err()
+        self.err.is_none()
     }
 
     /// Return error of last operation
-    pub fn error(&self) -> &IteratorError {
-        &self.err
+    pub fn error(&self) -> Option<&IteratorError> {
+        self.err.as_ref()
     }
 
     /// Seek to the first entry that is equal or greater than key
     pub fn seek(&mut self, key: &Bytes, whence: SeekPos) {
-        self.err = IteratorError::NoError;
+        self.err = None;
         let start_index = match whence {
             SeekPos::Origin => 0,
             SeekPos::Current => self.idx,
@@ -179,14 +173,8 @@ mod tests {
     fn test_iterator_error() {
         let ite1 = IteratorError::EOF;
         assert!(ite1.is_eof());
-        assert!(ite1.is_err());
-
-        let ite2 = IteratorError::NoError;
-        assert!(!ite2.is_eof());
-        assert!(!ite2.is_err());
 
         let ite3 = IteratorError::Error("23333".to_string());
         assert!(!ite3.is_eof());
-        assert!(ite3.is_err());
     }
 }
