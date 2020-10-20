@@ -5,6 +5,7 @@ use crate::value::Value;
 use bytes::{Bytes, BytesMut};
 use std::sync::Arc;
 
+/// Errors that may encounter during iterator operation
 #[derive(Clone, Debug)]
 pub enum IteratorError {
     NoError,
@@ -17,10 +18,12 @@ pub enum IteratorError {
 }
 
 impl IteratorError {
+    /// Check if iterator has error
     pub fn is_err(&self) -> bool {
         !matches!(self, IteratorError::NoError)
     }
 
+    /// Check if iterator has reached its end
     pub fn is_eof(&self) -> bool {
         matches!(self, IteratorError::EOF)
     }
@@ -34,14 +37,23 @@ enum SeekPos {
 /// Block iterator iterates on an SST block
 // TODO: support custom comparator
 struct BlockIterator {
+    /// current index of iterator
     idx: isize,
+    /// base key of the block
     base_key: Bytes,
+    /// key of current entry
     key: BytesMut,
+    /// raw value of current entry
     val: Bytes,
+    /// block data in bytes
     data: Bytes,
+    /// block struct
     // TODO: use `&'a Block` if possible
     block: Arc<Block>,
+    /// previous overlap key, used to construct key of current entry from
+    /// previous one faster
     perv_overlap: u16,
+    /// iterator error in last operation
     err: IteratorError,
 }
 
@@ -64,6 +76,7 @@ impl BlockIterator {
     fn entry_offsets(&self) -> &[u32] {
         &self.block.entry_offsets
     }
+
     fn set_idx(&mut self, i: isize) {
         self.idx = i;
         if i >= self.entry_offsets().len() as isize || i < 0 {

@@ -14,6 +14,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
 
+/// MmapFile stores SST data. `File` refers to a file on disk,
+/// and `Memory` refers to data in memory.
 // TODO: use a mmap library instead of handling I/O on our own
 enum MmapFile {
     File {
@@ -27,6 +29,7 @@ enum MmapFile {
 }
 
 impl MmapFile {
+    /// Returns if data is in memory.
     pub fn is_in_memory(&self) -> bool {
         match self {
             Self::File { .. } => false,
@@ -35,17 +38,30 @@ impl MmapFile {
     }
 }
 
+/// TableInner stores data of an SST.
+/// It is immutable once created and initialized.
 pub struct TableInner {
+    /// file struct of SST
     file: MmapFile,
+    /// size of SST
     table_size: usize,
+    /// smallest key
     smallest: Bytes,
+    /// biggest key
     biggest: Bytes,
+    /// SST id
     id: u64,
+    /// checksum of SST
     checksum: Bytes,
+    /// estimated size, only used on encryption or compression
     estimated_size: u32,
+    /// index of SST
     index: TableIndex,
+    /// start position of index
     index_start: usize,
+    /// length of index
     index_len: usize,
+    /// table options
     opt: Options,
 }
 
@@ -67,6 +83,7 @@ impl Drop for TableInner {
 }
 */
 
+/// Block contains several entries. It can be obtained from an SST.
 #[derive(Default)]
 pub struct Block {
     offset: usize,
