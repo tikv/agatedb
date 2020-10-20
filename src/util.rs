@@ -44,7 +44,7 @@ where
     let mut i = 0;
     let mut j = n;
     while i < j {
-        let h = (i + j) >> 1;
+        let h = (i + j) / 2;
         if !f(h) {
             i = h + 1;
         } else {
