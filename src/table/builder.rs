@@ -5,6 +5,9 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use prost::Message;
 use proto::meta::{checksum::Algorithm as ChecksumAlg, BlockOffset, Checksum, TableIndex};
 
+/// Entry header stores the difference between current key and block base key.
+/// `overlap` is the common prefix of key and base key, and diff is the length
+/// of different part.
 #[repr(C)]
 #[derive(Default)]
 pub struct Header {
@@ -26,6 +29,7 @@ impl Header {
     }
 }
 
+/// Builder builds an SST.
 pub struct Builder {
     buf: BytesMut,
     base_key: Bytes,
@@ -38,6 +42,7 @@ pub struct Builder {
 }
 
 impl Builder {
+    /// Create new builder from options
     pub fn new(options: Options) -> Builder {
         Builder {
             // approximately 16MB index + table size
@@ -52,6 +57,7 @@ impl Builder {
         }
     }
 
+    /// Check if the builder is empty
     pub fn is_empty(&self) -> bool {
         self.buf.is_empty()
     }
@@ -131,6 +137,7 @@ impl Builder {
         estimated_size > self.options.block_size as u32
     }
 
+    /// Add key-value pair to table
     pub fn add(&mut self, key: &Bytes, value: Value, vlog_len: u32) {
         if self.should_finish_block(&key, &value) {
             self.finish_block();
@@ -142,6 +149,7 @@ impl Builder {
         self.add_helper(key, value, vlog_len);
     }
 
+    /// Check if entries reach its capacity
     pub fn reach_capacity(&self, capacity: u64) -> bool {
         let block_size = self.buf.len() as u32 + // length of buffer
                                  self.entry_offsets.len() as u32 * 4 + // all entry offsets size
@@ -154,6 +162,7 @@ impl Builder {
         estimated_size as u64 > capacity
     }
 
+    /// Finalize the table
     pub fn finish(&mut self) -> Bytes {
         self.finish_block();
         if self.buf.is_empty() {
