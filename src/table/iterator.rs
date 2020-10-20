@@ -95,7 +95,7 @@ impl BlockIterator {
             .entry_offsets()
             .get(self.idx as usize + 1)
             .map(|x| *x as usize)
-            .unwrap_or(self.entry_offsets().len());
+            .unwrap_or(self.data.len()); // if this is last block, use data length as end offset
 
         let mut entry_data = self.data.slice(start_offset as usize..end_offset as usize);
         let mut header = Header::default();
