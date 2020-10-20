@@ -37,7 +37,6 @@ enum SeekPos {
     Current,
 }
 
-
 /// Block iterator iterates on an SST block
 // TODO: support custom comparator
 struct BlockIterator {
@@ -92,11 +91,11 @@ impl BlockIterator {
         }
 
         let start_offset = self.entry_offsets()[i as usize] as u32;
-        let end_offset = if self.idx + 1 == self.entry_offsets().len() as isize {
-            self.data.len()
-        } else {
-            self.entry_offsets()[self.idx as usize + 1] as usize
-        };
+        let end_offset = self
+            .entry_offsets()
+            .get(self.idx as usize + 1)
+            .map(|x| *x as usize)
+            .unwrap_or(self.entry_offsets().len());
 
         let mut entry_data = self.data.slice(start_offset as usize..end_offset as usize);
         let mut header = Header::default();
@@ -119,20 +118,25 @@ impl BlockIterator {
         self.val = entry_data.slice(header.diff as usize..);
     }
 
+    /// Check if last operation of iterator is error
+    /// TODO: use `Result<()>` for all iterator operation and remove this if possible
     pub fn valid(&self) -> bool {
         !self.err.is_err()
     }
 
+    /// Return error of last operation
     pub fn error(&self) -> &IteratorError {
         &self.err
     }
 
+    /// Seek to the first entry that is equal or greater than key
     pub fn seek(&mut self, key: &Bytes, whence: SeekPos) {
         self.err = IteratorError::NoError;
         let start_index = match whence {
             SeekPos::Origin => 0,
             SeekPos::Current => self.idx,
         };
+        
         let found_entry_idx = util::search(self.entry_offsets().len(), |idx| {
             use std::cmp::Ordering::*;
             if idx < start_index as usize {
