@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use skiplist::{FixedLengthSuffixComparitor as Flsc, Skiplist};
+use skiplist::{FixedLengthSuffixComparator as Flsc, Skiplist};
 use std::collections::VecDeque;
 use std::mem::{self, ManuallyDrop, MaybeUninit};
 use std::ptr;

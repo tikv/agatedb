@@ -1,23 +1,23 @@
 use bytes::Bytes;
 use std::cmp::Ordering;
 
-pub trait KeyComparitor {
+pub trait KeyComparator {
     fn compare_key(&self, lhs: &[u8], rhs: &[u8]) -> Ordering;
     fn same_key(&self, lhs: &[u8], rhs: &[u8]) -> bool;
 }
 
 #[derive(Default, Debug, Clone, Copy)]
-pub struct FixedLengthSuffixComparitor {
+pub struct FixedLengthSuffixComparator {
     len: usize,
 }
 
-impl FixedLengthSuffixComparitor {
-    pub const fn new(len: usize) -> FixedLengthSuffixComparitor {
-        FixedLengthSuffixComparitor { len }
+impl FixedLengthSuffixComparator {
+    pub const fn new(len: usize) -> FixedLengthSuffixComparator {
+        FixedLengthSuffixComparator { len }
     }
 }
 
-impl KeyComparitor for FixedLengthSuffixComparitor {
+impl KeyComparator for FixedLengthSuffixComparator {
     #[inline]
     fn compare_key(&self, lhs: &[u8], rhs: &[u8]) -> Ordering {
         if lhs.len() < self.len {

@@ -1,5 +1,5 @@
 use super::arena::Arena;
-use super::KeyComparitor;
+use super::KeyComparator;
 use super::MAX_HEIGHT;
 use bytes::Bytes;
 use rand::Rng;
@@ -85,7 +85,7 @@ impl<C> Skiplist<C> {
     }
 }
 
-impl<C: KeyComparitor> Skiplist<C> {
+impl<C: KeyComparator> Skiplist<C> {
     unsafe fn find_near(&self, key: &[u8], less: bool, allow_equal: bool) -> *const Node {
         let mut cursor: *const Node = self.core.head.as_ptr();
         let mut level = self.height();
@@ -330,7 +330,7 @@ pub struct IterRef<'a, C> {
     cursor: *const Node,
 }
 
-impl<'a, C: KeyComparitor> IterRef<'a, C> {
+impl<'a, C: KeyComparator> IterRef<'a, C> {
     pub fn valid(&self) -> bool {
         !self.cursor.is_null()
     }
@@ -387,11 +387,11 @@ impl<'a, C: KeyComparitor> IterRef<'a, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::FixedLengthSuffixComparitor;
+    use crate::FixedLengthSuffixComparator;
 
     #[test]
     fn test_find_near() {
-        let comp = FixedLengthSuffixComparitor::new(8);
+        let comp = FixedLengthSuffixComparator::new(8);
         let list = Skiplist::with_capacity(comp, 1 << 20);
         for i in 0..1000 {
             let key = Bytes::from(format!("{:05}{:08}", i * 10 + 5, 0));

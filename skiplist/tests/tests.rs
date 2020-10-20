@@ -20,7 +20,7 @@ fn key_with_ts(key: &str, ts: u64) -> Bytes {
 #[test]
 fn test_empty() {
     let key = key_with_ts("aaa", 0);
-    let comp = FixedLengthSuffixComparitor::new(8);
+    let comp = FixedLengthSuffixComparator::new(8);
     let list = Skiplist::with_capacity(comp, ARENA_SIZE);
     let v = list.get(&key);
     assert!(v.is_none());
@@ -38,7 +38,7 @@ fn test_empty() {
 
 #[test]
 fn test_basic() {
-    let comp = FixedLengthSuffixComparitor::new(8);
+    let comp = FixedLengthSuffixComparator::new(8);
     let list = Skiplist::with_capacity(comp, ARENA_SIZE);
     let table = vec![
         ("key1", new_value(42)),
@@ -63,7 +63,7 @@ fn test_basic() {
 
 fn test_concurrent_basic(n: usize, cap: u32, value_len: usize) {
     let pool = yatp::Builder::new("concurrent_basic").build_callback_pool();
-    let comp = FixedLengthSuffixComparitor::new(8);
+    let comp = FixedLengthSuffixComparator::new(8);
     let list = Skiplist::with_capacity(comp, cap);
     let kvs: Vec<_> = (0..n)
         .map(|i| {
@@ -115,7 +115,7 @@ fn test_one_key() {
     let n = 10000;
     let write_pool = yatp::Builder::new("one_key_write").build_callback_pool();
     let read_pool = yatp::Builder::new("one_key_read").build_callback_pool();
-    let comp = FixedLengthSuffixComparitor::new(8);
+    let comp = FixedLengthSuffixComparator::new(8);
     let list = Skiplist::with_capacity(comp, ARENA_SIZE);
     let key = key_with_ts("thekey", 0);
     let (tx, rx) = mpsc::channel();
@@ -167,7 +167,7 @@ fn test_one_key() {
 #[test]
 fn test_iterator_next() {
     let n = 100;
-    let comp = FixedLengthSuffixComparitor::new(8);
+    let comp = FixedLengthSuffixComparator::new(8);
     let list = Skiplist::with_capacity(comp, ARENA_SIZE);
     let mut iter_ref = list.iter_ref();
     assert!(!iter_ref.valid());
@@ -190,7 +190,7 @@ fn test_iterator_next() {
 #[test]
 fn test_iterator_prev() {
     let n = 100;
-    let comp = FixedLengthSuffixComparitor::new(8);
+    let comp = FixedLengthSuffixComparator::new(8);
     let list = Skiplist::with_capacity(comp, ARENA_SIZE);
     let mut iter_ref = list.iter_ref();
     assert!(!iter_ref.valid());
@@ -213,7 +213,7 @@ fn test_iterator_prev() {
 #[test]
 fn test_iterator_seek() {
     let n = 100;
-    let comp = FixedLengthSuffixComparitor::new(8);
+    let comp = FixedLengthSuffixComparator::new(8);
     let list = Skiplist::with_capacity(comp, ARENA_SIZE);
     let mut iter_ref = list.iter_ref();
     assert!(!iter_ref.valid());
