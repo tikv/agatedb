@@ -100,7 +100,7 @@ impl Builder {
             return;
         }
         for offset in &self.entry_offsets {
-            self.buf.put_u32(*offset);
+            self.buf.put_u32_le(*offset);
         }
         self.buf.put_u32(self.entry_offsets.len() as u32);
 
