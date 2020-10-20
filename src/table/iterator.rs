@@ -2,7 +2,7 @@ use super::builder::{Header, HEADER_SIZE};
 use super::{Block, TableInner};
 use crate::util::{self, KeyComparator, COMPARATOR};
 use crate::value::Value;
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -18,17 +18,11 @@ pub enum IteratorError {
 
 impl IteratorError {
     pub fn is_err(&self) -> bool {
-        match self {
-            IteratorError::NoError => false,
-            _ => true,
-        }
+        !matches!(self, IteratorError::NoError)
     }
 
     pub fn is_eof(&self) -> bool {
-        match self {
-            IteratorError::EOF => true,
-            _ => false,
-        }
+        matches!(self, IteratorError::EOF)
     }
 }
 
@@ -42,7 +36,7 @@ enum SeekPos {
 struct BlockIterator {
     idx: isize,
     base_key: Bytes,
-    key: Bytes,
+    key: BytesMut,
     val: Bytes,
     data: Bytes,
     // TODO: use `&'a Block` if possible
@@ -100,8 +94,7 @@ impl BlockIterator {
         let mut entry_data = self.data.slice(start_offset as usize..end_offset as usize);
         let mut header = Header::default();
         header.decode(&mut entry_data);
-
-        // TODO: optimize base_key copy
+        
         // if header.overlap > self.perv_overlap {
         //     self.key = Bytes::from(
         //         [
@@ -166,5 +159,25 @@ impl BlockIterator {
 
     pub fn prev(&mut self) {
         self.set_idx(self.idx - 1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_iterator_error() {
+        let ite1 = IteratorError::EOF;
+        assert!(ite1.is_eof());
+        assert!(ite1.is_err());
+
+        let ite2 = IteratorError::NoError;
+        assert!(!ite2.is_eof());
+        assert!(!ite2.is_err());
+
+        let ite3 = IteratorError::Error("23333".to_string());
+        assert!(!ite3.is_eof());
+        assert!(ite3.is_err());
     }
 }
