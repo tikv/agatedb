@@ -4,5 +4,5 @@ mod list;
 
 const MAX_HEIGHT: usize = 20;
 
-pub use key::{FixedLengthSuffixComparitor, KeyComparitor};
+pub use key::{FixedLengthSuffixComparator, KeyComparator};
 pub use list::Skiplist;

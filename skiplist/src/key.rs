@@ -1,24 +1,39 @@
+use bytes::Bytes;
 use std::cmp::Ordering;
 
-pub trait KeyComparitor {
+pub trait KeyComparator {
     fn compare_key(&self, lhs: &[u8], rhs: &[u8]) -> Ordering;
     fn same_key(&self, lhs: &[u8], rhs: &[u8]) -> bool;
 }
 
 #[derive(Default, Debug, Clone, Copy)]
-pub struct FixedLengthSuffixComparitor {
+pub struct FixedLengthSuffixComparator {
     len: usize,
 }
 
-impl FixedLengthSuffixComparitor {
-    pub fn new(len: usize) -> FixedLengthSuffixComparitor {
-        FixedLengthSuffixComparitor { len }
+impl FixedLengthSuffixComparator {
+    pub const fn new(len: usize) -> FixedLengthSuffixComparator {
+        FixedLengthSuffixComparator { len }
     }
 }
 
-impl KeyComparitor for FixedLengthSuffixComparitor {
+impl KeyComparator for FixedLengthSuffixComparator {
     #[inline]
     fn compare_key(&self, lhs: &[u8], rhs: &[u8]) -> Ordering {
+        if lhs.len() < self.len {
+            panic!(
+                "cannot compare with suffix {}: {:?}",
+                self.len,
+                Bytes::copy_from_slice(lhs)
+            );
+        }
+        if rhs.len() < self.len {
+            panic!(
+                "cannot compare with suffix {}: {:?}",
+                self.len,
+                Bytes::copy_from_slice(rhs)
+            );
+        }
         let (l_p, l_s) = lhs.split_at(lhs.len() - self.len);
         let (r_p, r_s) = rhs.split_at(rhs.len() - self.len);
         let res = l_p.cmp(r_p);

@@ -4,26 +4,32 @@ use crate::{checksum, util};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use prost::Message;
 use proto::meta::{checksum::Algorithm as ChecksumAlg, BlockOffset, Checksum, TableIndex};
-use std::{u16, u32};
 
+/// Entry header stores the difference between current key and block base key.
+/// `overlap` is the common prefix of key and base key, and diff is the length
+/// of different part.
 #[repr(C)]
-struct Header {
-    overlap: u16,
-    diff: u16,
+#[derive(Default)]
+pub struct Header {
+    pub overlap: u16,
+    pub diff: u16,
 }
 
+pub const HEADER_SIZE: usize = std::mem::size_of::<Header>();
+
 impl Header {
-    fn encode(&self, bytes: &mut BytesMut) {
+    pub fn encode(&self, bytes: &mut BytesMut) {
         bytes.put_u32_le((self.overlap as u32) << 16 | self.diff as u32);
     }
 
-    fn decode(&mut self, bytes: &mut Bytes) {
+    pub fn decode(&mut self, bytes: &mut Bytes) {
         let h = bytes.get_u32_le();
         self.overlap = (h >> 16) as u16;
         self.diff = h as u16;
     }
 }
 
+/// Builder builds an SST.
 pub struct Builder {
     buf: BytesMut,
     base_key: Bytes,
@@ -36,6 +42,7 @@ pub struct Builder {
 }
 
 impl Builder {
+    /// Create new builder from options
     pub fn new(options: Options) -> Builder {
         Builder {
             // approximately 16MB index + table size
@@ -50,6 +57,7 @@ impl Builder {
         }
     }
 
+    /// Check if the builder is empty
     pub fn is_empty(&self) -> bool {
         self.buf.is_empty()
     }
@@ -82,6 +90,7 @@ impl Builder {
         h.encode(&mut self.buf);
         self.buf.put_slice(diff_key);
         v.encode(&mut self.buf);
+
         let sst_size = v.encoded_size() as usize + diff_key.len() + 4;
         self.table_index.estimated_size += sst_size as u32 + vlog_len;
     }
@@ -93,7 +102,7 @@ impl Builder {
         for offset in &self.entry_offsets {
             self.buf.put_u32_le(*offset);
         }
-        self.buf.put_u32_le(self.entry_offsets.len() as u32);
+        self.buf.put_u32(self.entry_offsets.len() as u32);
 
         let cs = self.build_checksum(&self.buf[self.base_offset as usize..]);
         self.write_checksum(cs);
@@ -119,11 +128,16 @@ impl Builder {
             8 + // sum64 in checksum proto
             4; // checksum length
         assert!(entries_offsets_size < u32::MAX as usize);
-        let estimated_size = (self.buf.len() as u32) - self.base_offset + 6 /* header size for entry */ + key.len() as u32 + value.encoded_size() as u32 + entries_offsets_size as u32;
+        let estimated_size = (self.buf.len() as u32)
+            - self.base_offset + 6 /* header size for entry */
+            + key.len() as u32
+            + value.encoded_size() as u32
+            + entries_offsets_size as u32;
         assert!(self.buf.len() + (estimated_size as usize) < u32::MAX as usize);
         estimated_size > self.options.block_size as u32
     }
 
+    /// Add key-value pair to table
     pub fn add(&mut self, key: &Bytes, value: Value, vlog_len: u32) {
         if self.should_finish_block(&key, &value) {
             self.finish_block();
@@ -135,6 +149,7 @@ impl Builder {
         self.add_helper(key, value, vlog_len);
     }
 
+    /// Check if entries reach its capacity
     pub fn reach_capacity(&self, capacity: u64) -> bool {
         let block_size = self.buf.len() as u32 + // length of buffer
                                  self.entry_offsets.len() as u32 * 4 + // all entry offsets size
@@ -147,18 +162,23 @@ impl Builder {
         estimated_size as u64 > capacity
     }
 
+    /// Finalize the table
     pub fn finish(&mut self) -> Bytes {
         self.finish_block();
         if self.buf.is_empty() {
             return Bytes::new();
         }
         let mut bytes = BytesMut::new();
+        // TODO: move boundaries and build index if we need to encrypt or compress
+        // append index to buffer
         self.table_index.encode(&mut bytes).unwrap();
         assert!(bytes.len() < u32::MAX as usize);
         self.buf.put_slice(&bytes);
-        self.buf.put_u32_le(bytes.len() as u32);
+        self.buf.put_u32(bytes.len() as u32);
+        // append checksum
         let cs = self.build_checksum(&bytes);
         self.write_checksum(cs);
+        // TODO: eliminate clone if we do not need builder any more after finish
         self.buf.clone().freeze()
     }
 
@@ -232,5 +252,19 @@ mod tests {
         let mut b = Builder::new(opt);
 
         b.finish();
+    }
+
+    #[test]
+    fn test_header_encode_decode() {
+        let mut header = Header {
+            overlap: 23333,
+            diff: 23334,
+        };
+        let mut buf = BytesMut::new();
+        header.encode(&mut buf);
+        let mut buf = buf.freeze();
+        header.decode(&mut buf);
+        assert_eq!(header.overlap, 23333);
+        assert_eq!(header.diff, 23334);
     }
 }
