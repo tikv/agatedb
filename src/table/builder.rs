@@ -19,11 +19,11 @@ pub const HEADER_SIZE: usize = std::mem::size_of::<Header>();
 
 impl Header {
     pub fn encode(&self, bytes: &mut BytesMut) {
-        bytes.put_u32_le((self.overlap as u32) << 16 | self.diff as u32);
+        bytes.put_u32((self.overlap as u32) << 16 | self.diff as u32);
     }
 
     pub fn decode(&mut self, bytes: &mut Bytes) {
-        let h = bytes.get_u32_le();
+        let h = bytes.get_u32();
         self.overlap = (h >> 16) as u16;
         self.diff = h as u16;
     }
@@ -100,9 +100,9 @@ impl Builder {
             return;
         }
         for offset in &self.entry_offsets {
-            self.buf.put_u32_le(*offset);
+            self.buf.put_u32(*offset);
         }
-        self.buf.put_u32_le(self.entry_offsets.len() as u32);
+        self.buf.put_u32(self.entry_offsets.len() as u32);
 
         let cs = self.build_checksum(&self.buf[self.base_offset as usize..]);
         self.write_checksum(cs);
@@ -174,7 +174,7 @@ impl Builder {
         self.table_index.encode(&mut bytes).unwrap();
         assert!(bytes.len() < u32::MAX as usize);
         self.buf.put_slice(&bytes);
-        self.buf.put_u32_le(bytes.len() as u32);
+        self.buf.put_u32(bytes.len() as u32);
         // append checksum
         let cs = self.build_checksum(&bytes);
         self.write_checksum(cs);
@@ -195,7 +195,7 @@ impl Builder {
         let len = res.len();
         assert!(len < u32::MAX as usize);
         self.buf.put_slice(&res);
-        self.buf.put_u32_le(len as u32);
+        self.buf.put_u32(len as u32);
     }
 }
 
