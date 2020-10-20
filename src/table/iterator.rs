@@ -136,7 +136,7 @@ impl BlockIterator {
             SeekPos::Origin => 0,
             SeekPos::Current => self.idx,
         };
-        
+
         let found_entry_idx = util::search(self.entry_offsets().len(), |idx| {
             use std::cmp::Ordering::*;
             if idx < start_index as usize {
