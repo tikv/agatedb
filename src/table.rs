@@ -240,7 +240,7 @@ impl TableInner {
         let data = self.read(offset, block_offset.len as usize)?;
 
         let mut read_pos = data.len() - 4; // first read checksum length
-        let checksum_len = data.slice(read_pos..read_pos + 4).get_u32() as usize;
+        let checksum_len = (&data[read_pos..read_pos + 4]).get_u32() as usize;
 
         if checksum_len > data.len() {
             return Err(Error::TableRead("invalid checksum length".to_string()));
@@ -252,12 +252,12 @@ impl TableInner {
 
         // read num entries
         read_pos -= 4;
-        let num_entries = data.slice(read_pos..read_pos + 4).get_u32() as usize;
+        let num_entries = (&data[read_pos..read_pos + 4]).get_u32() as usize;
 
         let entries_index_start = read_pos - num_entries * 4;
         let entries_index_end = entries_index_start + num_entries * 4;
 
-        let mut entry_offsets_ptr = data.slice(entries_index_start..entries_index_end);
+        let mut entry_offsets_ptr = &data[entries_index_start..entries_index_end];
         let mut entry_offsets = Vec::with_capacity(num_entries);
         for _ in 0..num_entries {
             entry_offsets.push(entry_offsets_ptr.get_u32_le());
