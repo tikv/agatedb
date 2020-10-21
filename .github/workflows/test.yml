@@ -54,17 +54,9 @@ jobs:
       - uses: actions-rs/toolchain@v1
         name: Setup Cargo Toolchain 🛎️
         with:
-          components: rustfmt, clippy, rust-src, miri
+          components: rustfmt, clippy, rust-src
           toolchain: nightly
           default: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: clean
-      - uses: actions-rs/cargo@v1
-        name: Running Tests with miri 🚀
-        with:
-          command: miri
-          args: test --all-features
       - uses: actions-rs/cargo@v1
         name: Running Tests with Address Sanitizer 🚀
         with:
@@ -93,3 +85,32 @@ jobs:
           args: --all-features -Zbuild-std --target x86_64-unknown-linux-gnu
         env:
           RUSTFLAGS: "-Zsanitizer=thread"
+  miri_test:
+    name: Test with miri
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        name: Checkout 🛎️
+      - uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-miri-test
+      - uses: actions-rs/toolchain@v1
+        name: Setup Cargo Toolchain 🛎️
+        with:
+          components: rustfmt, clippy, rust-src, miri
+          toolchain: nightly
+          default: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: clean
+      - uses: actions-rs/cargo@v1
+        name: Running Tests with miri 🚀
+        with:
+          command: miri
+          args: test --all-features
+        env:
+          MIRIFLAGS: "-Zmiri-disable-isolation"
