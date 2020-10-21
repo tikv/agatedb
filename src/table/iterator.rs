@@ -201,6 +201,9 @@ pub const ITERATOR_NOCACHE: usize = 1 << 2;
 
 /// An iterator over SST.
 ///
+/// The generic represents a reference to `TableInner` struct.
+/// It should be `Arc<TableInner>` or &TableInner.
+/// 
 /// Here we use generic because when initializaing a
 /// table object, we need to get smallest and biggest
 /// elements by using an iterator over `&TableInner`.
