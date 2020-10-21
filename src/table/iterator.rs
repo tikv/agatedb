@@ -200,6 +200,13 @@ impl BlockIterator {
             self.set_idx(self.idx - 1);
         }
     }
+
+    pub fn require_load(iter: &Option<Self>) -> bool {
+        match iter {
+            Some(iter) => iter.data.is_empty(),
+            None => true,
+        }
+    }
 }
 
 // TODO: use `bitfield` if there are too many variants
@@ -355,7 +362,7 @@ impl<T: AsRef<TableInner>> Iterator<T> {
             return;
         }
 
-        if self.block_iterator.is_none() {
+        if BlockIterator::require_load(&self.block_iterator) {
             match self.table.as_ref().block(self.bpos, self.use_cache()) {
                 Ok(block) => {
                     let block_iterator = self.get_block_iterator(block);
@@ -378,7 +385,7 @@ impl<T: AsRef<TableInner>> Iterator<T> {
     fn prev_inner(&mut self) {
         self.err = None;
 
-        if self.block_iterator.is_none() {
+        if BlockIterator::require_load(&self.block_iterator) {
             match self.table.as_ref().block(self.bpos, self.use_cache()) {
                 Ok(block) => {
                     let block_iterator = self.get_block_iterator(block);
