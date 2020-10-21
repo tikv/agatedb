@@ -31,7 +31,7 @@ enum SeekPos {
 // TODO: support custom comparator
 struct BlockIterator {
     /// current index of iterator
-    idx: isize,
+    idx: usize,
     /// base key of the block
     base_key: Bytes,
     /// key of current entry
@@ -82,9 +82,9 @@ impl BlockIterator {
         &self.block.entry_offsets
     }
 
-    fn set_idx(&mut self, i: isize) {
+    fn set_idx(&mut self, i: usize) {
         self.idx = i;
-        if i >= self.entry_offsets().len() as isize || i < 0 {
+        if i >= self.entry_offsets().len() {
             self.err = Some(IteratorError::EOF);
             return;
         }
@@ -101,7 +101,7 @@ impl BlockIterator {
                 .slice(HEADER_SIZE..HEADER_SIZE + base_header.diff as usize);
         }
 
-        let end_offset = if self.idx + 1 == self.entry_offsets().len() as isize {
+        let end_offset = if self.idx + 1 == self.entry_offsets().len() {
             self.data.len()
         } else {
             self.entry_offsets()[self.idx as usize + 1] as usize
@@ -150,14 +150,14 @@ impl BlockIterator {
             if idx < start_index as usize {
                 return false;
             }
-            self.set_idx(idx as isize);
+            self.set_idx(idx);
             match COMPARATOR.compare_key(&self.key, &key) {
                 Less => false,
                 _ => true,
             }
         });
 
-        self.set_idx(found_entry_idx as isize);
+        self.set_idx(found_entry_idx);
     }
 
     pub fn seek_to_first(&mut self) {
@@ -165,7 +165,13 @@ impl BlockIterator {
     }
 
     pub fn seek_to_last(&mut self) {
-        self.set_idx(self.entry_offsets().len() as isize - 1);
+        if self.entry_offsets().is_empty() {
+            self.idx = std::usize::MAX;
+            self.err = Some(IteratorError::EOF);
+            return;
+        } else {
+            self.set_idx(self.entry_offsets().len() - 1);
+        }
     }
 
     pub fn next(&mut self) {
@@ -173,7 +179,13 @@ impl BlockIterator {
     }
 
     pub fn prev(&mut self) {
-        self.set_idx(self.idx - 1);
+        if self.idx == 0 {
+            self.idx = std::usize::MAX;
+            self.err = Some(IteratorError::EOF);
+            return;
+        } else {
+            self.set_idx(self.idx - 1);
+        }
     }
 }
 
