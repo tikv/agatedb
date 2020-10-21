@@ -2,6 +2,7 @@ use super::builder::{Header, HEADER_SIZE};
 use super::{Block, TableInner};
 use crate::util::{self, KeyComparator, COMPARATOR};
 use crate::value::Value;
+use crate::Error;
 use bytes::{Bytes, BytesMut};
 use std::sync::Arc;
 
@@ -25,6 +26,12 @@ impl IteratorError {
     /// Utility function to check if an Option<IteratorError> is EOF
     pub fn check_eof(err: &Option<IteratorError>) -> bool {
         matches!(err, Some(IteratorError::EOF))
+    }
+}
+
+impl From<Error> for IteratorError {
+    fn from(err: Error) -> Self {
+        IteratorError::Error(err.to_string())
     }
 }
 
@@ -244,14 +251,12 @@ impl<T: AsRef<TableInner>> Iterator<T> {
     }
 
     fn get_block_iterator(&mut self, block: Arc<Block>) -> &mut BlockIterator {
-        if self.block_iterator.is_none() {
-            self.block_iterator = Some(BlockIterator::new(block));
-            self.block_iterator.as_mut().unwrap()
-        } else {
-            let iter = self.block_iterator.as_mut().unwrap();
+        if let Some(ref mut iter) = self.block_iterator {
             iter.set_block(block);
-            iter
+            return iter;
         }
+        self.block_iterator = Some(BlockIterator::new(block));
+        self.block_iterator.as_mut().unwrap()
     }
 
     pub fn seek_to_first(&mut self) {
@@ -267,7 +272,7 @@ impl<T: AsRef<TableInner>> Iterator<T> {
                 block_iterator.seek_to_first();
                 self.err = block_iterator.err.clone();
             }
-            Err(err) => self.err = Some(IteratorError::Error(err.to_string())),
+            Err(err) => self.err = Some(err.into()),
         }
     }
 
@@ -284,7 +289,7 @@ impl<T: AsRef<TableInner>> Iterator<T> {
                 block_iterator.seek_to_last();
                 self.err = block_iterator.err.clone();
             }
-            Err(err) => self.err = Some(IteratorError::Error(err.to_string())),
+            Err(err) => self.err = Some(err.into()),
         }
     }
 
@@ -296,7 +301,7 @@ impl<T: AsRef<TableInner>> Iterator<T> {
                 block_iterator.seek(key, SeekPos::Origin);
                 self.err = block_iterator.err.clone();
             }
-            Err(err) => self.err = Some(IteratorError::Error(err.to_string())),
+            Err(err) => self.err = Some(err.into()),
         }
     }
 
@@ -351,14 +356,14 @@ impl<T: AsRef<TableInner>> Iterator<T> {
             return;
         }
 
-        if self.block_iterator.as_ref().unwrap().data.is_empty() {
+        if self.block_iterator.is_none() {
             match self.table.as_ref().block(self.bpos, self.use_cache()) {
                 Ok(block) => {
                     let block_iterator = self.get_block_iterator(block);
                     block_iterator.seek_to_first();
                     self.err = block_iterator.err.clone();
                 }
-                Err(err) => self.err = Some(IteratorError::Error(err.to_string())),
+                Err(err) => self.err = Some(err.into()),
             }
         } else {
             let bi = self.block_iterator.as_mut().unwrap();
@@ -374,14 +379,14 @@ impl<T: AsRef<TableInner>> Iterator<T> {
     fn prev_inner(&mut self) {
         self.err = None;
 
-        if self.block_iterator.as_ref().unwrap().data.is_empty() {
+        if self.block_iterator.is_none() {
             match self.table.as_ref().block(self.bpos, self.use_cache()) {
                 Ok(block) => {
                     let block_iterator = self.get_block_iterator(block);
                     block_iterator.seek_to_last();
                     self.err = block_iterator.err.clone();
                 }
-                Err(err) => self.err = Some(IteratorError::Error(err.to_string())),
+                Err(err) => self.err = Some(err.into()),
             }
         } else {
             let bi = self.block_iterator.as_mut().unwrap();
