@@ -90,7 +90,7 @@ impl BlockIterator {
         }
 
         self.err = None;
-        let start_offset = self.entry_offsets()[i as usize] as u32;
+        let start_offset = self.entry_offsets()[i] as u32;
 
         if self.base_key.is_empty() {
             let mut base_header = Header::default();
@@ -104,7 +104,7 @@ impl BlockIterator {
         let end_offset = if self.idx + 1 == self.entry_offsets().len() {
             self.data.len()
         } else {
-            self.entry_offsets()[self.idx as usize + 1] as usize
+            self.entry_offsets()[self.idx + 1] as usize
         };
 
         let mut entry_data = self.data.slice(start_offset as usize..end_offset as usize);
@@ -147,7 +147,7 @@ impl BlockIterator {
 
         let found_entry_idx = util::search(self.entry_offsets().len(), |idx| {
             use std::cmp::Ordering::*;
-            if idx < start_index as usize {
+            if idx < start_index {
                 return false;
             }
             self.set_idx(idx);
