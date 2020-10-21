@@ -331,7 +331,7 @@ impl<T: AsRef<TableInner>> Iterator<T> {
     }
 
     // seek_for_prev will reset iterator and seek to <= key.
-    pub fn seek_for_prev(&mut self, key: &Bytes) {
+    fn seek_for_prev(&mut self, key: &Bytes) {
         self.seek_from(key, SeekPos::Origin);
         if self.key() != key {
             self.prev_inner();
@@ -428,6 +428,7 @@ impl<T: AsRef<TableInner>> Iterator<T> {
         }
     }
 
+    /// Reset the iterator to first element
     pub fn rewind(&mut self) {
         if self.opt & ITERATOR_REVERSED == 0 {
             self.seek_to_first();
@@ -436,6 +437,7 @@ impl<T: AsRef<TableInner>> Iterator<T> {
         }
     }
 
+    /// Seek to first entry >= key
     pub fn seek(&mut self, key: &Bytes) {
         if self.opt & ITERATOR_REVERSED == 0 {
             self.seek_inner(key);
