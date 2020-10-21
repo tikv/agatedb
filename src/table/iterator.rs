@@ -241,8 +241,12 @@ impl<T: AsRef<TableInner>> Iterator<T> {
     fn get_block_iterator(&mut self, block: Arc<Block>) -> &mut BlockIterator {
         if self.block_iterator.is_none() {
             self.block_iterator = Some(BlockIterator::new(block));
+            self.block_iterator.as_mut().unwrap()
+        } else {
+            let iter = self.block_iterator.as_mut().unwrap();
+            iter.set_block(block);
+            iter
         }
-        self.block_iterator.as_mut().unwrap()
     }
 
     pub fn seek_to_first(&mut self) {
