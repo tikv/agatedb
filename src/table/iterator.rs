@@ -404,6 +404,10 @@ impl<T: AsRef<TableInner>> Iterator<T> {
         value
     }
 
+    /// `next` points the iterator to next element.
+    /// Note that if the iterator becomes invalid after operation,
+    /// you must reset the iterator by using `rewind` or `seek`
+    /// before using it again.
     pub fn next(&mut self) {
         if self.opt & ITERATOR_REVERSED == 0 {
             self.next_inner();
@@ -412,6 +416,10 @@ impl<T: AsRef<TableInner>> Iterator<T> {
         }
     }
 
+    /// `prev` points the iterator to previous element.
+    /// Note that if the iterator becomes invalid after operation,
+    /// you must reset the iterator by using `rewind` or `seek`
+    /// before using it again.
     pub(crate) fn prev(&mut self) {
         if self.opt & ITERATOR_REVERSED == 0 {
             self.prev_inner();
