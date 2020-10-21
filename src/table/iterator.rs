@@ -114,6 +114,7 @@ impl BlockIterator {
         self.key.extend_from_slice(diff_key);
         self.val = entry_data.slice(header.diff as usize..);
     }
+
     /// Check if last operation of iterator is error
     /// TODO: use `Result<()>` for all iterator operation and remove this if possible
     pub fn valid(&self) -> bool {
