@@ -58,6 +58,9 @@ jobs:
           toolchain: nightly
           default: true
       - uses: actions-rs/cargo@v1
+        with:
+          command: clean
+      - uses: actions-rs/cargo@v1
         name: Running Tests with miri 🚀
         with:
           command: miri test
