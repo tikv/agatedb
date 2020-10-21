@@ -1,11 +1,17 @@
 pub(crate) mod builder;
 mod iterator;
 
+
 use crate::opt::Options;
-use bytes::Bytes;
-use proto::meta::TableIndex;
+
+use crate::Result;
+use bytes::{Buf, Bytes};
+
+
+use proto::meta::{BlockOffset, TableIndex};
 use std::fs;
-use std::path::PathBuf;
+use std::io::{Read};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -66,17 +72,17 @@ pub struct Table {
 
 impl TableInner {
     /// Create an SST from bytes data generated with table builder
-    pub fn create(path: &Path, data: Bytes, opt: Options) -> Result<TableInner> {
+    pub fn create(_path: &Path, _data: Bytes, _opt: Options) -> Result<TableInner> {
         unimplemented!()
     }
 
     /// Open an existing SST on disk
-    pub fn open(path: &Path, opt: Options) -> Result<TableInner> {
+    pub fn open(_path: &Path, _opt: Options) -> Result<TableInner> {
         unimplemented!()
     }
 
     /// Open an existing SST from data in memory
-    pub fn open_in_memory(data: Bytes, id: u64, opt: Options) -> Result<TableInner> {
+    pub fn open_in_memory(_data: Bytes, _id: u64, _opt: Options) -> Result<TableInner> {
         unimplemented!()
     }
 
@@ -88,7 +94,7 @@ impl TableInner {
         unimplemented!()
     }
 
-    fn key_splits(&mut self, n: usize, _prefix: Bytes) -> Vec<String> {
+    fn key_splits(&mut self, _n: usize, _prefix: Bytes) -> Vec<String> {
         unimplemented!()
     }
 
@@ -105,7 +111,7 @@ impl TableInner {
         self.fetch_index().offsets.get(idx)
     }
 
-    fn block(&self, idx: usize, _use_cache: bool) -> Result<Arc<Block>> {
+    fn block(&self, _idx: usize, _use_cache: bool) -> Result<Arc<Block>> {
         unimplemented!()
     }
 
@@ -179,7 +185,7 @@ impl TableInner {
         self.bytes(offset, size)
     }
 
-    fn bytes(&self, offset: usize, size: usize) -> Result<Bytes> {
+    fn bytes(&self, _offset: usize, _size: usize) -> Result<Bytes> {
         unimplemented!()
     }
 

@@ -1,6 +1,7 @@
 use super::builder::{Header, HEADER_SIZE};
-use super::Block;
+use super::{Block, TableInner};
 use crate::util::{self, KeyComparator, COMPARATOR};
+use crate::value::Value;
 use bytes::{Bytes, BytesMut};
 use std::sync::Arc;
 
