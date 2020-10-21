@@ -11,7 +11,9 @@ struct ArenaCore {
 impl Drop for ArenaCore {
     fn drop(&mut self) {
         unsafe {
-            Vec::from_raw_parts(self.ptr, 0, self.cap);
+            let ptr = self.ptr as *mut u64;
+            let cap = self.cap / 8;
+            Vec::from_raw_parts(ptr, 0, cap);
         }
     }
 }
