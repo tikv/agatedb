@@ -376,7 +376,7 @@ impl<T: AsRef<TableInner>> Iterator<T> {
             bi.next();
             if !bi.valid() {
                 self.bpos += 1;
-                bi.data = Bytes::new();
+                bi.data.clear();
                 self.next_inner();
             }
         }
@@ -408,7 +408,7 @@ impl<T: AsRef<TableInner>> Iterator<T> {
             bi.prev();
             if !bi.valid() {
                 self.bpos -= 1;
-                bi.data = Bytes::new();
+                bi.data.clear();
                 self.prev_inner();
             }
         }
