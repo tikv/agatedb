@@ -235,7 +235,7 @@ impl<T: AsRef<TableInner>> Iterator<T> {
         }
     }
 
-    pub fn reset(&mut self) {
+    fn reset(&mut self) {
         self.bpos = 0;
         self.err = None;
     }
@@ -307,17 +307,16 @@ impl<T: AsRef<TableInner>> Iterator<T> {
 
     fn seek_from(&mut self, key: &Bytes, whence: SeekPos) {
         self.err = None;
-        match whence {
-            SeekPos::Origin => self.reset(),
-            _ => {}
+        if matches!(whence, SeekPos::Origin) {
+            self.reset();
         }
 
         let idx = util::search(self.table.as_ref().offsets_length(), |idx| {
             use std::cmp::Ordering::*;
             let block_offset = self.table.as_ref().offsets(idx).unwrap();
             match COMPARATOR.compare_key(&block_offset.key, &key) {
-                Less => false,
-                _ => true,
+                Greater => true,
+                _ => false,
             }
         });
 
