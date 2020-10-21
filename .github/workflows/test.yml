@@ -54,9 +54,14 @@ jobs:
       - uses: actions-rs/toolchain@v1
         name: Setup Cargo Toolchain 🛎️
         with:
-          components: rustfmt, clippy, rust-src
+          components: rustfmt, clippy, rust-src, miri
           toolchain: nightly
           default: true
+      - uses: actions-rs/cargo@v1
+        name: Running Tests with miri 🚀
+        with:
+          command: miri test
+          args: --all-features
       - uses: actions-rs/cargo@v1
         name: Running Tests with Address Sanitizer 🚀
         with:
