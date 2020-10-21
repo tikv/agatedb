@@ -207,7 +207,7 @@ pub const ITERATOR_NOCACHE: usize = 1 << 2;
 /// At that time, we could not build an `Arc<TableInner>`.
 pub struct Iterator<T: AsRef<TableInner>> {
     table: T,
-    bpos: isize,
+    bpos: usize,
     block_iterator: Option<BlockIterator>,
     err: Option<IteratorError>,
     opt: usize,
@@ -256,11 +256,7 @@ impl<T: AsRef<TableInner>> Iterator<T> {
             return;
         }
         self.bpos = 0;
-        match self
-            .table
-            .as_ref()
-            .block(self.bpos as usize, self.use_cache())
-        {
+        match self.table.as_ref().block(self.bpos, self.use_cache()) {
             Ok(block) => {
                 let block_iterator = self.get_block_iterator(block);
                 block_iterator.seek_to_first();
@@ -276,12 +272,8 @@ impl<T: AsRef<TableInner>> Iterator<T> {
             self.err = Some(IteratorError::EOF);
             return;
         }
-        self.bpos = num_blocks as isize - 1;
-        match self
-            .table
-            .as_ref()
-            .block(self.bpos as usize, self.use_cache())
-        {
+        self.bpos = num_blocks - 1;
+        match self.table.as_ref().block(self.bpos, self.use_cache()) {
             Ok(block) => {
                 let block_iterator = self.get_block_iterator(block);
                 block_iterator.seek_to_last();
@@ -292,12 +284,8 @@ impl<T: AsRef<TableInner>> Iterator<T> {
     }
 
     fn seek_helper(&mut self, block_idx: usize, key: &Bytes) {
-        self.bpos = block_idx as isize;
-        match self
-            .table
-            .as_ref()
-            .block(self.bpos as usize, self.use_cache())
-        {
+        self.bpos = block_idx;
+        match self.table.as_ref().block(self.bpos, self.use_cache()) {
             Ok(block) => {
                 let block_iterator = self.get_block_iterator(block);
                 block_iterator.seek(key, SeekPos::Origin);
@@ -353,17 +341,13 @@ impl<T: AsRef<TableInner>> Iterator<T> {
     fn next_inner(&mut self) {
         self.err = None;
 
-        if self.bpos as usize > self.table.as_ref().offsets_length() {
+        if self.bpos > self.table.as_ref().offsets_length() {
             self.err = Some(IteratorError::EOF);
             return;
         }
 
         if self.block_iterator.as_ref().unwrap().data.is_empty() {
-            match self
-                .table
-                .as_ref()
-                .block(self.bpos as usize, self.use_cache())
-            {
+            match self.table.as_ref().block(self.bpos, self.use_cache()) {
                 Ok(block) => {
                     let block_iterator = self.get_block_iterator(block);
                     block_iterator.seek_to_first();
@@ -385,17 +369,8 @@ impl<T: AsRef<TableInner>> Iterator<T> {
     fn prev_inner(&mut self) {
         self.err = None;
 
-        if self.bpos < 0 {
-            self.err = Some(IteratorError::EOF);
-            return;
-        }
-
         if self.block_iterator.as_ref().unwrap().data.is_empty() {
-            match self
-                .table
-                .as_ref()
-                .block(self.bpos as usize, self.use_cache())
-            {
+            match self.table.as_ref().block(self.bpos, self.use_cache()) {
                 Ok(block) => {
                     let block_iterator = self.get_block_iterator(block);
                     block_iterator.seek_to_last();
@@ -407,6 +382,11 @@ impl<T: AsRef<TableInner>> Iterator<T> {
             let bi = self.block_iterator.as_mut().unwrap();
             bi.prev();
             if !bi.valid() {
+                if self.bpos == 0 {
+                    self.bpos = std::usize::MAX;
+                    self.err = Some(IteratorError::EOF);
+                    return;
+                }
                 self.bpos -= 1;
                 bi.data.clear();
                 self.prev_inner();
