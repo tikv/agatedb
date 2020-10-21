@@ -4,6 +4,7 @@ use agatedb::{Table, TableBuilder, TableOptions, Value};
 use bytes::Bytes;
 use common::rand_value;
 use criterion::{criterion_group, criterion_main, Criterion};
+use rand::Rng;
 use tempdir::TempDir;
 
 fn bench_table_builder(c: &mut Criterion) {
@@ -59,8 +60,8 @@ fn get_table_for_benchmark(count: usize) -> Table {
 
 fn bench_table(c: &mut Criterion) {
     let n = 5000000;
-    let table = get_table_for_benchmark(n);
     c.bench_function("table read", |b| {
+        let table = get_table_for_benchmark(n);
         b.iter(|| {
             let mut it = table.new_iterator(0);
             it.seek_to_first();
@@ -68,6 +69,49 @@ fn bench_table(c: &mut Criterion) {
                 it.next();
             }
         });
+    });
+
+    let builder_opts = TableOptions {
+        block_size: 4 * 1024,
+        bloom_false_positive: 0.01,
+        table_size: 0,
+    };
+
+    c.bench_function("table read and build", |b| {
+        let table = get_table_for_benchmark(n);
+        b.iter(|| {
+            let mut it = table.new_iterator(0);
+            let mut builder = TableBuilder::new(builder_opts.clone());
+            it.seek_to_first();
+            while it.valid() {
+                builder.add(&Bytes::copy_from_slice(it.key()), it.value(), 0);
+                it.next();
+            }
+            builder.finish()
+        });
+    });
+
+    // TODO: table merge read
+
+    let mut rng = rand::thread_rng();
+    c.bench_function("table random read", |b| {
+        let table = get_table_for_benchmark(n);
+        let mut it = table.new_iterator(0);
+        b.iter_batched(
+            || {
+                let i = rng.gen_range(0, n);
+                (
+                    Bytes::from(format!("{:016x}", i)),
+                    Bytes::from(i.to_string()),
+                )
+            },
+            |(k, v)| {
+                it.seek(&k);
+                assert!(it.valid());
+                assert_eq!(it.value().value, v)
+            },
+            criterion::BatchSize::SmallInput,
+        );
     });
 }
 

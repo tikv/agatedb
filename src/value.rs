@@ -3,11 +3,11 @@ use std::mem::MaybeUninit;
 
 #[derive(Default, Debug, Clone)]
 pub struct Value {
-    pub(crate) meta: u8,
-    pub(crate) user_meta: u8,
-    pub(crate) expires_at: u64,
-    pub(crate) value: Bytes,
-    pub(crate) version: u64,
+    pub meta: u8,
+    pub user_meta: u8,
+    pub expires_at: u64,
+    pub value: Bytes,
+    pub version: u64,
 }
 
 #[inline]
