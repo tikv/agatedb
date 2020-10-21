@@ -117,7 +117,7 @@ fn bench_table(c: &mut Criterion) {
 
 criterion_group! {
     name = benches_table;
-    config = Criterion::default().sample_size(20);
+    config = Criterion::default();
     targets = bench_table_builder, bench_table
 }
 
