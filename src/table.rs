@@ -1,16 +1,13 @@
 pub(crate) mod builder;
 mod iterator;
 
-
 use crate::opt::Options;
 
 use crate::Result;
-use bytes::{Buf, Bytes};
-
+use bytes::Bytes;
 
 use proto::meta::{BlockOffset, TableIndex};
 use std::fs;
-use std::io::{Read};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
