@@ -470,7 +470,6 @@ impl Table {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -520,7 +519,6 @@ mod tests {
     fn build_table(mut kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> Table {
         let mut builder = Builder::new(opts.clone());
         let tmp_dir = TempDir::new("agatedb").unwrap();
-        // let tmp_dir = Path::new("data/");
         let filename = tmp_dir.path().join("1.sst".to_string());
 
         kv_pairs.sort_by(|x, y| x.0.cmp(&y.0));
@@ -533,6 +531,9 @@ mod tests {
         Table::create(&filename, data, opts).unwrap()
         // you can also test in-memory table
         // Table::open_in_memory(data, 233, opts).unwrap()
+        // `tmp_dir` will be dropped and the temp folder will be deleted
+        // when we return from this function. However, as we saves file
+        // descriptor to the file, we could still safely access that file.
     }
 
     #[test]
