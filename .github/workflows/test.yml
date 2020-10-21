@@ -63,8 +63,8 @@ jobs:
       - uses: actions-rs/cargo@v1
         name: Running Tests with miri 🚀
         with:
-          command: miri test
-          args: --all-features
+          command: miri
+          args: test --all-features
       - uses: actions-rs/cargo@v1
         name: Running Tests with Address Sanitizer 🚀
         with:
