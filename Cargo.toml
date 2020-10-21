@@ -32,6 +32,10 @@ members = [
 name = "bench"
 harness = false
 
+[[bench]]
+name = "bench_table"
+harness = false
+
 [profile.bench]
 opt-level = 3
 debug = false
