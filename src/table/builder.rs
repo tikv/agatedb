@@ -22,7 +22,7 @@ impl Header {
         bytes.put_u32_le((self.overlap as u32) << 16 | self.diff as u32);
     }
 
-    pub fn decode(&mut self, mut bytes: &[u8]) {
+    pub fn decode(&mut self, bytes: &mut Bytes) {
         let h = bytes.get_u32_le();
         self.overlap = (h >> 16) as u16;
         self.diff = h as u16;
