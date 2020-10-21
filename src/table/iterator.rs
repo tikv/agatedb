@@ -233,6 +233,8 @@ impl<T: AsRef<TableInner>> Iterator<T> {
         self.err = None;
     }
 
+    /// Check if last operation of iterator is error
+    /// TODO: use `Result<()>` for all iterator operation and remove this if possible
     pub fn valid(&self) -> bool {
         self.err.is_none()
     }
@@ -387,6 +389,8 @@ impl<T: AsRef<TableInner>> Iterator<T> {
             if !bi.valid() {
                 if self.bpos == 0 {
                     self.bpos = std::usize::MAX;
+                    // At this point, the iterator must be reset before using.
+                    // If the user calls `next`, `bpos` will overflow and panic.
                     self.err = Some(IteratorError::EOF);
                     return;
                 }
