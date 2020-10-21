@@ -65,6 +65,18 @@ impl BlockIterator {
         }
     }
 
+    /// Replace block inside iterator and reset the iterator
+    pub fn set_block(&mut self, block: Arc<Block>) {
+        self.err = None;
+        self.idx = 0;
+        self.base_key.clear();
+        self.perv_overlap = 0;
+        self.key.clear();
+        self.val.clear();
+        self.data = block.data.slice(..block.entries_index_start);
+        self.block = block;
+    }
+
     #[inline]
     fn entry_offsets(&self) -> &[u32] {
         &self.block.entry_offsets
