@@ -201,7 +201,7 @@ impl BlockIterator {
         }
     }
 
-    pub fn require_load(iter: &Option<Self>) -> bool {
+    pub fn is_ready(iter: &Option<Self>) -> bool {
         match iter {
             Some(iter) => iter.data.is_empty(),
             None => true,
@@ -357,12 +357,12 @@ impl<T: AsRef<TableInner>> Iterator<T> {
     fn next_inner(&mut self) {
         self.err = None;
 
-        if self.bpos > self.table.as_ref().offsets_length() {
+        if self.bpos >= self.table.as_ref().offsets_length() {
             self.err = Some(IteratorError::EOF);
             return;
         }
 
-        if BlockIterator::require_load(&self.block_iterator) {
+        if BlockIterator::is_ready(&self.block_iterator) {
             match self.table.as_ref().block(self.bpos, self.use_cache()) {
                 Ok(block) => {
                     let block_iterator = self.get_block_iterator(block);
@@ -385,7 +385,12 @@ impl<T: AsRef<TableInner>> Iterator<T> {
     fn prev_inner(&mut self) {
         self.err = None;
 
-        if BlockIterator::require_load(&self.block_iterator) {
+        if self.bpos == std::usize::MAX {
+            self.err = Some(IteratorError::EOF);
+            return;
+        }
+
+        if BlockIterator::is_ready(&self.block_iterator) {
             match self.table.as_ref().block(self.bpos, self.use_cache()) {
                 Ok(block) => {
                     let block_iterator = self.get_block_iterator(block);
@@ -398,14 +403,8 @@ impl<T: AsRef<TableInner>> Iterator<T> {
             let bi = self.block_iterator.as_mut().unwrap();
             bi.prev();
             if !bi.valid() {
-                if self.bpos == 0 {
-                    self.bpos = std::usize::MAX;
-                    // At this point, the iterator must be reset before using.
-                    // If the user calls `next`, `bpos` will overflow and panic.
-                    self.err = Some(IteratorError::EOF);
-                    return;
-                }
-                self.bpos -= 1;
+                self.bpos = self.bpos.wrapping_sub(1);
+                // bpos will become -1 or usize::MAX if it moves before zero position.
                 bi.data.clear();
                 self.prev_inner();
             }
