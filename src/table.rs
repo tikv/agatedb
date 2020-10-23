@@ -2,10 +2,11 @@ pub(crate) mod builder;
 mod iterator;
 
 use crate::opt::Options;
+use crate::Result;
 use bytes::Bytes;
-use proto::meta::TableIndex;
+use proto::meta::{BlockOffset, TableIndex};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -62,6 +63,134 @@ pub struct TableInner {
 
 pub struct Table {
     inner: Arc<TableInner>,
+}
+
+impl TableInner {
+    /// Create an SST from bytes data generated with table builder
+    pub fn create(_path: &Path, _data: Bytes, _opt: Options) -> Result<TableInner> {
+        unimplemented!()
+    }
+
+    /// Open an existing SST on disk
+    pub fn open(_path: &Path, _opt: Options) -> Result<TableInner> {
+        unimplemented!()
+    }
+
+    /// Open an existing SST from data in memory
+    pub fn open_in_memory(_data: Bytes, _id: u64, _opt: Options) -> Result<TableInner> {
+        unimplemented!()
+    }
+
+    fn init_biggest_and_smallest(&mut self) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn init_index(&mut self) -> Result<&BlockOffset> {
+        unimplemented!()
+    }
+
+    fn key_splits(&mut self, _n: usize, _prefix: Bytes) -> Vec<String> {
+        unimplemented!()
+    }
+
+    fn fetch_index(&self) -> &TableIndex {
+        return &self.index;
+        // TODO: encryption
+    }
+
+    fn offsets_length(&self) -> usize {
+        self.fetch_index().offsets.len()
+    }
+
+    fn offsets(&self, idx: usize) -> Option<&BlockOffset> {
+        self.fetch_index().offsets.get(idx)
+    }
+
+    fn block(&self, _idx: usize, _use_cache: bool) -> Result<Arc<Block>> {
+        unimplemented!()
+    }
+
+    fn index_key(&self) -> u64 {
+        self.id
+    }
+
+    /// Get number of keys in SST
+    pub fn key_count(&self) -> u32 {
+        self.fetch_index().key_count
+    }
+
+    /// Get size of index
+    pub fn index_size(&self) -> usize {
+        self.index_len
+    }
+
+    /// Get size of bloom filter
+    pub fn bloom_filter_size(&self) -> usize {
+        self.fetch_index().bloom_filter.len()
+    }
+
+    /// Get size of SST
+    pub fn size(&self) -> u64 {
+        self.table_size as u64
+    }
+
+    /// Get smallest key of current table
+    pub fn smallest(&self) -> &Bytes {
+        &self.smallest
+    }
+
+    /// Get biggest key of current table
+    pub fn biggest(&self) -> &Bytes {
+        &self.biggest
+    }
+
+    /// Get filename of current SST. Returns `<memtable>` if in-memory.
+    pub fn filename(&self) -> String {
+        match &self.file {
+            MmapFile::Memory { .. } => "<memtable>".to_string(),
+            MmapFile::File { name, .. } => name.to_string_lossy().into_owned(),
+        }
+    }
+
+    /// Get SST id
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// Check if the table doesn't contain an entry with bloom filter.
+    /// Always return false if no bloom filter is present in SST.
+    pub fn does_not_have(_hash: u32) -> bool {
+        false
+        // TODO: add bloom filter
+    }
+
+    fn read_bloom_filter(&self) {
+        unimplemented!()
+    }
+
+    pub(crate) fn read_table_index(&self) -> Result<TableIndex> {
+        unimplemented!()
+    }
+
+    fn verify_checksum(&self) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn read(&self, offset: usize, size: usize) -> Result<Bytes> {
+        self.bytes(offset, size)
+    }
+
+    fn bytes(&self, _offset: usize, _size: usize) -> Result<Bytes> {
+        unimplemented!()
+    }
+
+    fn is_in_memory(&self) -> bool {
+        self.file.is_in_memory()
+    }
+
+    fn max_version(&self) -> u64 {
+        unimplemented!()
+    }
 }
 
 /*
