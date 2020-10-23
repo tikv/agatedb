@@ -434,18 +434,6 @@ impl<T: AsRef<TableInner>> Iterator<T> {
         }
     }
 
-    /// `prev` points the iterator to previous element.
-    /// Note that if the iterator becomes invalid after operation,
-    /// you must reset the iterator by using `rewind` or `seek`
-    /// before using it again.
-    pub(crate) fn prev(&mut self) {
-        if self.opt & ITERATOR_REVERSED == 0 {
-            self.prev_inner();
-        } else {
-            self.next_inner();
-        }
-    }
-
     /// Reset the iterator to first element
     pub fn rewind(&mut self) {
         if self.opt & ITERATOR_REVERSED == 0 {
