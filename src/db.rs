@@ -7,8 +7,15 @@ use std::path::{Path, PathBuf};
 use crate::util::make_comparator;
 use std::sync::Arc;
 use skiplist::Skiplist;
+use std::collections::VecDeque;
+use std::sync::RwLock;
 
+pub struct MemTables {
+    mut_table: MemTable,
+    imm_table: VecDeque<MemTable>,
+}
 pub struct Core {
+    mt: RwLock<MemTables>,
     opts: AgateOptions
 }
 
