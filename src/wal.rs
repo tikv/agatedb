@@ -6,6 +6,7 @@ use crate::util::binary::{
 use bytes::{BufMut, Bytes, BytesMut};
 use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
+use crate::structs::Entry;
 
 /// `Header` stores metadata of an entry in WAL and in value log.
 #[derive(Default, Debug, PartialEq)]
@@ -77,14 +78,18 @@ impl Header {
 }
 
 pub struct Wal {
-    f: File,
+    file_id: usize,
     path: PathBuf,
 }
 
 impl Wal {
-    pub fn open(path: PathBuf) -> Result<Wal> {
+    pub fn open(file_id: usize, path: PathBuf) -> Result<Wal> {
         let f = OpenOptions::new().append(true).create(true).open(&path)?;
-        Ok(Wal { f, path })
+        Ok(Wal { file_id, path })
+    }
+
+    pub fn write_entry(&mut self, entry: Entry) -> Result<()> {
+        unimplemented!()
     }
 }
 

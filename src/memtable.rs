@@ -1,44 +1,29 @@
-use bytes::Bytes;
-use skiplist::{FixedLengthSuffixComparator as Flsc, Skiplist};
+use crate::format::get_ts;
+use crate::structs::Entry;
+use crate::util::{make_comparator, Comparator};
+use crate::value::Value;
+use crate::wal::Wal;
+use crate::AgateOptions;
+use crate::Result;
+use bytes::{Bytes, BytesMut};
+use skiplist::Skiplist;
 use std::collections::VecDeque;
 use std::mem::{self, ManuallyDrop, MaybeUninit};
+use std::path::{Path, PathBuf};
 use std::ptr;
 
-pub struct MemTableView {
-    tables: ManuallyDrop<[Skiplist<Flsc>; 20]>,
-    len: usize,
-}
-
-impl MemTableView {
-    pub fn get(&self, key: &[u8]) -> Option<&Bytes> {
-        for i in 0..self.len {
-            let res = self.tables[i].get(key);
-            if res.is_some() {
-                return res;
-            }
-        }
-        None
-    }
-}
-
-impl Drop for MemTableView {
-    fn drop(&mut self) {
-        for i in 0..self.len {
-            unsafe {
-                ptr::drop_in_place(&mut self.tables[i]);
-            }
-        }
-    }
-}
-
 pub struct MemTable {
-    mutable: Skiplist<Flsc>,
-    immutable: VecDeque<Skiplist<Flsc>>,
+    pub(crate) skl: Skiplist<Comparator>,
+    pub(crate) wal: Option<Wal>,
+    pub(crate) max_version: u64,
+    pub(crate) opt: AgateOptions,
+    pub buf: BytesMut,
 }
 
 impl MemTable {
+    /*
     pub fn with_capacity(table_size: u32, max_count: usize) -> MemTable {
-        let c = Flsc::new(8);
+        let c = make_comparator();
         MemTable {
             mutable: Skiplist::with_capacity(c, table_size),
             immutable: VecDeque::with_capacity(max_count - 1),
@@ -58,5 +43,42 @@ impl MemTable {
             tables: unsafe { ManuallyDrop::new(mem::transmute(array)) },
             len: self.immutable.len() + 1,
         }
+    }
+    */
+
+    pub fn new(skl: Skiplist<Comparator>, wal: Option<Wal>, opt: AgateOptions) -> Self {
+        Self {
+            skl,
+            wal,
+            opt,
+            max_version: 0,
+            buf: BytesMut::new(),
+        }
+    }
+
+    pub fn update_skip_list(&mut self) {
+        unimplemented!()
+    }
+
+    pub fn put(&mut self, key: Bytes, value: Value) -> Result<()> {
+        if let Some(ref mut wal) = self.wal {
+            let entry = Entry::new(
+                key.clone(),
+                value.value.clone(),
+                value.expires_at,
+                value.version,
+                value.user_meta,
+                value.meta,
+            );
+            wal.write_entry(entry)?;
+        }
+        value.encode(&mut self.buf);
+        let ts = get_ts(&key);
+        self.skl.put(key, self.buf.clone());
+        if ts > self.max_version {
+            self.max_version = ts;
+        }
+
+        Ok(())
     }
 }
