@@ -1,4 +1,4 @@
-use super::memtable::MemTable;
+use super::memtable::{MemTable, MemTables, MemTablesView};
 use super::{format, Error, Result};
 use crate::wal::Wal;
 use bytes::Bytes;
@@ -9,11 +9,8 @@ use std::sync::Arc;
 use skiplist::Skiplist;
 use std::collections::VecDeque;
 use std::sync::RwLock;
+use crate::value::Value;
 
-pub struct MemTables {
-    mut_table: MemTable,
-    imm_table: VecDeque<MemTable>,
-}
 pub struct Core {
     mt: RwLock<MemTables>,
     opts: AgateOptions
@@ -123,5 +120,28 @@ impl Core {
         mem_table.update_skip_list();
 
         Ok(mem_table)
+    }
+
+    pub fn is_closed(&self) -> bool {
+        // TODO: check db closed
+        false
+    }
+
+    pub(crate) fn get(&self, key: &[u8]) -> Result<Value> {
+        if self.is_closed() {
+            return Err(Error::DBClosed);
+        }
+
+        let view = self.mt.read()?.view();
+        let mut value = Value::default();
+
+        for table in view.tables() {
+            if let Some(value_data) = table.get(key) {
+                value.decode(value_data);
+
+            }
+        }
+
+        unimplemented!(); // Should get from level controller
     }
 }

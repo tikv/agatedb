@@ -12,6 +12,8 @@ use std::mem::{self, ManuallyDrop, MaybeUninit};
 use std::path::{Path, PathBuf};
 use std::ptr;
 
+const MEMTABLE_VIEW_MAX: usize = 20;
+
 pub struct MemTable {
     pub(crate) skl: Skiplist<Comparator>,
     pub(crate) wal: Option<Wal>,
@@ -80,5 +82,48 @@ impl MemTable {
         }
 
         Ok(())
+    }
+}
+
+pub struct MemTablesView {
+    tables: ManuallyDrop<[Skiplist<Comparator>; MEMTABLE_VIEW_MAX]>,
+    len: usize,
+}
+
+impl MemTablesView {
+    pub fn tables(&self) -> &[Skiplist<Comparator>] {
+        &self.tables[0..self.len]
+    }
+}
+
+impl Drop for MemTablesView {
+    fn drop(&mut self) {
+        for i in 0..self.len {
+            unsafe {
+                ptr::drop_in_place(&mut self.tables[i]);
+            }
+        }
+    }
+}
+
+pub struct MemTables {
+    mutable: Skiplist<Comparator>,
+    immutable: VecDeque<Skiplist<Comparator>>,
+}
+
+impl MemTables {
+    pub fn view(&self) -> MemTablesView {
+        // Maybe flush is better.
+        assert!(self.immutable.len() + 1 <= MEMTABLE_VIEW_MAX);
+        let mut array: [MaybeUninit<Skiplist<Comparator>>; MEMTABLE_VIEW_MAX] =
+            unsafe { MaybeUninit::uninit().assume_init() };
+        array[0] = MaybeUninit::new(self.mutable.clone());
+        for (i, s) in self.immutable.iter().enumerate() {
+            array[i + 1] = MaybeUninit::new(s.clone());
+        }
+        MemTablesView {
+            tables: unsafe { ManuallyDrop::new(mem::transmute(array)) },
+            len: self.immutable.len() + 1,
+        }
     }
 }
