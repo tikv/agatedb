@@ -6,7 +6,6 @@ use crate::util::binary::{
 use bytes::{BufMut, Bytes, BytesMut};
 use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
-use crate::structs::Entry;
 
 /// `Header` stores metadata of an entry in WAL and in value log.
 #[derive(Default, Debug, PartialEq)]

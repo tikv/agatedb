@@ -1,8 +1,8 @@
 use std::io;
 use std::result;
 
-use thiserror::Error;
 use std::sync::PoisonError;
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -27,7 +27,7 @@ pub enum Error {
     #[error("Database Closed")]
     DBClosed,
     #[error("Lock Poison")]
-    PoisonError(String)
+    PoisonError(String),
 }
 
 impl From<io::Error> for Error {
@@ -44,7 +44,7 @@ impl From<prost::DecodeError> for Error {
     }
 }
 
-impl <T: Sized> From<PoisonError<T>> for Error {
+impl<T: Sized> From<PoisonError<T>> for Error {
     #[inline]
     fn from(e: PoisonError<T>) -> Error {
         Error::PoisonError(e.to_string())

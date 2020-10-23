@@ -127,3 +127,50 @@ impl MemTables {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use skiplist::FixedLengthSuffixComparator;
+
+    fn get_comparator() -> FixedLengthSuffixComparator {
+        FixedLengthSuffixComparator::new(0)
+    }
+    fn get_skip_list(data: Vec<(String, String)>) -> Skiplist<FixedLengthSuffixComparator> {
+        let skl = Skiplist::with_capacity(get_comparator(), 4 * 1024 * 1024);
+        for (k, v) in data {
+            assert!(skl.put(k, v).is_none());
+        }
+        skl
+    }
+
+    #[test]
+    fn test_memtable_put() {
+        let mut data = vec![];
+        for i in 0..1000 {
+            data.push((i.to_string(), i.to_string()));
+        }
+        let (d1, dx) = data.split_at(250);
+        let (d2, dx) = dx.split_at(250);
+        let (d3, dx) = dx.split_at(250);
+        let (d4, _) = dx.split_at(250);
+        let mem_tables = MemTables {
+            mutable: get_skip_list(d1.to_vec()),
+            immutable: VecDeque::from(
+                [d2, d3, d4]
+                    .iter()
+                    .map(|x| get_skip_list(x.to_vec()))
+                    .collect::<Vec<Skiplist<FixedLengthSuffixComparator>>>(),
+            ),
+        };
+        let view = mem_tables.view();
+        for k in 0..4 {
+            for i in k * 250..(k + 1) * 250 {
+                assert_eq!(
+                    view.tables()[k].get(i.to_string().as_bytes()),
+                    Some(&Bytes::from(i.to_string()))
+                );
+            }
+        }
+    }
+}

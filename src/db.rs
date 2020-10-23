@@ -1,19 +1,20 @@
 use super::memtable::{MemTable, MemTables, MemTablesView};
 use super::{format, Error, Result};
+use crate::format::get_ts;
+use crate::util::make_comparator;
+use crate::value::Value;
 use crate::wal::Wal;
 use bytes::Bytes;
-use std::fs;
-use std::path::{Path, PathBuf};
-use crate::util::make_comparator;
-use std::sync::Arc;
 use skiplist::Skiplist;
 use std::collections::VecDeque;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::RwLock;
-use crate::value::Value;
 
 pub struct Core {
     mt: RwLock<MemTables>,
-    opts: AgateOptions
+    opts: AgateOptions,
 }
 
 #[derive(Clone)]
@@ -43,7 +44,7 @@ pub struct AgateOptions {
     pub table_size: u32,
     pub max_table_count: usize,
     pub max_table_size: u64,
-    pub in_memory: bool
+    pub in_memory: bool,
 }
 
 impl AgateOptions {
@@ -93,13 +94,14 @@ impl AgateOptions {
     */
 }
 
-
 impl Core {
     fn memtable_file_path(base_path: &Path, file_id: usize) -> PathBuf {
-        base_path.to_path_buf().join(format!("{:05}{}", file_id, MEMTABLE_FILE_EXT))
+        base_path
+            .to_path_buf()
+            .join(format!("{:05}{}", file_id, MEMTABLE_FILE_EXT))
     }
 
-    fn arena_size(&self) -> u64{
+    fn arena_size(&self) -> u64 {
         self.opts.max_table_size as u64
     }
 
@@ -133,15 +135,28 @@ impl Core {
         }
 
         let view = self.mt.read()?.view();
-        let mut value = Value::default();
+        let mut max_value = Value::default();
+
+        let version = get_ts(key);
 
         for table in view.tables() {
+            let mut value = Value::default();
+
             if let Some(value_data) = table.get(key) {
                 value.decode(value_data);
-
+                if value.meta == 0 && value.value.is_empty() {
+                    continue;
+                }
+                if value.version == version {
+                    return Ok(value);
+                }
+                if max_value.version < value.version {
+                    max_value = value;
+                }
             }
         }
 
+        // max_value will be used in level controller
         unimplemented!(); // Should get from level controller
     }
 }
