@@ -579,7 +579,7 @@ mod tests {
             assert!(it.valid());
             assert_eq!(it.value().value, (n - 1).to_string());
             assert_eq!(it.value().meta, b'A');
-            it.prev();
+            it.prev_inner();
             assert!(it.valid());
             assert_eq!(it.value().value, (n - 2).to_string());
             assert_eq!(it.value().meta, b'A');
@@ -672,13 +672,13 @@ mod tests {
             assert!(!it.valid());
 
             for i in (0..n).rev() {
-                it.prev();
+                it.prev_inner();
                 assert!(it.valid());
                 let v = it.value();
                 assert_eq!(i.to_string(), v.value);
                 assert_eq!(b'A', v.meta);
             }
-            it.prev();
+            it.prev_inner();
             assert!(!it.valid())
         }
     }
@@ -718,13 +718,13 @@ mod tests {
         assert!(it.valid());
         assert_eq!(it.key(), &seek);
 
-        it.prev();
-        it.prev();
+        it.prev_inner();
+        it.prev_inner();
         assert!(it.valid());
         assert_eq!(user_key(it.key()), &key(b"key", 1008)[..]);
 
-        it.next();
-        it.next();
+        it.next_inner();
+        it.next_inner();
         assert!(it.valid());
         assert_eq!(user_key(it.key()), &key(b"key", 1010)[..]);
 
@@ -732,7 +732,7 @@ mod tests {
         assert!(it.valid());
         assert_eq!(user_key(it.key()), &key(b"key", 2000)[..]);
 
-        it.prev();
+        it.prev_inner();
         assert!(it.valid());
         assert_eq!(user_key(it.key()), &key(b"key", 1999)[..]);
 
