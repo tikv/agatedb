@@ -9,6 +9,55 @@ pub struct Entry {
     pub meta: u8,
 }
 
+fn varint_len(l: usize) -> usize {
+    if l < 0x80 {
+        1
+    } else if l < (1 << 14) {
+        2
+    } else if l < (1 << 21) {
+        3
+    } else if l < (1 << 28) {
+        4
+    } else if l < (1usize << 35) {
+        5
+    } else if l < (1usize << 42) {
+        6
+    } else if l < (1usize << 49) {
+        7
+    } else if l < (1usize << 56) {
+        8
+    } else if l < (1usize << 63) {
+        9
+    } else {
+        10
+    }
+}
+
+unsafe fn encode_varint_uncheck(bytes: &mut [MaybeUninit<u8>], mut u: u64) -> usize {
+    let mut p = bytes.as_mut_ptr();
+    let mut c = 0;
+    while u >= 0x80 {
+        (*(&mut *p).as_mut_ptr()) = (u as u8 & 0x7f) | 0x80;
+        p = p.add(1);
+        u >>= 7;
+        c += 1;
+    }
+    (*(&mut *p).as_mut_ptr()) = u as u8;
+    c + 1
+}
+
+unsafe fn decode_varint_uncheck(bytes: &[u8]) -> (u64, usize) {
+    let mut a = 0;
+    let mut p = bytes.as_ptr();
+    let mut c = 0;
+    while *p >= 0x80 {
+        a = (a << 7) | (*p & 0x7f) as u64;
+        p = p.add(1);
+        c += 1;
+    }
+    ((a << 7) | (*p) as u64, c + 1)
+}
+
 impl Entry {
     pub fn new(key: Bytes, value: Bytes) -> Entry {
         Entry {

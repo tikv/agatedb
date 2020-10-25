@@ -226,9 +226,7 @@ mod tests {
             let k = key_with_ts(format!("{:016x}", i).as_str(), (i + 1) as u64);
             let v = Bytes::from(i.to_string());
             let vs = Value::new(v);
-            if i == 0 {
-                block_first_keys.push(k.clone());
-            } else if builder.should_finish_block(&k, &vs) {
+            if i == 0 || builder.should_finish_block(&k, &vs) {
                 block_first_keys.push(k.clone());
             }
             builder.add(&k, vs, 0);

@@ -47,7 +47,7 @@ impl MemTable {
 
     pub fn view(&self) -> MemTableView {
         // Maybe flush is better.
-        assert!(self.immutable.len() + 1 <= 20);
+        assert!(self.immutable.len() < 20);
         let mut array: [MaybeUninit<Skiplist<Flsc>>; 20] =
             unsafe { MaybeUninit::uninit().assume_init() };
         array[0] = MaybeUninit::new(self.mutable.clone());
