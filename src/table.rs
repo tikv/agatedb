@@ -220,7 +220,7 @@ impl TableInner {
     }
 
     fn fetch_index(&self) -> &TableIndex {
-        return &self.index;
+        &self.index
         // TODO: encryption
     }
 

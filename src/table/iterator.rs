@@ -181,7 +181,6 @@ impl BlockIterator {
         if self.entry_offsets().is_empty() {
             self.idx = std::usize::MAX;
             self.err = Some(IteratorError::EOF);
-            return;
         } else {
             self.set_idx(self.entry_offsets().len() - 1);
         }
@@ -195,7 +194,6 @@ impl BlockIterator {
         if self.idx == 0 {
             self.idx = std::usize::MAX;
             self.err = Some(IteratorError::EOF);
-            return;
         } else {
             self.set_idx(self.idx - 1);
         }

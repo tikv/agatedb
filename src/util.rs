@@ -29,10 +29,8 @@ pub fn bytes_diff<'a, 'b>(base: &'a [u8], target: &'b [u8]) -> &'b [u8] {
             }
             i += 8;
         }
-        if i + 4 <= end {
-            if u32(base.as_ptr().add(i)) == u32(target.as_ptr().add(i)) {
-                i += 4;
-            }
+        if i + 4 <= end && (u32(base.as_ptr().add(i)) == u32(target.as_ptr().add(i))) {
+            i += 4;
         }
         while i < end {
             if base.get_unchecked(i) != target.get_unchecked(i) {
@@ -45,12 +43,12 @@ pub fn bytes_diff<'a, 'b>(base: &'a [u8], target: &'b [u8]) -> &'b [u8] {
 }
 
 /// simple rewrite of golang sort.Search
-pub fn search<F>(n: usize, mut f: F) -> usize
+pub fn search<F>(len: usize, mut f: F) -> usize
 where
     F: FnMut(usize) -> bool,
 {
     let mut i = 0;
-    let mut j = n;
+    let mut j = len;
     while i < j {
         let h = (i + j) / 2;
         if !f(h) {

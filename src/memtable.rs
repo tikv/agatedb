@@ -87,8 +87,8 @@ impl MemTables {
     /// Get view of all current memtables
     pub fn view(&self) -> MemTablesView {
         // Maybe flush is better.
-        assert!(self.immutable.len() + 1 <= MEMTABLE_VIEW_MAX);
-        let mut array: [MaybeUninit<Skiplist<Comparator>>; MEMTABLE_VIEW_MAX] =
+        assert!(self.immutable.len() < 20);
+        let mut array: [MaybeUninit<Skiplist<Flsc>>; 20] =
             unsafe { MaybeUninit::uninit().assume_init() };
         array[0] = MaybeUninit::new(self.mutable.skl.clone());
         for (i, s) in self.immutable.iter().enumerate() {
