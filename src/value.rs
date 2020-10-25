@@ -3,9 +3,6 @@ use crate::entry::EntryRef;
 use crate::wal::Header;
 use crate::Result;
 use bytes::{BufMut, Bytes, BytesMut};
-use std::io::BufReader;
-use std::io::{Read, Seek};
-use std::mem::MaybeUninit;
 
 pub const VALUE_DELETE: u8 = 1 << 0;
 pub const VALUE_POINTER: u8 = 1 << 1;
@@ -127,7 +124,7 @@ impl Value {
     }
 
     pub fn encode(&self, buf: &mut BytesMut) {
-        let mut arr: [u8; 12] = unsafe { MaybeUninit::uninit().assume_init() };
+        let mut arr: [u8; 12] = [0; 12];
         arr[0] = self.meta;
         arr[1] = self.user_meta;
         let written = encode_var(&mut arr[2..], self.expires_at);
