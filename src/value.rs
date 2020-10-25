@@ -1,5 +1,4 @@
 use bytes::{BufMut, Bytes, BytesMut};
-use std::mem::MaybeUninit;
 
 #[derive(Default, Debug, Clone)]
 pub struct Value {
@@ -104,7 +103,7 @@ impl Value {
     }
 
     pub fn encode(&self, buf: &mut BytesMut) {
-        let mut arr: [u8; 12] = unsafe { MaybeUninit::uninit().assume_init() };
+        let mut arr: [u8; 12] = [0; 12];
         arr[0] = self.meta;
         arr[1] = self.user_meta;
         let written = encode_var(&mut arr[2..], self.expires_at);
