@@ -146,7 +146,7 @@ impl TableInner {
 
     fn init_biggest_and_smallest(&mut self) -> Result<()> {
         let ko = self.init_index()?;
-        self.smallest = Bytes::copy_from_slice(&ko.key);
+        self.smallest = Bytes::from(ko.key.clone());
         let mut it = TableIterator::new(&self, ITERATOR_REVERSED | ITERATOR_NOCACHE);
         it.rewind();
         if !it.valid() {
@@ -166,11 +166,6 @@ impl TableInner {
         read_pos -= 4;
         let mut buf = self.read(read_pos, 4)?;
         let checksum_len = buf.get_u32() as usize;
-        if (checksum_len as i32) < 0 {
-            return Err(Error::TableRead(
-                "checksum length less than zero".to_string(),
-            ));
-        }
 
         // read checksum
         read_pos -= checksum_len;
@@ -363,7 +358,6 @@ impl TableInner {
                 file.seek(std::io::SeekFrom::Start(offset as u64))?;
                 let mut buf = vec![0; size];
                 file.read_exact(&mut buf)?;
-                assert_eq!(buf.len(), size);
                 Ok(Bytes::from(buf))
             }
         }
@@ -413,7 +407,7 @@ impl Block {
     }
 
     fn verify_checksum(&self) -> Result<()> {
-        let chksum = prost::Message::decode(self.data.clone())?;
+        let chksum = prost::Message::decode(self.checksum.clone())?;
         checksum::verify_checksum(&self.data, &chksum)
     }
 }
