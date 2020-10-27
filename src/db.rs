@@ -16,6 +16,7 @@ use std::sync::RwLock;
 pub struct Core {
     mt: RwLock<MemTables>,
     opts: AgateOptions,
+    next_mem_fid: usize,
 }
 
 #[derive(Clone)]
@@ -38,96 +39,153 @@ impl Agate {
     */
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct AgateOptions {
     pub create_if_not_exists: bool,
-    pub wal_path: Option<PathBuf>,
-    pub table_size: u32,
-    pub max_table_count: usize,
-    pub max_table_size: u64,
+    pub num_memtables: usize,
+    pub mem_table_size: u64,
     pub in_memory: bool,
     pub sync_writes: bool,
+    pub path: PathBuf,
+}
+
+impl Default for AgateOptions {
+    fn default() -> Self {
+        Self {
+            create_if_not_exists: false,
+            path: PathBuf::new(),
+            mem_table_size: 64 << 20,
+            num_memtables: 20,
+            in_memory: false,
+            sync_writes: false,
+        }
+        // TODO: add other options
+    }
 }
 
 impl AgateOptions {
-    /*
     pub fn create(&mut self) -> &mut AgateOptions {
         self.create_if_not_exists = true;
         self
     }
 
-    pub fn wal_path<P: Into<PathBuf>>(&mut self, p: P) -> &mut AgateOptions {
-        self.wal_path = Some(p.into());
+    pub fn path<P: Into<PathBuf>>(&mut self, p: P) -> &mut AgateOptions {
+        self.path = p.into();
         self
     }
 
-    pub fn table_size(&mut self, size: u32) -> &mut AgateOptions {
-        self.table_size = size;
+    pub fn num_memtables(&mut self, num_memtables: usize) -> &mut AgateOptions {
+        self.num_memtables = num_memtables;
         self
     }
 
-    pub fn max_table_count(&mut self, count: usize) -> &mut AgateOptions {
-        self.max_table_count = count;
+    pub fn in_memory(&mut self, in_memory: bool) -> &mut AgateOptions {
+        self.in_memory = in_memory;
         self
+    }
+
+    pub fn sync_writes(&mut self, sync_writes: bool) -> &mut AgateOptions {
+        self.sync_writes = sync_writes;
+        self
+    }
+
+    fn fix_options(&mut self) -> Result<()> {
+        if self.in_memory {
+            // TODO: find a way to check if path is set, if set, then panic with ConfigError
+            self.sync_writes = false;
+        }
+
+        Ok(())
     }
 
     pub fn open<P: AsRef<Path>>(&mut self, path: P) -> Result<Agate> {
-        let p = path.as_ref();
-        if !p.exists() {
-            if !self.create_if_not_exists {
-                return Err(Error::Config(format!("{} doesn't exist", p.display())));
+        self.fix_options()?;
+
+        if !self.in_memory {
+            let p = path.as_ref();
+            if !p.exists() {
+                if !self.create_if_not_exists {
+                    return Err(Error::Config(format!("{} doesn't exist", p.display())));
+                }
+                fs::create_dir_all(p)?;
             }
-            fs::create_dir_all(p)?;
+            // TODO: create wal path, acquire database path lock
         }
-        let p = self.wal_path.take().unwrap_or_else(|| p.join("WAL"));
-        if self.table_size == 0 {
-            self.table_size = 32 * 1024 * 1024;
-        }
-        if self.max_table_count == 0 {
-            self.max_table_count = 24;
-        }
+
+        // TODO: open or create manifest
         Ok(Agate {
-            core: Arc::new(Core {
-                wal: Wal::open(p)?,
-                memtable: MemTable::with_capacity(self.table_size, self.max_table_count),
-            }),
+            core: Arc::new(Core::new(self.clone())?),
         })
     }
-    */
 
-    pub fn skip_vlog(&self, entry: &Entry) -> bool {
-        unimplemented!()
+    fn skip_vlog(&self, entry: &Entry) -> bool {
+        // TODO: implement skip_vlog
+        false
+    }
+
+    fn arena_size(&self) -> u64 {
+        // TODO: take other options into account
+        self.mem_table_size as u64
     }
 }
 
 impl Core {
+    fn new(opts: AgateOptions) -> Result<Self> {
+        // create first mem table
+        let mt = Self::open_mem_table(&opts.path, opts.clone(), 0)?;
+
+        // create agate core
+        let core = Self {
+            mt: RwLock::new(MemTables::new(mt, VecDeque::new())),
+            opts,
+            next_mem_fid: 1,
+        };
+
+        // TODO: initialize other structures
+
+        Ok(core)
+    }
+
     fn memtable_file_path(base_path: &Path, file_id: usize) -> PathBuf {
         base_path
             .to_path_buf()
             .join(format!("{:05}{}", file_id, MEMTABLE_FILE_EXT))
     }
 
-    fn arena_size(&self) -> u64 {
-        self.opts.max_table_size as u64
-    }
-
-    pub fn open_mem_table(&self, base_path: &Path, file_id: usize) -> Result<MemTable> {
-        let path = Self::memtable_file_path(base_path, file_id);
+    fn open_mem_table<P: AsRef<Path>>(
+        base_path: P,
+        opts: AgateOptions,
+        file_id: usize,
+    ) -> Result<MemTable> {
+        let path = Self::memtable_file_path(base_path.as_ref(), file_id);
         let c = make_comparator();
         // TODO: refactor skiplist to use `u64`
-        let skl = Skiplist::with_capacity(c, self.arena_size() as u32);
-        if self.opts.in_memory {
-            return Ok(MemTable::new(skl, None, self.opts.clone()));
+        let skl = Skiplist::with_capacity(c, opts.arena_size() as u32);
+        if opts.in_memory {
+            return Ok(MemTable::new(skl, None, opts.clone()));
         }
         let wal = Wal::open(file_id, path)?;
-
         // TODO: delete WAL when skiplist ref count becomes zero
 
-        let mut mem_table = MemTable::new(skl, Some(wal), self.opts.clone());
+        let mut mem_table = MemTable::new(skl, Some(wal), opts.clone());
 
         mem_table.update_skip_list()?;
 
         Ok(mem_table)
+    }
+
+    fn open_mem_tables(&mut self) -> Result<()> {
+        if self.opts.in_memory {
+            return Ok(());
+        }
+        // TODO: process on-disk structures
+        Ok(())
+    }
+
+    fn new_mem_table(&mut self) -> Result<MemTable> {
+        let mt = Self::open_mem_table(&self.opts.path, self.opts.clone(), self.next_mem_fid)?;
+        self.next_mem_fid += 1;
+        Ok(mt)
     }
 
     pub fn is_closed(&self) -> bool {
@@ -204,5 +262,51 @@ impl Core {
             mut_table.sync_wal()?;
         }
         Ok(())
+    }
+}
+
+impl Agate {
+    pub fn get(&self, key: &[u8]) -> Result<Value> {
+        self.core.get(key)
+    }
+
+    pub fn write_to_lsm(&self, request: Request) -> Result<()> {
+        self.core.write_to_lsm(request)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::format::key_with_ts;
+    use bytes::BytesMut;
+    use tempdir::TempDir;
+
+    #[test]
+    fn test_build() {
+        with_agate_test(|_| {});
+    }
+
+    fn with_agate_test(f: impl FnOnce(Agate) -> ()) {
+        let tmp_dir = TempDir::new("agatedb").unwrap();
+        let agate = AgateOptions::default()
+            .create()
+            .in_memory(true)
+            .open(tmp_dir)
+            .unwrap();
+        f(agate)
+    }
+
+    #[test]
+    fn test_get_put() {
+        with_agate_test(|agate| {
+            let key = key_with_ts(BytesMut::from("2333"), 2333);
+            let value = Bytes::from("2333333333333333");
+            let req = Request {
+                entries: vec![Entry::new(key.clone(), value.clone(), 0, 0, 0, 0)],
+            };
+            agate.write_to_lsm(req).unwrap();
+            agate.get(&key).unwrap();
+        });
     }
 }

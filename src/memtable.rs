@@ -128,6 +128,10 @@ pub struct MemTables {
 }
 
 impl MemTables {
+    pub(crate) fn new(mutable: MemTable, immutable: VecDeque<MemTable>) -> Self {
+        Self { mutable, immutable }
+    }
+
     /// Get view of all current memtables
     pub fn view(&self) -> MemTablesView {
         // Maybe flush is better.
