@@ -1,5 +1,6 @@
 use bytes::{BufMut, Bytes, BytesMut};
 use std::mem::MaybeUninit;
+use crate::structs::Entry;
 
 #[derive(Default, Debug, Clone)]
 pub struct Value {
@@ -111,4 +112,8 @@ impl Value {
         buf.put_slice(&arr[..written + 2]);
         buf.put_slice(&self.value);
     }
+}
+
+pub struct Request {
+    pub entries: Vec<Entry>
 }

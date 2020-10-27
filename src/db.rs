@@ -1,8 +1,9 @@
 use super::memtable::{MemTable, MemTables, MemTablesView};
 use super::{format, Error, Result};
 use crate::format::get_ts;
+use crate::structs::Entry;
 use crate::util::make_comparator;
-use crate::value::Value;
+use crate::value::{Request, Value};
 use crate::wal::Wal;
 use bytes::Bytes;
 use skiplist::Skiplist;
@@ -92,6 +93,10 @@ impl AgateOptions {
         })
     }
     */
+
+    pub fn skip_vlog(&self, entry: &Entry) -> bool {
+        unimplemented!()
+    }
 }
 
 impl Core {
@@ -158,5 +163,32 @@ impl Core {
 
         // max_value will be used in level controller
         unimplemented!(); // Should get from level controller
+    }
+
+    pub fn write_to_lsm(&self, request: Request) -> Result<()> {
+        // TODO: check entries and pointers
+
+        for (i, entry) in request.entries.into_iter().enumerate() {
+            if self.opts.skip_vlog(&entry) {
+                // deletion or tombstone
+                self.mt.read()?.put(
+                    entry.key,
+                    Value {
+                        value: unimplemented!(),
+                        meta: entry.meta & (!VALUE_POINTER),
+                        user_meta: entry.user_meta,
+                        expires_at: entry.expires_at,
+                        version: 0
+                    },
+                )
+            } else {
+                // write pointer to memtable
+                self.mt.read()
+            }
+        }
+        if self.opt.sync_writes {
+            self.mt.write()?.sync_wal();
+        }
+        Ok(())
     }
 }
