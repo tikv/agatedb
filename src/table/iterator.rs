@@ -341,13 +341,15 @@ impl<T: AsRef<TableInner>> Iterator<T> {
         }
     }
 
-    // seek_inner will reset iterator and seek to >= key.
+    /// seek_inner will reset iterator and seek to >= key.
     fn seek_inner(&mut self, key: &Bytes) {
         self.seek_from(key, SeekPos::Origin);
     }
 
-    // seek_for_prev will reset iterator and seek to <= key.
-    fn seek_for_prev(&mut self, key: &Bytes) {
+    /// seek_for_prev will reset iterator and seek to <= key.
+    ///
+    /// This function will only be called in tests outside this mod
+    pub(crate) fn seek_for_prev(&mut self, key: &Bytes) {
         self.seek_from(key, SeekPos::Origin);
         if self.key() != key {
             self.prev_inner();

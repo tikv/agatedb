@@ -1,11 +1,16 @@
 pub(crate) mod builder;
 mod iterator;
 
+use crate::checksum;
 use crate::opt::Options;
+use crate::Error;
 use crate::Result;
-use bytes::Bytes;
-use proto::meta::{BlockOffset, TableIndex};
+use bytes::{Buf, Bytes};
+use iterator::{Iterator as TableIterator, ITERATOR_NOCACHE, ITERATOR_REVERSED};
+use prost::Message;
+use proto::meta::{BlockOffset, Checksum, TableIndex};
 use std::fs;
+use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -58,35 +63,134 @@ pub struct TableInner {
     /// length of index
     index_len: usize,
     /// table options
-    opt: Options,
+    opts: Options,
 }
 
 pub struct Table {
     inner: Arc<TableInner>,
 }
 
+/// `AsRef<TableInner>` is only used in `init_biggest_and_smallest`
+/// to construct a table iterator from `&TableInner`.
+impl AsRef<TableInner> for TableInner {
+    fn as_ref(&self) -> &TableInner {
+        self
+    }
+}
+
 impl TableInner {
     /// Create an SST from bytes data generated with table builder
-    pub fn create(_path: &Path, _data: Bytes, _opt: Options) -> Result<TableInner> {
-        unimplemented!()
+    fn create(path: &Path, data: Bytes, opts: Options) -> Result<TableInner> {
+        let mut f = fs::OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .open(path)?;
+        f.write(&data)?;
+        // TODO: pass file object directly to open and sync write
+        drop(f);
+        Self::open(path, opts)
     }
 
     /// Open an existing SST on disk
-    pub fn open(_path: &Path, _opt: Options) -> Result<TableInner> {
-        unimplemented!()
+    fn open(path: &Path, opts: Options) -> Result<TableInner> {
+        let f = fs::OpenOptions::new()
+            .read(true)
+            .write(false)
+            .create(false)
+            .open(path)?;
+        let file_name = path.file_name().unwrap().to_str().unwrap();
+        let id = parse_file_id(file_name)?;
+        let meta = f.metadata()?;
+        let table_size = meta.len();
+        let mut inner = TableInner {
+            file: MmapFile::File {
+                file: Mutex::new(f),
+                name: path.to_path_buf(),
+            },
+            table_size: table_size as usize,
+            smallest: Bytes::new(),
+            biggest: Bytes::new(),
+            id,
+            checksum: Bytes::new(),
+            estimated_size: 0,
+            index: TableIndex::default(),
+            index_start: 0,
+            index_len: 0,
+            opts,
+        };
+        inner.init_biggest_and_smallest()?;
+        // TODO: verify checksum
+        Ok(inner)
     }
 
     /// Open an existing SST from data in memory
-    pub fn open_in_memory(_data: Bytes, _id: u64, _opt: Options) -> Result<TableInner> {
-        unimplemented!()
+    fn open_in_memory(data: Bytes, id: u64, opts: Options) -> Result<TableInner> {
+        let table_size = data.len();
+        let mut inner = TableInner {
+            file: MmapFile::Memory { data },
+            opts,
+            table_size,
+            id,
+            smallest: Bytes::new(),
+            biggest: Bytes::new(),
+            checksum: Bytes::new(),
+            estimated_size: 0,
+            index: TableIndex::default(),
+            index_start: 0,
+            index_len: 0,
+        };
+        inner.init_biggest_and_smallest()?;
+        Ok(inner)
     }
 
     fn init_biggest_and_smallest(&mut self) -> Result<()> {
-        unimplemented!()
+        let ko = self.init_index()?;
+        self.smallest = Bytes::from(ko.key.clone());
+        let mut it = TableIterator::new(&self, ITERATOR_REVERSED | ITERATOR_NOCACHE);
+        it.rewind();
+        if !it.valid() {
+            return Err(Error::TableRead(format!(
+                "failed to initialize biggest for table {}",
+                self.filename()
+            )));
+        }
+        self.biggest = Bytes::copy_from_slice(it.key());
+        Ok(())
     }
 
     fn init_index(&mut self) -> Result<&BlockOffset> {
-        unimplemented!()
+        let mut read_pos = self.table_size;
+
+        // read checksum length from last 4 bytes
+        read_pos -= 4;
+        let mut buf = self.read(read_pos, 4)?;
+        let checksum_len = buf.get_u32() as usize;
+
+        // read checksum
+        read_pos -= checksum_len;
+        let buf = self.read(read_pos, checksum_len)?;
+        let chksum = Checksum::decode(buf)?;
+
+        // read index size from footer
+        read_pos -= 4;
+        let mut buf = self.read(read_pos, 4)?;
+        self.index_len = buf.get_u32() as usize;
+
+        // read index
+        read_pos -= self.index_len;
+        self.index_start = read_pos;
+        let data = self.read(read_pos, self.index_len)?;
+        checksum::verify_checksum(&data, &chksum)?;
+
+        self.index = self.read_table_index()?;
+
+        // TODO: compression
+        self.estimated_size = self.table_size as u32;
+
+        // TODO: has bloom filter
+
+        Ok(&self.index.offsets[0])
     }
 
     fn key_splits(&mut self, _n: usize, _prefix: Bytes) -> Vec<String> {
@@ -106,8 +210,53 @@ impl TableInner {
         self.fetch_index().offsets.get(idx)
     }
 
-    fn block(&self, _idx: usize, _use_cache: bool) -> Result<Arc<Block>> {
-        unimplemented!()
+    fn block(&self, idx: usize, _use_cache: bool) -> Result<Arc<Block>> {
+        // TODO: support cache
+        if idx >= self.offsets_length() {
+            return Err(Error::TableRead("block out of index".to_string()));
+        }
+        let block_offset = self.offsets(idx).ok_or(Error::TableRead(format!(
+            "failed to get offset block {}",
+            idx
+        )))?;
+
+        let offset = block_offset.offset as usize;
+        let data = self.read(offset, block_offset.len as usize)?;
+
+        let mut read_pos = data.len() - 4; // first read checksum length
+        let checksum_len = (&data[read_pos..read_pos + 4]).get_u32() as usize;
+
+        if checksum_len > data.len() {
+            return Err(Error::TableRead("invalid checksum length".to_string()));
+        }
+
+        // read checksum
+        read_pos -= checksum_len;
+        let checksum = data.slice(read_pos..read_pos + checksum_len);
+
+        // read num entries
+        read_pos -= 4;
+        let num_entries = (&data[read_pos..read_pos + 4]).get_u32() as usize;
+
+        let entries_index_start = read_pos - num_entries * 4;
+        let entries_index_end = entries_index_start + num_entries * 4;
+
+        let mut entry_offsets_ptr = &data[entries_index_start..entries_index_end];
+        let mut entry_offsets = Vec::with_capacity(num_entries);
+        for _ in 0..num_entries {
+            entry_offsets.push(entry_offsets_ptr.get_u32_le());
+        }
+
+        Ok(Arc::new(Block {
+            offset,
+            entries_index_start,
+            // Drop checksum and checksum length.
+            // The checksum is calculated for actual data + entry index + index length
+            data: data.slice(..read_pos + 4),
+            entry_offsets,
+            checksum_len,
+            checksum,
+        }))
     }
 
     fn index_key(&self) -> u64 {
@@ -169,19 +318,49 @@ impl TableInner {
     }
 
     pub(crate) fn read_table_index(&self) -> Result<TableIndex> {
-        unimplemented!()
+        let data = self.read(self.index_start, self.index_len)?;
+        // TODO: prefetch
+        let result = Message::decode(data)?;
+        Ok(result)
     }
 
     fn verify_checksum(&self) -> Result<()> {
-        unimplemented!()
+        let table_index = self.fetch_index();
+        for i in 0..table_index.offsets.len() {
+            let block = self.block(i, true)?;
+            // TODO: table opts
+            block.verify_checksum()?;
+        }
+        Ok(())
     }
 
     fn read(&self, offset: usize, size: usize) -> Result<Bytes> {
         self.bytes(offset, size)
     }
 
-    fn bytes(&self, _offset: usize, _size: usize) -> Result<Bytes> {
-        unimplemented!()
+    fn bytes(&self, offset: usize, size: usize) -> Result<Bytes> {
+        match &self.file {
+            MmapFile::Memory { data } => {
+                if offset + size > data.len() {
+                    Err(Error::TableRead(format!(
+                        "out of range, offset={}, size={}, len={}",
+                        offset,
+                        size,
+                        data.len()
+                    )))
+                } else {
+                    Ok(data.slice(offset..offset + size))
+                }
+            }
+            MmapFile::File { file, .. } => {
+                // TODO: use MmapFile
+                let mut file = file.lock().unwrap();
+                file.seek(std::io::SeekFrom::Start(offset as u64))?;
+                let mut buf = vec![0; size];
+                file.read_exact(&mut buf)?;
+                Ok(Bytes::from(buf))
+            }
+        }
     }
 
     fn is_in_memory(&self) -> bool {
@@ -190,6 +369,7 @@ impl TableInner {
 
     fn max_version(&self) -> u64 {
         unimplemented!()
+        // self.fetch_index()?.max_version()
     }
 }
 
@@ -218,64 +398,74 @@ pub struct Block {
     checksum_len: usize,
 }
 
-/*
 impl Block {
     fn size(&self) -> u64 {
-        3 * mem::size_of::<usize>() as u64 + self.data.len() as u64 + self.checksum.len() as u64 + self.entry_offsets.len() as u64 * mem::size_of::<u32>() as u64
+        3 * std::mem::size_of::<usize>() as u64
+            + self.data.len() as u64
+            + self.checksum.len() as u64
+            + self.entry_offsets.len() as u64 * std::mem::size_of::<u32>() as u64
     }
 
     fn verify_checksum(&self) -> Result<()> {
-        let mut chksum = CheckSum::default();
-        chksum.merge_from_bytes(&self.checksum)?;
+        let chksum = prost::Message::decode(self.checksum.clone())?;
         checksum::verify_checksum(&self.data, &chksum)
     }
 }
 
-fn parse_file_id(name: &str) -> (u64, bool) {
+fn parse_file_id(name: &str) -> Result<u64> {
     if !name.ends_with(".sst") {
-        (0, false)
+        return Err(Error::InvalidFilename(name.to_string()));
     }
     match name[..name.len() - 4].parse() {
-        Ok(id) => (id, true),
-        Err(_) => return (0, false),
+        Ok(id) => Ok(id),
+        Err(_) => Err(Error::InvalidFilename(name.to_string())),
     }
 }
 
 impl Table {
-    pub fn open(path: &Path, opt: Options) -> Result<Table> {
-        let f = fs::File::open(path)?;
-        let file_name = path.base_name();
-        let (id, ok) = parse_file_id(file_name);
-        if !ok {
-            return Err();
-        }
-        let meta = f.metadata()?;
-        let table_size = meta.len();
-        let mut t = Table {
-            inner: Arc::new(Table {
-                file: Some(File {
-                    name: path.to_buf(),
-                    file: f,
-                }),
-                table_size,
-                smallest: Bytes::new(),
-                biggest: Bytes::new(),
-                id,
-                checksum: 0,
-                estimated_size: 0,
-                index_start: 0,
-                index_len: 0,
-                is_in_memory: false,
-                opt,
-                no_of_blocks: 0,
-            }),
-        };
-
+    /// Create an SST from bytes data generated with table builder
+    pub fn create(path: &Path, data: Bytes, opts: Options) -> Result<Table> {
+        Ok(Table {
+            inner: Arc::new(TableInner::create(path, data, opts)?),
+        })
     }
 
-    fn init_biggest_and_smallest(&mut self) -> Result<()> {
-        self.read_index()?;
+    /// Open an existing SST on disk
+    pub fn open(path: &Path, opts: Options) -> Result<Table> {
+        Ok(Table {
+            inner: Arc::new(TableInner::open(path, opts)?),
+        })
+    }
 
+    /// Open an existing SST from data in memory
+    pub fn open_in_memory(data: Bytes, id: u64, opts: Options) -> Result<Table> {
+        Ok(Table {
+            inner: Arc::new(TableInner::open_in_memory(data, id, opts)?),
+        })
+    }
+
+    /// Get block numbers
+    pub(crate) fn offsets_length(&self) -> usize {
+        self.inner.offsets_length()
+    }
+
+    /// Get all block offsets
+    pub(crate) fn offsets(&self, idx: usize) -> Option<&BlockOffset> {
+        self.inner.offsets(idx)
+    }
+
+    /// Get one block from table
+    pub(crate) fn block(&self, block_pos: usize, use_cache: bool) -> Result<Arc<Block>> {
+        self.inner.block(block_pos, use_cache)
+    }
+
+    /// Get an iterator to this table
+    pub fn new_iterator(&self, opt: usize) -> TableIterator<Arc<TableInner>> {
+        TableIterator::new(self.inner.clone(), opt)
+    }
+
+    /// Get max version of this table
+    pub fn max_version(&self) -> u64 {
+        self.inner.max_version()
     }
 }
-*/

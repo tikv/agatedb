@@ -198,11 +198,11 @@ impl Builder {
         self.buf.put_u32(len as u32);
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::format::key_with_ts;
+    use crate::table::Table;
     use tempdir::TempDir;
 
     const TEST_KEYS_COUNT: usize = 100000;
@@ -216,14 +216,15 @@ mod tests {
             table_size: 30 << 20,
         };
 
-        let mut builder = Builder::new(opts);
-        let _tmp_dir = TempDir::new("agatedb").unwrap();
+        let mut builder = Builder::new(opts.clone());
+        let tmp_dir = TempDir::new("agatedb").unwrap();
+        let filename = tmp_dir.path().join("1.sst".to_string());
 
         let mut block_first_keys = vec![];
 
         for i in 0..TEST_KEYS_COUNT {
             let k = key_with_ts(format!("{:016x}", i).as_str(), (i + 1) as u64);
-            let v = Bytes::from(format!("{}", i));
+            let v = Bytes::from(i.to_string());
             let vs = Value::new(v);
             if i == 0 {
                 block_first_keys.push(k.clone());
@@ -233,7 +234,20 @@ mod tests {
             builder.add(&k, vs, 0);
         }
 
-        // TODO: complete this test after finishing table API
+        let table = Table::create(&filename, builder.finish(), opts).unwrap();
+
+        // TODO: data key in options
+
+        assert_eq!(table.offsets_length(), block_first_keys.len());
+
+        let idx = table.inner.read_table_index().unwrap();
+
+        for i in 0..idx.offsets.len() {
+            assert_eq!(block_first_keys[i], idx.offsets[i].key);
+        }
+
+        // TODO: support max_version
+        // assert_eq!(TEST_KEYS_COUNT, table.max_version());
     }
 
     #[test]
