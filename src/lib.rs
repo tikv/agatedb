@@ -7,7 +7,7 @@ mod format;
 mod levels;
 mod memtable;
 mod ops;
-mod opt;
+pub mod opt;
 mod table;
 mod util;
 mod value;
