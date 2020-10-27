@@ -1,4 +1,4 @@
-use crate::util::{decode_varint_uncheck, encode_varint_uncheck, varint_len};
+use crate::util::{encode_varint_uncheck, varint_len};
 use bytes::{BufMut, Bytes, BytesMut};
 use std::ptr;
 

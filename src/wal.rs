@@ -3,7 +3,7 @@ use crate::util::{decode_varint_uncheck, encode_varint_uncheck, varint_len};
 use bytes::{BufMut, Bytes, BytesMut};
 use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
-use std::ptr;
+
 
 #[derive(Default, Debug, PartialEq)]
 struct Header {
