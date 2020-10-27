@@ -1,6 +1,13 @@
+use crate::structs::Entry;
 use bytes::{BufMut, Bytes, BytesMut};
 use std::mem::MaybeUninit;
-use crate::structs::Entry;
+
+pub const VALUE_DELETE: u8 = 1 << 0;
+pub const VALUE_POINTER: u8 = 1 << 1;
+pub const VALUE_DISCARD_EARLIER_VERSIONS: u8 = 1 << 2;
+pub const VALUE_MERGE_ENTRY: u8 = 1 << 3;
+pub const VALUE_TXN: u8 = 1 << 6;
+pub const VALUE_FIN_TXN: u8 = 1 << 7;
 
 #[derive(Default, Debug, Clone)]
 pub struct Value {
@@ -9,6 +16,15 @@ pub struct Value {
     pub expires_at: u64,
     pub value: Bytes,
     pub version: u64,
+}
+
+impl Into<Bytes> for Value {
+    fn into(self) -> Bytes {
+        // TODO: we can reduce unnecessary copy by re-writing `encode`
+        let mut buf = BytesMut::new();
+        self.encode(&mut buf);
+        buf.freeze()
+    }
 }
 
 #[inline]
@@ -115,5 +131,5 @@ impl Value {
 }
 
 pub struct Request {
-    pub entries: Vec<Entry>
+    pub entries: Vec<Entry>,
 }

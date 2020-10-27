@@ -3,7 +3,7 @@ use super::{format, Error, Result};
 use crate::format::get_ts;
 use crate::structs::Entry;
 use crate::util::make_comparator;
-use crate::value::{Request, Value};
+use crate::value::{self, Request, Value};
 use crate::wal::Wal;
 use bytes::Bytes;
 use skiplist::Skiplist;
@@ -46,6 +46,7 @@ pub struct AgateOptions {
     pub max_table_count: usize,
     pub max_table_size: u64,
     pub in_memory: bool,
+    pub sync_writes: bool,
 }
 
 impl AgateOptions {
@@ -124,7 +125,7 @@ impl Core {
 
         let mut mem_table = MemTable::new(skl, Some(wal), self.opts.clone());
 
-        mem_table.update_skip_list();
+        mem_table.update_skip_list()?;
 
         Ok(mem_table)
     }
@@ -168,26 +169,39 @@ impl Core {
     pub fn write_to_lsm(&self, request: Request) -> Result<()> {
         // TODO: check entries and pointers
 
+        let memtables = self.mt.read()?;
+        let mut_table = memtables.table_mut();
+
+        let view = self.mt.read()?.view();
         for (i, entry) in request.entries.into_iter().enumerate() {
             if self.opts.skip_vlog(&entry) {
                 // deletion or tombstone
-                self.mt.read()?.put(
+                mut_table.put(
+                    entry.key,
+                    Value {
+                        value: entry.value,
+                        meta: entry.meta & (!value::VALUE_POINTER),
+                        user_meta: entry.user_meta,
+                        expires_at: entry.expires_at,
+                        version: 0,
+                    },
+                )?;
+            } else {
+                // write pointer to memtable
+                mut_table.put(
                     entry.key,
                     Value {
                         value: unimplemented!(),
-                        meta: entry.meta & (!VALUE_POINTER),
+                        meta: entry.meta | value::VALUE_POINTER,
                         user_meta: entry.user_meta,
                         expires_at: entry.expires_at,
-                        version: 0
+                        version: 0,
                     },
-                )
-            } else {
-                // write pointer to memtable
-                self.mt.read()
+                )?;
             }
         }
-        if self.opt.sync_writes {
-            self.mt.write()?.sync_wal();
+        if self.opts.sync_writes {
+            mut_table.sync_wal()?;
         }
         Ok(())
     }

@@ -1,7 +1,7 @@
 use crate::format::get_ts;
 use crate::structs::Entry;
 use crate::util::{make_comparator, Comparator};
-use crate::value::Value;
+use crate::value::{self, Value};
 use crate::wal::Wal;
 use crate::AgateOptions;
 use crate::Result;
@@ -11,15 +11,15 @@ use std::collections::VecDeque;
 use std::mem::{self, ManuallyDrop, MaybeUninit};
 use std::path::{Path, PathBuf};
 use std::ptr;
+use std::sync::atomic::AtomicU64;
 
 const MEMTABLE_VIEW_MAX: usize = 20;
 
 pub struct MemTable {
     pub(crate) skl: Skiplist<Comparator>,
     pub(crate) wal: Option<Wal>,
-    pub(crate) max_version: u64,
+    pub(crate) max_version: AtomicU64,
     pub(crate) opt: AgateOptions,
-    pub buf: BytesMut,
 }
 
 impl MemTable {
@@ -53,17 +53,19 @@ impl MemTable {
             skl,
             wal,
             opt,
-            max_version: 0,
-            buf: BytesMut::new(),
+            max_version: AtomicU64::new(0),
         }
     }
 
-    pub fn update_skip_list(&mut self) {
-        unimplemented!()
+    pub fn update_skip_list(&mut self) -> Result<()> {
+        if let Some(ref wal) = self.wal {
+            unimplemented!()
+        }
+        Ok(())
     }
 
-    pub fn put(&mut self, key: Bytes, value: Value) -> Result<()> {
-        if let Some(ref mut wal) = self.wal {
+    pub fn put(&self, key: Bytes, value: Value) -> Result<()> {
+        if let Some(ref wal) = self.wal {
             let entry = Entry::new(
                 key.clone(),
                 value.value.clone(),
@@ -74,13 +76,27 @@ impl MemTable {
             );
             wal.write_entry(entry)?;
         }
-        value.encode(&mut self.buf);
-        let ts = get_ts(&key);
-        self.skl.put(key, self.buf.clone());
-        if ts > self.max_version {
-            self.max_version = ts;
+
+        // only insert finish marker in WAL
+        if value.meta & value::VALUE_FIN_TXN != 0 {
+            return Ok(());
         }
 
+        // write to skiplist
+        let ts = get_ts(&key);
+        self.skl.put(key, value);
+
+        // update max version
+        self.max_version
+            .fetch_max(ts, std::sync::atomic::Ordering::SeqCst);
+
+        Ok(())
+    }
+
+    pub fn sync_wal(&self) -> Result<()> {
+        if let Some(ref wal) = self.wal {
+            wal.sync()?;
+        }
         Ok(())
     }
 }
@@ -107,24 +123,30 @@ impl Drop for MemTablesView {
 }
 
 pub struct MemTables {
-    mutable: Skiplist<Comparator>,
-    immutable: VecDeque<Skiplist<Comparator>>,
+    mutable: MemTable,
+    immutable: VecDeque<MemTable>,
 }
 
 impl MemTables {
+    /// Get view of all current memtables
     pub fn view(&self) -> MemTablesView {
         // Maybe flush is better.
         assert!(self.immutable.len() + 1 <= MEMTABLE_VIEW_MAX);
         let mut array: [MaybeUninit<Skiplist<Comparator>>; MEMTABLE_VIEW_MAX] =
             unsafe { MaybeUninit::uninit().assume_init() };
-        array[0] = MaybeUninit::new(self.mutable.clone());
+        array[0] = MaybeUninit::new(self.mutable.skl.clone());
         for (i, s) in self.immutable.iter().enumerate() {
-            array[i + 1] = MaybeUninit::new(s.clone());
+            array[i + 1] = MaybeUninit::new(s.skl.clone());
         }
         MemTablesView {
             tables: unsafe { ManuallyDrop::new(mem::transmute(array)) },
             len: self.immutable.len() + 1,
         }
+    }
+
+    /// Get mutable memtable
+    pub fn table_mut(&self) -> &MemTable {
+        &self.mutable
     }
 }
 
@@ -136,12 +158,13 @@ mod tests {
     fn get_comparator() -> FixedLengthSuffixComparator {
         FixedLengthSuffixComparator::new(0)
     }
-    fn get_skip_list(data: Vec<(String, String)>) -> Skiplist<FixedLengthSuffixComparator> {
+
+    fn get_memtable(data: Vec<(String, String)>) -> MemTable {
         let skl = Skiplist::with_capacity(get_comparator(), 4 * 1024 * 1024);
         for (k, v) in data {
             assert!(skl.put(k, v).is_none());
         }
-        skl
+        MemTable::new(skl, None, AgateOptions::default())
     }
 
     #[test]
@@ -155,12 +178,12 @@ mod tests {
         let (d3, dx) = dx.split_at(250);
         let (d4, _) = dx.split_at(250);
         let mem_tables = MemTables {
-            mutable: get_skip_list(d1.to_vec()),
+            mutable: get_memtable(d1.to_vec()),
             immutable: VecDeque::from(
                 [d2, d3, d4]
                     .iter()
-                    .map(|x| get_skip_list(x.to_vec()))
-                    .collect::<Vec<Skiplist<FixedLengthSuffixComparator>>>(),
+                    .map(|x| get_memtable(x.to_vec()))
+                    .collect::<Vec<MemTable>>(),
             ),
         };
         let view = mem_tables.view();

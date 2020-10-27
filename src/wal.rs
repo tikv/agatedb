@@ -87,8 +87,13 @@ impl Wal {
         Ok(Wal { file_id, path })
     }
 
-    pub fn write_entry(&mut self, entry: Entry) -> Result<()> {
+    pub fn write_entry(&self, entry: Entry) -> Result<()> {
         // TODO: not implementaed
+        Ok(())
+    }
+
+    pub fn sync(&self) -> Result<()> {
+        // TODO: not implemented
         Ok(())
     }
 }
