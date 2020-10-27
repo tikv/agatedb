@@ -115,6 +115,32 @@ pub unsafe fn decode_varint_uncheck(bytes: &[u8]) -> (u64, usize) {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use bytes::{BufMut, BytesMut};
+
     #[test]
-    fn test_varint_decode_encode() {}
+    fn test_varint_decode_encode() {
+        for i in vec![
+            2,
+            5,
+            233,
+            2333,
+            23333,
+            233333,
+            2333333,
+            23333333333,
+            std::u64::MAX - 23333333333,
+        ] {
+            let size = varint_len(i as usize);
+            let mut bytes = BytesMut::new();
+            bytes.reserve(size);
+            unsafe {
+                let buf = bytes.bytes_mut();
+                encode_varint_uncheck(buf.get_unchecked_mut(..), i);
+            }
+            let (data, count) = unsafe { decode_varint_uncheck(&bytes) };
+            assert_eq!(data, i);
+            assert_eq!(count, size);
+        }
+    }
 }
