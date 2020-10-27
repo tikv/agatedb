@@ -4,7 +4,6 @@ use bytes::{BufMut, Bytes, BytesMut};
 use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
 
-
 #[derive(Default, Debug, PartialEq)]
 struct Header {
     key_len: u32,
