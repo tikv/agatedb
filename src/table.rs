@@ -63,7 +63,7 @@ pub struct TableInner {
     /// length of index
     index_len: usize,
     /// table options
-    opt: Options,
+    opts: Options,
 }
 
 pub struct Table {
@@ -80,20 +80,20 @@ impl AsRef<TableInner> for TableInner {
 
 impl TableInner {
     /// Create an SST from bytes data generated with table builder
-    fn create(path: &Path, data: Bytes, opt: Options) -> Result<TableInner> {
+    fn create(path: &Path, data: Bytes, opts: Options) -> Result<TableInner> {
         let mut f = fs::OpenOptions::new()
             .create_new(true)
             .read(true)
             .write(true)
             .open(path)?;
         f.write(&data)?;
-        // TODO: pass file object directly to open
+        // TODO: pass file object directly to open and sync write
         drop(f);
-        Self::open(path, opt)
+        Self::open(path, opts)
     }
 
     /// Open an existing SST on disk
-    fn open(path: &Path, opt: Options) -> Result<TableInner> {
+    fn open(path: &Path, opts: Options) -> Result<TableInner> {
         let f = fs::OpenOptions::new()
             .read(true)
             .write(false)
@@ -117,7 +117,7 @@ impl TableInner {
             index: TableIndex::default(),
             index_start: 0,
             index_len: 0,
-            opt,
+            opts,
         };
         inner.init_biggest_and_smallest()?;
         // TODO: verify checksum
@@ -125,11 +125,11 @@ impl TableInner {
     }
 
     /// Open an existing SST from data in memory
-    fn open_in_memory(data: Bytes, id: u64, opt: Options) -> Result<TableInner> {
+    fn open_in_memory(data: Bytes, id: u64, opts: Options) -> Result<TableInner> {
         let table_size = data.len();
         let mut inner = TableInner {
             file: MmapFile::Memory { data },
-            opt,
+            opts,
             table_size,
             id,
             smallest: Bytes::new(),
@@ -266,6 +266,8 @@ impl TableInner {
         Ok(Arc::new(Block {
             offset,
             entries_index_start,
+            // Drop checksum and checksum length.
+            // The checksum is calculated for actual data + entry index + index length
             data: data.slice(..read_pos + 4),
             entry_offsets,
             checksum_len,
@@ -439,23 +441,23 @@ fn parse_file_id(name: &str) -> Result<u64> {
 
 impl Table {
     /// Create an SST from bytes data generated with table builder
-    pub fn create(path: &Path, data: Bytes, opt: Options) -> Result<Table> {
+    pub fn create(path: &Path, data: Bytes, opts: Options) -> Result<Table> {
         Ok(Table {
-            inner: Arc::new(TableInner::create(path, data, opt)?),
+            inner: Arc::new(TableInner::create(path, data, opts)?),
         })
     }
 
     /// Open an existing SST on disk
-    pub fn open(path: &Path, opt: Options) -> Result<Table> {
+    pub fn open(path: &Path, opts: Options) -> Result<Table> {
         Ok(Table {
-            inner: Arc::new(TableInner::open(path, opt)?),
+            inner: Arc::new(TableInner::open(path, opts)?),
         })
     }
 
     /// Open an existing SST from data in memory
-    pub fn open_in_memory(data: Bytes, id: u64, opt: Options) -> Result<Table> {
+    pub fn open_in_memory(data: Bytes, id: u64, opts: Options) -> Result<Table> {
         Ok(Table {
-            inner: Arc::new(TableInner::open_in_memory(data, id, opt)?),
+            inner: Arc::new(TableInner::open_in_memory(data, id, opts)?),
         })
     }
 
