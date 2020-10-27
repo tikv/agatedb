@@ -41,12 +41,16 @@ impl Agate {
 
 #[derive(Clone)]
 pub struct AgateOptions {
+    pub path: PathBuf,
+    // TODO: docs
+    pub in_memory: bool,
+    pub sync_writes: bool,
+
     pub create_if_not_exists: bool,
     pub num_memtables: usize,
     pub mem_table_size: u64,
-    pub in_memory: bool,
-    pub sync_writes: bool,
-    pub path: PathBuf,
+
+    pub value_threshold: usize,
 }
 
 impl Default for AgateOptions {
@@ -58,6 +62,7 @@ impl Default for AgateOptions {
             num_memtables: 20,
             in_memory: false,
             sync_writes: false,
+            value_threshold: 1 << 10,
         }
         // TODO: add other options
     }
@@ -119,8 +124,7 @@ impl AgateOptions {
     }
 
     fn skip_vlog(&self, entry: &Entry) -> bool {
-        // TODO: implement skip_vlog
-        false
+        entry.value.len() < self.value_threshold
     }
 
     fn arena_size(&self) -> u64 {
@@ -221,7 +225,7 @@ impl Core {
         }
 
         // max_value will be used in level controller
-        unimplemented!(); // Should get from level controller
+        panic!("value not available in memtable") // Should get from level controller
     }
 
     pub fn write_to_lsm(&self, request: Request) -> Result<()> {
@@ -230,10 +234,9 @@ impl Core {
         let memtables = self.mt.read()?;
         let mut_table = memtables.table_mut();
 
-        let view = self.mt.read()?.view();
         for (i, entry) in request.entries.into_iter().enumerate() {
             if self.opts.skip_vlog(&entry) {
-                // deletion or tombstone
+                // deletion, tombstone, and small values
                 mut_table.put(
                     entry.key,
                     Value {
@@ -298,9 +301,9 @@ mod tests {
     }
 
     #[test]
-    fn test_get_put() {
+    fn test_simple_get_put() {
         with_agate_test(|agate| {
-            let key = key_with_ts(BytesMut::from("2333"), 2333);
+            let key = key_with_ts(BytesMut::from("2333"), 0);
             let value = Bytes::from("2333333333333333");
             let req = Request {
                 entries: vec![Entry::new(key.clone(), value.clone(), 0, 0, 0, 0)],
