@@ -199,17 +199,6 @@ impl TableInner {
     }
 
     fn key_splits(&mut self, _n: usize, _prefix: Bytes) -> Vec<String> {
-        // if n == 0 {
-        //     return vec![];
-        // }
-
-        // let output_len = self.offsets_length();
-        // let jump = output_len / n;
-        // let _jump = if jump == 0 { 1 } else { jump };
-
-        // let _block_offset = BlockOffset::default();
-        // let res = vec![];
-
         unimplemented!()
     }
 
