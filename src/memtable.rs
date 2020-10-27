@@ -1,15 +1,15 @@
 use crate::format::get_ts;
 use crate::structs::Entry;
-use crate::util::{make_comparator, Comparator};
+use crate::util::Comparator;
 use crate::value::{self, Value};
 use crate::wal::Wal;
 use crate::AgateOptions;
 use crate::Result;
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use skiplist::Skiplist;
 use std::collections::VecDeque;
 use std::mem::{self, ManuallyDrop, MaybeUninit};
-use std::path::{Path, PathBuf};
+
 use std::ptr;
 use std::sync::atomic::AtomicU64;
 
@@ -58,7 +58,7 @@ impl MemTable {
     }
 
     pub fn update_skip_list(&mut self) -> Result<()> {
-        if let Some(ref wal) = self.wal {
+        if let Some(ref _wal) = self.wal {
             unimplemented!()
         }
         Ok(())

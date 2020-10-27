@@ -83,11 +83,11 @@ pub struct Wal {
 
 impl Wal {
     pub fn open(file_id: usize, path: PathBuf) -> Result<Wal> {
-        let f = OpenOptions::new().append(true).create(true).open(&path)?;
+        let _f: File = OpenOptions::new().append(true).create(true).open(&path)?;
         Ok(Wal { file_id, path })
     }
 
-    pub fn write_entry(&self, entry: Entry) -> Result<()> {
+    pub fn write_entry(&self, _entry: Entry) -> Result<()> {
         // TODO: not implementaed
         Ok(())
     }

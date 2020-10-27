@@ -1,6 +1,4 @@
 use crate::db::Agate;
-use crate::{Error, Result};
-use bytes::Bytes;
 
 pub struct Snapshot {
     read_ts: u64,

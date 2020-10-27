@@ -1,5 +1,5 @@
-use super::memtable::{MemTable, MemTables, MemTablesView};
-use super::{format, Error, Result};
+use super::memtable::{MemTable, MemTables};
+use super::{Error, Result};
 use crate::format::get_ts;
 use crate::structs::Entry;
 use crate::util::make_comparator;
@@ -234,7 +234,7 @@ impl Core {
         let memtables = self.mt.read()?;
         let mut_table = memtables.table_mut();
 
-        for (i, entry) in request.entries.into_iter().enumerate() {
+        for entry in request.entries.into_iter() {
             if self.opts.skip_vlog(&entry) {
                 // deletion, tombstone, and small values
                 mut_table.put(
@@ -252,13 +252,14 @@ impl Core {
                 mut_table.put(
                     entry.key,
                     Value {
-                        value: unimplemented!(),
+                        value: Bytes::new(),
                         meta: entry.meta | value::VALUE_POINTER,
                         user_meta: entry.user_meta,
                         expires_at: entry.expires_at,
                         version: 0,
                     },
                 )?;
+                unimplemented!()
             }
         }
         if self.opts.sync_writes {
