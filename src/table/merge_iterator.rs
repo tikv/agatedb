@@ -17,11 +17,10 @@ pub struct MergeIterator {
     current_key: BytesMut,
 }
 
-enum Iterators {
+pub enum Iterators {
     Merge(Box<MergeIterator>),
     // TODO: Concat(ConcatIterator),
     Table(Box<TableIterator>),
-    Dynamic(Box<dyn AgateIterator>),
 }
 
 macro_rules! impl_iterators {
@@ -71,6 +70,14 @@ struct IteratorNode {
 }
 
 impl IteratorNode {
+    fn new(iter: Iterators) -> Self {
+        Self {
+            valid: false,
+            key: BytesMut::new(),
+            iter,
+        }
+    }
+
     fn set_key(&mut self) {
         self.valid = self.iter.valid();
         if self.valid {
@@ -174,6 +181,36 @@ impl MergeIterator {
             self.current_key.extend_from_slice(&self.left.key);
         } else {
             self.current_key.extend_from_slice(&self.right.key);
+        }
+    }
+
+    pub fn from_iterators(mut iters: Vec<Iterators>, reverse: bool) -> Iterators {
+        match iters.len() {
+            0 => panic!("no element in iters"),
+            1 => iters.pop().unwrap(),
+            2 => {
+                let right = iters.pop().unwrap();
+                let left = iters.pop().unwrap();
+                Iterators::Merge(Box::new(MergeIterator {
+                    reverse,
+                    left: IteratorNode::new(left),
+                    right: IteratorNode::new(right),
+                    is_left_small: true,
+                    current_key: BytesMut::new(),
+                }))
+            }
+            _ => {
+                let mid = iters.len() / 2;
+                let right = iters.split_off(mid);
+                let left = iters;
+                Iterators::Merge(Box::new(MergeIterator {
+                    reverse,
+                    left: IteratorNode::new(Self::from_iterators(left, reverse)),
+                    right: IteratorNode::new(Self::from_iterators(right, reverse)),
+                    is_left_small: true,
+                    current_key: BytesMut::new(),
+                }))
+            }
         }
     }
 }
