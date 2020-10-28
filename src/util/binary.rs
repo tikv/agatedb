@@ -1,5 +1,3 @@
-// Copyright 2017 Jay Lee. Licensed under MIT.
-
 use crate::{Error, Result};
 use bytes::BytesMut;
 use std::{cmp, mem, ptr, slice, u64};
