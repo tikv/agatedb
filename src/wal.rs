@@ -7,16 +7,23 @@ use bytes::{BufMut, Bytes, BytesMut};
 use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
 
+/// `Header` stores metadata of an entry in WAL and in value log.
 #[derive(Default, Debug, PartialEq)]
 struct Header {
+    /// length of key
     key_len: u32,
+    /// length of value
     value_len: u32,
+    /// entry expire date
     expires_at: u64,
+    /// metadata
     meta: u8,
+    /// user metadata
     user_meta: u8,
 }
 
 impl Header {
+    /// Get length of header if being encoded
     pub fn encoded_len(&self) -> usize {
         1 + 1
             + varint_u64_bytes_len(self.expires_at) as usize
@@ -24,6 +31,7 @@ impl Header {
             + varint_u32_bytes_len(self.value_len) as usize
     }
 
+    /// Encode header into bytes
     pub fn encode(&self, bytes: &mut BytesMut) {
         let encoded_len = self.encoded_len();
         bytes.reserve(encoded_len);
@@ -50,6 +58,7 @@ impl Header {
         debug_assert_eq!(bytes.len(), encoded_len);
     }
 
+    /// Decode header from bytes
     pub fn decode(&mut self, bytes: &mut Bytes) -> Result<usize> {
         self.meta = bytes[0];
         self.user_meta = bytes[1];
