@@ -31,6 +31,11 @@ jobs:
           toolchain: nightly
           default: true
       - uses: actions-rs/cargo@v1
+        name: Clippy Lint
+        with:
+          command: clippy
+          args: --all-targets --all-features
+      - uses: actions-rs/cargo@v1
         name: Check Code Format 🔧
         with:
           command: fmt
