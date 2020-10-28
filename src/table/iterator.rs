@@ -164,10 +164,7 @@ impl BlockIterator {
                 return false;
             }
             self.set_idx(idx);
-            match COMPARATOR.compare_key(&self.key, &key) {
-                Less => false,
-                _ => true,
-            }
+            !matches!(COMPARATOR.compare_key(&self.key, &key), Less)
         });
 
         self.set_idx(found_entry_idx);
@@ -322,10 +319,7 @@ impl<T: AsRef<TableInner>> Iterator<T> {
         let idx = util::search(self.table.as_ref().offsets_length(), |idx| {
             use std::cmp::Ordering::*;
             let block_offset = self.table.as_ref().offsets(idx).unwrap();
-            match COMPARATOR.compare_key(&block_offset.key, &key) {
-                Greater => true,
-                _ => false,
-            }
+            !matches!(COMPARATOR.compare_key(&block_offset.key, &key), Greater)
         });
 
         if idx == 0 {
