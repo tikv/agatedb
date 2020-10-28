@@ -1,6 +1,6 @@
 use crate::{Error, Result};
 use bytes::BytesMut;
-use std::{cmp, mem, ptr, slice, u64};
+use std::{cmp, ptr, slice, u64};
 
 fn decode_varint_u32_slow(data: &[u8]) -> Result<(u32, u8)> {
     let mut res = 0;
@@ -181,7 +181,7 @@ pub fn decode_bytes<'a>(data: &'a [u8]) -> Result<(&'a [u8], usize)> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::{i64, u32};
+    use std::u32;
 
     macro_rules! check_res {
         ($num:ident, $res:expr, $len:expr, 1) => {
