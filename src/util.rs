@@ -3,6 +3,8 @@ pub mod binary;
 pub use skiplist::FixedLengthSuffixComparator as Comparator;
 pub use skiplist::{FixedLengthSuffixComparator, KeyComparator};
 use std::{cmp, ptr};
+use crate::{Result, Error};
+
 pub static COMPARATOR: FixedLengthSuffixComparator = make_comparator();
 
 pub const fn make_comparator() -> FixedLengthSuffixComparator {
@@ -59,4 +61,15 @@ where
         }
     }
     i
+}
+
+pub fn fill_file(file: &mut impl std::io::Write, mut size: u64) -> Result<()> {
+    let buf = vec![0; 4096];
+    let buf_len = buf.len() as u64;
+    while size > buf_len {
+        size -= buf_len;
+        file.write_all(&buf)?;
+    }
+    file.write_all(&buf[..size as usize])?;
+    Ok(())
 }

@@ -1,11 +1,17 @@
-use super::Result;
 use crate::util::binary::{
     decode_varint_u32, decode_varint_u64, encode_varint_u32_to_array, encode_varint_u64_to_array,
     varint_u32_bytes_len, varint_u64_bytes_len,
 };
 use bytes::{BufMut, Bytes, BytesMut};
+use crate::structs::Entry;
+use crate::AgateOptions;
+use crate::Result;
+use memmap::{MmapMut, MmapOptions};
 use std::fs::{File, OpenOptions};
+use bytes::BytesMut;
 use std::path::PathBuf;
+
+const MAX_HEADER_SIZE: usize = 21;
 
 /// `Header` stores metadata of an entry in WAL and in value log.
 #[derive(Default, Debug, PartialEq)]
@@ -76,15 +82,61 @@ impl Header {
     }
 }
 
+/// WAL of a memtable
+///
+/// TODO: delete WAL file when reference to WAL (or memtable) comes to 0
 pub struct Wal {
-    file_id: usize,
     path: PathBuf,
+    file: File,
+    mmap_file: MmapMut,
+    opts: AgateOptions,
+    write_at: u32,
 }
 
 impl Wal {
-    pub fn open(file_id: usize, path: PathBuf) -> Result<Wal> {
-        let _f: File = OpenOptions::new().append(true).create(true).open(&path)?;
-        Ok(Wal { file_id, path })
+    pub fn open(path: PathBuf, opts: AgateOptions) -> Result<Wal> {
+        let (file, bootstrap) = if path.exists() {
+            (
+                OpenOptions::new()
+                    .create(false)
+                    .read(true)
+                    .write(true)
+                    .open(&path)?,
+                false,
+            )
+        } else {
+            let mut file = OpenOptions::new()
+                .create_new(true)
+                .read(true)
+                .write(true)
+                .open(&path)?;
+            // TODO: use mmap to specify size instead of filling up the file
+            crate::util::fill_file(&mut file, 2 * opts.value_log_file_size)?;
+            file.sync_all()?;
+            (file, true)
+        };
+        let mmap_file = unsafe { MmapOptions::new().map_mut(&file)? };
+        let mut wal = Wal {
+            path,
+            file,
+            mmap_file,
+            opts,
+            write_at: 0
+        };
+
+        if bootstrap {
+            wal.bootstrap()?;
+        }
+
+        // TODO: we should read vlog headers and data key from wal.
+        // But at this time, I'm not sure about this part. So we just
+        // let the WAL to solely store entries.
+
+        Ok(wal)
+    }
+
+    fn bootstrap(&mut self) -> Result<()> {
+        Ok(())
     }
 
     pub fn write_entry(&self, _entry: Entry) -> Result<()> {
@@ -93,8 +145,37 @@ impl Wal {
     }
 
     pub fn sync(&self) -> Result<()> {
-        // TODO: not implemented
+        self.mmap_file.flush()?;
         Ok(())
+    }
+
+    pub fn zero_next_entry(&mut self) -> Result<()> {
+        let range =
+            &mut self.mmap_file[self.write_at as usize..self.write_at as usize + MAX_HEADER_SIZE];
+        // TODO: optimize zero fill
+        range.fill(0);
+        Ok(())
+    }
+
+    pub fn encode_entry(buf: &mut BytesMut, entry: &Entry, offset: u32) {
+        let header = Header {
+            key_len: entry.key.len(),
+            value_len: entry.value.len(),
+
+        };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempdir::TempDir;
+    #[test]
+    fn test_wal_create() {
+        let tmp_dir = TempDir::new("agatedb").unwrap();
+        let mut opts = AgateOptions::default();
+        opts.value_log_file_size(4096);
+        Wal::open(tmp_dir.path().join("1.wal"), opts).unwrap();
     }
 }
 

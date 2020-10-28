@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+#![feature(slice_fill)]
+
 mod checksum;
 mod db;
 mod entry;

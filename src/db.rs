@@ -51,6 +51,8 @@ pub struct AgateOptions {
     pub mem_table_size: u64,
 
     pub value_threshold: usize,
+    pub value_log_file_size: u64,
+    pub value_log_max_entries: u32,
 }
 
 impl Default for AgateOptions {
@@ -63,6 +65,8 @@ impl Default for AgateOptions {
             in_memory: false,
             sync_writes: false,
             value_threshold: 1 << 10,
+            value_log_file_size: 1 << 30 - 1,
+            value_log_max_entries: 1000000
         }
         // TODO: add other options
     }
@@ -91,6 +95,16 @@ impl AgateOptions {
 
     pub fn sync_writes(&mut self, sync_writes: bool) -> &mut AgateOptions {
         self.sync_writes = sync_writes;
+        self
+    }
+
+    pub fn value_log_file_size(&mut self, value_log_file_size: u64) -> &mut AgateOptions {
+        self.value_log_file_size = value_log_file_size;
+        self
+    }
+
+    pub fn value_log_max_entries(&mut self, value_log_max_entries: u32) -> &mut AgateOptions {
+        self.value_log_max_entries = value_log_max_entries;
         self
     }
 
@@ -168,7 +182,7 @@ impl Core {
         if opts.in_memory {
             return Ok(MemTable::new(skl, None, opts.clone()));
         }
-        let wal = Wal::open(file_id, path)?;
+        let wal = Wal::open(path, opts.clone())?;
         // TODO: delete WAL when skiplist ref count becomes zero
 
         let mut mem_table = MemTable::new(skl, Some(wal), opts.clone());
