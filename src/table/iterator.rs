@@ -1,5 +1,6 @@
 use super::builder::{Header, HEADER_SIZE};
 use super::{Block, TableInner};
+use crate::structs::AgateIterator;
 use crate::util::{self, KeyComparator, COMPARATOR};
 use crate::value::Value;
 use crate::Error;
@@ -250,12 +251,6 @@ impl<T: AsRef<TableInner>> Iterator<T> {
         self.err = None;
     }
 
-    /// Check if last operation of iterator is error
-    /// TODO: use `Result<()>` for all iterator operation and remove this if possible
-    pub fn valid(&self) -> bool {
-        self.err.is_none()
-    }
-
     pub fn use_cache(&self) -> bool {
         self.opt & ITERATOR_NOCACHE == 0
     }
@@ -422,11 +417,16 @@ impl<T: AsRef<TableInner>> Iterator<T> {
         }
     }
 
-    pub fn key(&self) -> &[u8] {
+    pub fn error(&self) -> Option<&IteratorError> {
+        self.err.as_ref()
+    }
+}
+impl<T: AsRef<TableInner>> AgateIterator for Iterator<T> {
+    fn key(&self) -> &[u8] {
         &self.block_iterator.as_ref().unwrap().key
     }
 
-    pub fn value(&self) -> Value {
+    fn value(&self) -> Value {
         let mut value = Value::default();
         value.decode(&self.block_iterator.as_ref().unwrap().val);
         value
@@ -436,7 +436,7 @@ impl<T: AsRef<TableInner>> Iterator<T> {
     /// Note that if the iterator becomes invalid after operation,
     /// you must reset the iterator by using `rewind` or `seek`
     /// before using it again.
-    pub fn next(&mut self) {
+    fn next(&mut self) {
         if self.opt & ITERATOR_REVERSED == 0 {
             self.next_inner();
         } else {
@@ -445,7 +445,7 @@ impl<T: AsRef<TableInner>> Iterator<T> {
     }
 
     /// Reset the iterator to first element
-    pub fn rewind(&mut self) {
+    fn rewind(&mut self) {
         if self.opt & ITERATOR_REVERSED == 0 {
             self.seek_to_first();
         } else {
@@ -454,7 +454,7 @@ impl<T: AsRef<TableInner>> Iterator<T> {
     }
 
     /// Seek to first entry >= key
-    pub fn seek(&mut self, key: &Bytes) {
+    fn seek(&mut self, key: &Bytes) {
         if self.opt & ITERATOR_REVERSED == 0 {
             self.seek_inner(key);
         } else {
@@ -462,8 +462,10 @@ impl<T: AsRef<TableInner>> Iterator<T> {
         }
     }
 
-    pub fn error(&self) -> Option<&IteratorError> {
-        self.err.as_ref()
+    /// Check if last operation of iterator is error
+    /// TODO: use `Result<()>` for all iterator operation and remove this if possible
+    fn valid(&self) -> bool {
+        self.err.is_none()
     }
 }
 
