@@ -1,6 +1,6 @@
 use super::Result;
 use crate::util::binary::{
-    decode_varint_u32, decode_varint_u64, encode_varint_u32, encode_varint_u64,
+    decode_varint_u32, decode_varint_u64, encode_varint_u32_to_array, encode_varint_u64_to_array,
     varint_u32_bytes_len, varint_u64_bytes_len,
 };
 use bytes::{BufMut, Bytes, BytesMut};
@@ -31,11 +31,21 @@ impl Header {
             let buf = bytes.bytes_mut();
             *(*buf.get_unchecked_mut(0)).as_mut_ptr() = self.meta;
             *(*buf.get_unchecked_mut(1)).as_mut_ptr() = self.user_meta;
-            bytes.advance_mut(2);
+            let mut index = 2;
+            index += encode_varint_u32_to_array(
+                (*buf.get_unchecked_mut(index)).as_mut_ptr(),
+                self.key_len,
+            );
+            index += encode_varint_u32_to_array(
+                (*buf.get_unchecked_mut(index)).as_mut_ptr(),
+                self.value_len,
+            );
+            index += encode_varint_u64_to_array(
+                (*buf.get_unchecked_mut(index)).as_mut_ptr(),
+                self.expires_at,
+            );
+            bytes.advance_mut(index);
         }
-        encode_varint_u32(bytes, self.key_len);
-        encode_varint_u32(bytes, self.value_len);
-        encode_varint_u64(bytes, self.expires_at);
         debug_assert_eq!(bytes.len(), encoded_len);
     }
 
