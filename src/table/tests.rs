@@ -184,6 +184,8 @@ fn test_iterate_from_start() {
             it.next();
             count += 1;
         }
+
+        assert_eq!(n, count);
     }
 }
 
