@@ -1,5 +1,8 @@
 use super::Result;
-use crate::util::{decode_varint_uncheck, encode_varint_uncheck, varint_len};
+use crate::util::binary::{
+    decode_varint_u32, decode_varint_u64, encode_varint_u32, encode_varint_u64,
+    varint_u32_bytes_len, varint_u64_bytes_len,
+};
 use bytes::{BufMut, Bytes, BytesMut};
 use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
@@ -16,44 +19,40 @@ struct Header {
 impl Header {
     pub fn encoded_len(&self) -> usize {
         1 + 1
-            + varint_len(self.expires_at as usize)
-            + varint_len(self.key_len as usize)
-            + varint_len(self.value_len as usize)
+            + varint_u64_bytes_len(self.expires_at) as usize
+            + varint_u32_bytes_len(self.key_len) as usize
+            + varint_u32_bytes_len(self.value_len) as usize
     }
 
     pub fn encode(&self, bytes: &mut BytesMut) {
         let encoded_len = self.encoded_len();
         bytes.reserve(encoded_len);
-        let read = unsafe {
+        unsafe {
             let buf = bytes.bytes_mut();
             *(*buf.get_unchecked_mut(0)).as_mut_ptr() = self.meta;
             *(*buf.get_unchecked_mut(1)).as_mut_ptr() = self.user_meta;
-            let mut read = 2;
-            read += encode_varint_uncheck(buf.get_unchecked_mut(read..), self.key_len as u64);
-            read += encode_varint_uncheck(buf.get_unchecked_mut(read..), self.value_len as u64);
-            read += encode_varint_uncheck(buf.get_unchecked_mut(read..), self.expires_at);
-            read
-        };
-        assert_eq!(read, encoded_len);
-        unsafe {
-            bytes.advance_mut(read);
+            bytes.advance_mut(2);
         }
+        encode_varint_u32(bytes, self.key_len);
+        encode_varint_u32(bytes, self.value_len);
+        encode_varint_u64(bytes, self.expires_at);
+        debug_assert_eq!(bytes.len(), encoded_len);
     }
 
-    pub fn decode(&mut self, bytes: &mut Bytes) -> usize {
+    pub fn decode(&mut self, bytes: &mut Bytes) -> Result<usize> {
         self.meta = bytes[0];
         self.user_meta = bytes[1];
-        let mut index = 2;
-        let (key_len, count) = unsafe { decode_varint_uncheck(&bytes[index..]) };
-        self.key_len = key_len as u32;
-        index += count;
-        let (value_len, count) = unsafe { decode_varint_uncheck(&bytes[index..]) };
-        self.value_len = value_len as u32;
-        index += count;
-        let (expires_at, count) = unsafe { decode_varint_uncheck(&bytes[index..]) };
+        let mut read = 2;
+        let (key_len, cnt) = decode_varint_u32(&bytes[read..])?;
+        read += cnt as usize;
+        self.key_len = key_len;
+        let (value_len, cnt) = decode_varint_u32(&bytes[read..])?;
+        read += cnt as usize;
+        self.value_len = value_len;
+        let (expires_at, cnt) = decode_varint_u64(&bytes[read..])?;
+        read += cnt as usize;
         self.expires_at = expires_at;
-        index += count;
-        index
+        Ok(read)
     }
 }
 
@@ -88,7 +87,7 @@ mod tests {
         let mut buf = buf.freeze();
 
         let mut new_header = Header::default();
-        new_header.decode(&mut buf);
+        new_header.decode(&mut buf).unwrap();
         assert_eq!(new_header, header);
     }
 }

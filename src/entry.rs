@@ -1,6 +1,4 @@
-use crate::util::{encode_varint_uncheck, varint_len};
-use bytes::{BufMut, Bytes, BytesMut};
-use std::ptr;
+use bytes::Bytes;
 
 const DELETE: u8 = 1 << 0;
 const VALUE_POINTER: u8 = 1 << 1;
@@ -24,6 +22,8 @@ impl Entry {
         self.meta |= DELETE;
     }
 
+    // TODO: entry encoding will be done later, as current WAL encodes header and key / value separately
+    /*
     pub fn encoded_len(&self) -> usize {
         let kl = self.key.len();
         let vl = self.value.len();
@@ -53,5 +53,5 @@ impl Entry {
         unsafe {
             bytes.advance_mut(encoded_len);
         }
-    }
+    }*/
 }
