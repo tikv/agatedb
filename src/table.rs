@@ -1,10 +1,13 @@
 pub(crate) mod builder;
 mod iterator;
+mod merge_iterator;
 
 use crate::checksum;
 use crate::opt::Options;
+use crate::structs::AgateIterator;
 use crate::Error;
 use crate::Result;
+
 use bytes::{Buf, Bytes};
 use iterator::{Iterator as TableIterator, ITERATOR_NOCACHE, ITERATOR_REVERSED};
 use prost::Message;
