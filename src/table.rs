@@ -239,10 +239,9 @@ impl TableInner {
         if idx >= self.offsets_length() {
             return Err(Error::TableRead("block out of index".to_string()));
         }
-        let block_offset = self.offsets(idx).ok_or_else(|| Error::TableRead(format!(
-            "failed to get offset block {}",
-            idx
-        )))?;
+        let block_offset = self
+            .offsets(idx)
+            .ok_or_else(|| Error::TableRead(format!("failed to get offset block {}", idx)))?;
 
         let offset = block_offset.offset as usize;
         let data = self.read(offset, block_offset.len as usize)?;
