@@ -29,6 +29,7 @@ impl Header {
         bytes.reserve(encoded_len);
         unsafe {
             let buf = bytes.bytes_mut();
+            assert!(buf.len() >= encoded_len);
             *(*buf.get_unchecked_mut(0)).as_mut_ptr() = self.meta;
             *(*buf.get_unchecked_mut(1)).as_mut_ptr() = self.user_meta;
             let mut index = 2;
