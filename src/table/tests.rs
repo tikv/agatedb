@@ -273,32 +273,30 @@ fn test_iterate_back_and_forth() {
 fn test_uni_iterator() {
     let opts = get_test_table_options();
     let table = build_test_table(b"key", 10000, opts);
-    {
-        let mut it = table.new_iterator(0);
-        it.rewind();
-        let mut count = 0;
-        while it.valid() {
-            let v = it.value();
-            assert_eq!(count.to_string(), v.value);
-            assert_eq!(b'A', v.meta);
-            it.next();
-            count += 1;
-        }
-        assert_eq!(count, 10000);
+
+    let mut it = table.new_iterator(0);
+    it.rewind();
+    let mut count = 0;
+    while it.valid() {
+        let v = it.value();
+        assert_eq!(count.to_string(), v.value);
+        assert_eq!(b'A', v.meta);
+        it.next();
+        count += 1;
     }
-    {
-        let mut it = table.new_iterator(ITERATOR_REVERSED);
-        it.rewind();
-        let mut count = 0;
-        while it.valid() {
-            let v = it.value();
-            assert_eq!((10000 - 1 - count).to_string(), v.value);
-            assert_eq!(b'A', v.meta);
-            it.next();
-            count += 1;
-        }
-        assert_eq!(count, 10000);
+    assert_eq!(count, 10000);
+
+    let mut it = table.new_iterator(ITERATOR_REVERSED);
+    it.rewind();
+    let mut count = 0;
+    while it.valid() {
+        let v = it.value();
+        assert_eq!((10000 - 1 - count).to_string(), v.value);
+        assert_eq!(b'A', v.meta);
+        it.next();
+        count += 1;
     }
+    assert_eq!(count, 10000);
 }
 
 // TODO: concat iterators and merge iterators
