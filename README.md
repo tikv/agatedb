@@ -12,10 +12,10 @@ progress at the [Project][2].
 The whole plan is to port [badger][3] in Rust first and then port the
 optimizations that has been used in [unistore][4].
 
-1: https://github.com/tikv/tikv
-2: https://github.com/tikv/tikv/projects/1
-3: https://github.com/dgraph-io/badger
-4: https://github.com/ngaut/unistore
+[1]: https://github.com/tikv/tikv
+[2]: https://github.com/tikv/tikv/projects/1
+[3]: https://github.com/dgraph-io/badger
+[4]: https://github.com/ngaut/unistore
 
 ## Why not X?
 
