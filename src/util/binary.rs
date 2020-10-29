@@ -4,8 +4,7 @@ use std::{cmp, ptr, slice, u64};
 
 fn decode_varint_u32_slow(data: &[u8]) -> Result<(u32, u8)> {
     let mut res = 0;
-    for i in 0..data.len() {
-        let b = data[i];
+    for (i, &b) in data.iter().enumerate() {
         res |= (b as u32 & 0x7f) << (i * 7);
         if b < 0x80 {
             return Ok((res, i as u8 + 1));
@@ -47,8 +46,7 @@ fn decode_varint_u32_fallback(data: &[u8]) -> Result<(u32, u8)> {
 
 fn decode_varint_u64_slow(data: &[u8]) -> Result<(u64, u8)> {
     let mut res = 0;
-    for i in 0..data.len() {
-        let b = data[i];
+    for (i, &b) in data.iter().enumerate() {
         res |= (b as u64 & 0x7f) << (i * 7);
         if b < 0x80 {
             return Ok((res, i as u8 + 1));
@@ -196,7 +194,7 @@ mod test {
                     assert_eq!(large_buffer, bin, "encode for {}", n);
 
                     assert_eq!($len(n), bin.len() as u32, "{:?}", n);
-                    check_res!(n, $dec(&mut output).unwrap(), bin.len(), $check_len);
+                    check_res!(n, $dec(&output).unwrap(), bin.len(), $check_len);
                 }
             }
         };
