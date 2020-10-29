@@ -1,6 +1,4 @@
-use bytes::{BufMut, Bytes, BytesMut};
-use std::mem::MaybeUninit;
-use std::ptr;
+use bytes::Bytes;
 
 const DELETE: u8 = 1 << 0;
 const VALUE_POINTER: u8 = 1 << 1;
@@ -9,55 +7,6 @@ pub struct Entry {
     pub key: Bytes,
     pub value: Bytes,
     pub meta: u8,
-}
-
-fn varint_len(l: usize) -> usize {
-    if l < 0x80 {
-        1
-    } else if l < (1 << 14) {
-        2
-    } else if l < (1 << 21) {
-        3
-    } else if 1 < (1 << 28) {
-        4
-    } else if 1 < (1usize << 35) {
-        5
-    } else if 1 < (1usize << 42) {
-        6
-    } else if 1 < (1usize << 49) {
-        7
-    } else if 1 < (1usize << 56) {
-        8
-    } else if 1 < (1usize << 63) {
-        9
-    } else {
-        10
-    }
-}
-
-unsafe fn encode_varint_uncheck(bytes: &mut [MaybeUninit<u8>], mut u: u64) -> usize {
-    let mut p = bytes.as_mut_ptr();
-    let mut c = 0;
-    while u >= 0x80 {
-        (*(&mut *p).as_mut_ptr()) = (u as u8 & 0x7f) | 0x80;
-        p = p.add(1);
-        u >>= 7;
-        c += 1;
-    }
-    (*(&mut *p).as_mut_ptr()) = u as u8;
-    c + 1
-}
-
-unsafe fn decode_varint_uncheck(bytes: &[u8]) -> (u64, usize) {
-    let mut a = 0;
-    let mut p = bytes.as_ptr();
-    let mut c = 0;
-    while *p >= 0x80 {
-        a = (a << 7) | (*p & 0x7f) as u64;
-        p = p.add(1);
-        c += 1;
-    }
-    ((a << 7) | (*p) as u64, c + 1)
 }
 
 impl Entry {
@@ -73,6 +22,8 @@ impl Entry {
         self.meta |= DELETE;
     }
 
+    // TODO: entry encoding will be done later, as current WAL encodes header and key / value separately
+    /*
     pub fn encoded_len(&self) -> usize {
         let kl = self.key.len();
         let vl = self.value.len();
@@ -102,5 +53,5 @@ impl Entry {
         unsafe {
             bytes.advance_mut(encoded_len);
         }
-    }
+    }*/
 }
