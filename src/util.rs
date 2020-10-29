@@ -1,5 +1,8 @@
+pub mod binary;
+
 pub use skiplist::{FixedLengthSuffixComparator, KeyComparator};
 use std::{cmp, ptr};
+
 pub static COMPARATOR: FixedLengthSuffixComparator = FixedLengthSuffixComparator::new(8);
 
 unsafe fn u64(ptr: *const u8) -> u64 {

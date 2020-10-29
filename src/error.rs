@@ -19,6 +19,8 @@ pub enum Error {
     InvalidFilename(String),
     #[error("Invalid prost data: {0}")]
     Decode(#[source] Box<prost::DecodeError>),
+    #[error("Invalid data: {0}")]
+    VarDecode(&'static str),
     #[error("{0}")]
     TableRead(String),
 }
