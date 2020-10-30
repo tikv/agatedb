@@ -1,5 +1,10 @@
 use crate::entry::Entry;
+use crate::entry::EntryRef;
+use crate::wal::Header;
+use crate::Result;
 use bytes::{BufMut, Bytes, BytesMut};
+use std::io::BufReader;
+use std::io::{Read, Seek};
 use std::mem::MaybeUninit;
 
 pub const VALUE_DELETE: u8 = 1 << 0;
@@ -132,4 +137,54 @@ impl Value {
 
 pub struct Request {
     pub entries: Vec<Entry>,
+}
+
+pub struct ValuePointer {
+    pub file_id: u32,
+    pub len: u32,
+    pub offset: u32,
+}
+
+pub struct EntryReader {
+    key: Vec<u8>,
+    value: Vec<u8>,
+    buf: Vec<u8>,
+    header: Header,
+    record_offset: u32,
+}
+
+impl EntryReader {
+    pub fn new() -> Self {
+        Self {
+            record_offset: 0,
+            key: vec![],
+            value: vec![],
+            buf: vec![0; crate::wal::MAX_HEADER_SIZE],
+            header: Header::default(),
+        }
+    }
+
+    /// Entry returns header, key and value.
+    pub fn entry<R: Read + Seek>(&mut self, reader: &mut BufReader<R>) -> Result<EntryRef> {
+        // first, read MAX_HEADER_SIZE bytes to buf
+        let size = reader.read(&mut self.buf)?;
+        // then, try decode the header
+        let decoded_size = self.header.decode(&self.buf[0..size as usize])?;
+        // now, we seek back to where the header ends
+        reader.seek(std::io::SeekFrom::Current(
+            decoded_size as i64 - size as i64,
+        ))?;
+        self.key.resize(self.header.key_len as usize, 0);
+        reader.read_exact(&mut self.key)?;
+        self.value.resize(self.header.value_len as usize, 0);
+        reader.read_exact(&mut self.value)?;
+        Ok(EntryRef {
+            key: &self.key,
+            value: &self.value,
+            meta: self.header.meta,
+            user_meta: self.header.user_meta,
+            expires_at: self.header.expires_at,
+            version: 0,
+        })
+    }
 }

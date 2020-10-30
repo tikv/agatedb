@@ -1,4 +1,4 @@
-use crate::entry::Entry;
+use crate::entry::{Entry, EntryRef};
 use crate::format::get_ts;
 use crate::util::Comparator;
 use crate::value::{self, Value};
@@ -69,9 +69,26 @@ impl MemTable {
 
     pub fn update_skip_list(&self) -> Result<()> {
         let mut core = self.core.write()?;
-        if let Some(ref mut _wal) = core.wal {
-            // TODO: implement update
+        let mut max_version = core.max_version;
+        if let Some(ref mut wal) = core.wal {
+            let mut it = wal.iter()?;
+            while let Some(entry) = it.next() {
+                let entry = entry?;
+                let ts = get_ts(entry.key);
+                if ts > max_version {
+                    max_version = ts;
+                }
+                let v = Value {
+                    value: Bytes::copy_from_slice(entry.value),
+                    meta: entry.meta,
+                    user_meta: entry.user_meta,
+                    expires_at: entry.expires_at,
+                    version: 0,
+                };
+                self.skl.put(Bytes::copy_from_slice(entry.key), v);
+            }
         }
+        core.max_version = max_version;
         Ok(())
     }
 

@@ -28,6 +28,8 @@ pub enum Error {
     DBClosed,
     #[error("Lock Poison")]
     PoisonError(String),
+    #[error("{0}")]
+    LogRead(String),
 }
 
 impl From<io::Error> for Error {

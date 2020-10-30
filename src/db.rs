@@ -1,7 +1,7 @@
 use super::memtable::{MemTable, MemTables};
 use super::{Error, Result};
-use crate::format::get_ts;
 use crate::entry::Entry;
+use crate::format::get_ts;
 use crate::util::make_comparator;
 use crate::value::{self, Request, Value};
 use crate::wal::Wal;
@@ -66,7 +66,7 @@ impl Default for AgateOptions {
             sync_writes: false,
             value_threshold: 1 << 10,
             value_log_file_size: 1 << 30 - 1,
-            value_log_max_entries: 1000000
+            value_log_max_entries: 1000000,
         }
         // TODO: add other options
     }
@@ -120,13 +120,14 @@ impl AgateOptions {
     pub fn open<P: AsRef<Path>>(&mut self, path: P) -> Result<Agate> {
         self.fix_options()?;
 
+        self.path = path.as_ref().to_path_buf();
+
         if !self.in_memory {
-            let p = path.as_ref();
-            if !p.exists() {
+            if !self.path.exists() {
                 if !self.create_if_not_exists {
-                    return Err(Error::Config(format!("{} doesn't exist", p.display())));
+                    return Err(Error::Config(format!("{:?} doesn't exist", self.path)));
                 }
-                fs::create_dir_all(p)?;
+                fs::create_dir_all(&self.path)?;
             }
             // TODO: create wal path, acquire database path lock
         }
@@ -243,7 +244,7 @@ impl Core {
     }
 
     /// `write_to_lsm` will only be called in write thread (or write coroutine).
-    /// 
+    ///
     /// By using a fine-grained lock approach, writing to LSM tree acquires:
     /// 1. read lock of memtable list (only block flush)
     /// 2. write lock of mutable memtable WAL (won't block mut-table read).
