@@ -10,7 +10,6 @@ mod levels;
 mod memtable;
 mod ops;
 mod opt;
-mod structs;
 mod table;
 mod util;
 mod value;

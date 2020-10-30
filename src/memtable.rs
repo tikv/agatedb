@@ -1,5 +1,5 @@
+use crate::entry::Entry;
 use crate::format::get_ts;
-use crate::structs::Entry;
 use crate::util::Comparator;
 use crate::value::{self, Value};
 use crate::wal::Wal;
@@ -11,15 +11,23 @@ use std::collections::VecDeque;
 use std::mem::{self, ManuallyDrop, MaybeUninit};
 
 use std::ptr;
-use std::sync::atomic::AtomicU64;
+use std::sync::RwLock;
 
 const MEMTABLE_VIEW_MAX: usize = 20;
 
+/// MemTableCore guards WAL and max_version.
+/// These data will only be modified on memtable put.
+/// Therefore, separating wal and max_version enables
+/// concurrent read/write of MemTable.
+struct MemTableCore {
+    wal: Option<Wal>,
+    max_version: u64,
+}
+
 pub struct MemTable {
     pub(crate) skl: Skiplist<Comparator>,
-    pub(crate) wal: Option<Wal>,
-    pub(crate) max_version: AtomicU64,
-    pub(crate) opt: AgateOptions,
+    opt: AgateOptions,
+    core: RwLock<MemTableCore>,
 }
 
 impl MemTable {
@@ -51,30 +59,34 @@ impl MemTable {
     pub fn new(skl: Skiplist<Comparator>, wal: Option<Wal>, opt: AgateOptions) -> Self {
         Self {
             skl,
-            wal,
             opt,
-            max_version: AtomicU64::new(0),
+            core: RwLock::new(MemTableCore {
+                wal,
+                max_version: 0,
+            }),
         }
     }
 
-    pub fn update_skip_list(&mut self) -> Result<()> {
-        if let Some(ref _wal) = self.wal {
-            unimplemented!()
+    pub fn update_skip_list(&self) -> Result<()> {
+        let mut core = self.core.write()?;
+        if let Some(ref mut _wal) = core.wal {
+            // TODO: implement update
         }
         Ok(())
     }
 
     pub fn put(&self, key: Bytes, value: Value) -> Result<()> {
-        if let Some(ref wal) = self.wal {
-            let entry = Entry::new(
-                key.clone(),
-                value.value.clone(),
-                value.expires_at,
-                value.version,
-                value.user_meta,
-                value.meta,
-            );
-            wal.write_entry(entry)?;
+        let mut core = self.core.write()?;
+        if let Some(ref mut wal) = core.wal {
+            let entry = Entry {
+                key: key.clone(),
+                value: value.value.clone(),
+                expires_at: value.expires_at,
+                version: value.version,
+                user_meta: value.user_meta,
+                meta: value.meta,
+            };
+            wal.write_entry(&entry)?;
         }
 
         // only insert finish marker in WAL
@@ -87,14 +99,14 @@ impl MemTable {
         self.skl.put(key, value);
 
         // update max version
-        self.max_version
-            .fetch_max(ts, std::sync::atomic::Ordering::SeqCst);
+        core.max_version = ts;
 
         Ok(())
     }
 
     pub fn sync_wal(&self) -> Result<()> {
-        if let Some(ref wal) = self.wal {
+        let mut core = self.core.write()?;
+        if let Some(ref mut wal) = core.wal {
             wal.sync()?;
         }
         Ok(())

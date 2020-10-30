@@ -1,14 +1,13 @@
+use crate::entry::Entry;
 use crate::util::binary::{
     decode_varint_u32, decode_varint_u64, encode_varint_u32_to_array, encode_varint_u64_to_array,
     varint_u32_bytes_len, varint_u64_bytes_len,
 };
-use bytes::{BufMut, Bytes, BytesMut};
-use crate::structs::Entry;
 use crate::AgateOptions;
 use crate::Result;
+use bytes::{BufMut, Bytes, BytesMut};
 use memmap::{MmapMut, MmapOptions};
 use std::fs::{File, OpenOptions};
-use bytes::BytesMut;
 use std::path::PathBuf;
 
 const MAX_HEADER_SIZE: usize = 21;
@@ -91,6 +90,7 @@ pub struct Wal {
     mmap_file: MmapMut,
     opts: AgateOptions,
     write_at: u32,
+    buf: BytesMut,
 }
 
 impl Wal {
@@ -121,7 +121,8 @@ impl Wal {
             file,
             mmap_file,
             opts,
-            write_at: 0
+            write_at: 0,
+            buf: BytesMut::new(),
         };
 
         if bootstrap {
@@ -139,12 +140,17 @@ impl Wal {
         Ok(())
     }
 
-    pub fn write_entry(&self, _entry: Entry) -> Result<()> {
-        // TODO: not implementaed
+    pub(crate) fn write_entry(&mut self, entry: &Entry) -> Result<()> {
+        self.buf.clear();
+        Self::encode_entry(&mut self.buf, entry);
+        self.mmap_file[self.write_at as usize..self.write_at as usize + self.buf.len()]
+            .clone_from_slice(&self.buf[..]);
+        self.write_at += self.buf.len() as u32;
+        self.zero_next_entry()?;
         Ok(())
     }
 
-    pub fn sync(&self) -> Result<()> {
+    pub fn sync(&mut self) -> Result<()> {
         self.mmap_file.flush()?;
         Ok(())
     }
@@ -157,12 +163,24 @@ impl Wal {
         Ok(())
     }
 
-    pub fn encode_entry(buf: &mut BytesMut, entry: &Entry, offset: u32) {
+    fn encode_entry(mut buf: &mut BytesMut, entry: &Entry) {
         let header = Header {
-            key_len: entry.key.len(),
-            value_len: entry.value.len(),
-
+            key_len: entry.key.len() as u32,
+            value_len: entry.value.len() as u32,
+            expires_at: entry.expires_at,
+            meta: entry.meta,
+            user_meta: entry.user_meta,
         };
+
+        // write header to buffer
+        header.encode(&mut buf);
+
+        // write key and value to buffer
+        // TODO: encryption
+        buf.extend_from_slice(&entry.key);
+        buf.extend_from_slice(&entry.value);
+
+        // TODO: add CRC32 check
     }
 }
 
@@ -177,11 +195,6 @@ mod tests {
         opts.value_log_file_size(4096);
         Wal::open(tmp_dir.path().join("1.wal"), opts).unwrap();
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     #[test]
     fn test_header_encode() {

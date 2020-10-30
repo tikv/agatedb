@@ -1,7 +1,7 @@
 use super::memtable::{MemTable, MemTables};
 use super::{Error, Result};
 use crate::format::get_ts;
-use crate::structs::Entry;
+use crate::entry::Entry;
 use crate::util::make_comparator;
 use crate::value::{self, Request, Value};
 use crate::wal::Wal;
@@ -185,7 +185,7 @@ impl Core {
         let wal = Wal::open(path, opts.clone())?;
         // TODO: delete WAL when skiplist ref count becomes zero
 
-        let mut mem_table = MemTable::new(skl, Some(wal), opts.clone());
+        let mem_table = MemTable::new(skl, Some(wal), opts.clone());
 
         mem_table.update_skip_list()?;
 
@@ -242,6 +242,12 @@ impl Core {
         panic!("value not available in memtable") // Should get from level controller
     }
 
+    /// `write_to_lsm` will only be called in write thread (or write coroutine).
+    /// 
+    /// By using a fine-grained lock approach, writing to LSM tree acquires:
+    /// 1. read lock of memtable list (only block flush)
+    /// 2. write lock of mutable memtable WAL (won't block mut-table read).
+    /// 3. level controller lock (TBD)
     pub fn write_to_lsm(&self, request: Request) -> Result<()> {
         // TODO: check entries and pointers
 
@@ -309,7 +315,8 @@ mod tests {
         let tmp_dir = TempDir::new("agatedb").unwrap();
         let agate = AgateOptions::default()
             .create()
-            .in_memory(true)
+            .in_memory(false)
+            .value_log_file_size(4096)
             .open(tmp_dir)
             .unwrap();
         f(agate)
@@ -321,7 +328,7 @@ mod tests {
             let key = key_with_ts(BytesMut::from("2333"), 0);
             let value = Bytes::from("2333333333333333");
             let req = Request {
-                entries: vec![Entry::new(key.clone(), value.clone(), 0, 0, 0, 0)],
+                entries: vec![Entry::new(key.clone(), value.clone())],
             };
             agate.write_to_lsm(req).unwrap();
             agate.get(&key).unwrap();

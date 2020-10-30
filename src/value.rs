@@ -1,4 +1,4 @@
-use crate::structs::Entry;
+use crate::entry::Entry;
 use bytes::{BufMut, Bytes, BytesMut};
 use std::mem::MaybeUninit;
 
