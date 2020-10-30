@@ -14,7 +14,6 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::Mutex;
 
 #[cfg(test)]
 mod tests;
@@ -361,7 +360,7 @@ impl TableInner {
                 } else {
                     Ok(data.slice(offset..offset + size))
                 }
-            },
+            }
             MmapFile::File { mmap, .. } => {
                 if offset + size > mmap.len() {
                     Err(Error::TableRead(format!(
