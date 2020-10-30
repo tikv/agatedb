@@ -242,7 +242,10 @@ impl<T: AsRef<TableInner>> Iterator<T> {
         }
     }
 
-    fn reset(&mut self) {
+    /// Reset iterator
+    ///
+    /// This function will only be used in tests outside this mod
+    pub(crate) fn reset(&mut self) {
         self.bpos = 0;
         self.err = None;
     }
@@ -356,7 +359,10 @@ impl<T: AsRef<TableInner>> Iterator<T> {
         }
     }
 
-    fn next_inner(&mut self) {
+    /// Seek to next key
+    ///
+    /// This function will be only used in tests outside this mod
+    pub(crate) fn next_inner(&mut self) {
         self.err = None;
 
         if self.bpos >= self.table.as_ref().offsets_length() {
@@ -384,7 +390,10 @@ impl<T: AsRef<TableInner>> Iterator<T> {
         }
     }
 
-    fn prev_inner(&mut self) {
+    /// Seek to previous key
+    ///
+    /// This function will be only used in tests outside this mod
+    pub(crate) fn prev_inner(&mut self) {
         self.err = None;
 
         if self.bpos == std::usize::MAX {

@@ -29,7 +29,11 @@ members = [
 ]
 
 [[bench]]
-name = "bench"
+name = "bench_common"
+harness = false
+
+[[bench]]
+name = "bench_table"
 harness = false
 
 [profile.bench]

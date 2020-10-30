@@ -15,6 +15,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
 
+#[cfg(test)]
+mod tests;
+
 /// MmapFile stores SST data. `File` refers to a file on disk,
 /// and `Memory` refers to data in memory.
 // TODO: use a mmap library instead of handling I/O on our own

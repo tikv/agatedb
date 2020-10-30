@@ -16,6 +16,7 @@ mod wal;
 pub use format::{get_ts, key_with_ts};
 pub use opt::Options as TableOptions;
 pub use table::builder::Builder as TableBuilder;
+pub use table::Table;
 pub use value::Value;
 
 pub use db::{Agate, AgateOptions};
