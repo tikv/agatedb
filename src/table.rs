@@ -129,15 +129,18 @@ impl TableInner {
         if matches!(opts.checksum_mode, OnTableAndBlockRead | OnTableRead) {
             inner.verify_checksum()?;
         }
+
         Ok(inner)
     }
 
     /// Open an existing SST from data in memory
     fn open_in_memory(data: Bytes, id: u64, opts: Options) -> Result<TableInner> {
+        use ChecksumVerificationMode::*;
+
         let table_size = data.len();
         let mut inner = TableInner {
             file: MmapFile::Memory { data },
-            opts,
+            opts: opts.clone(),
             table_size,
             id,
             smallest: Bytes::new(),
@@ -149,7 +152,11 @@ impl TableInner {
             index_len: 0,
         };
         inner.init_biggest_and_smallest()?;
-        inner.verify_checksum()?;
+
+        if matches!(opts.checksum_mode, OnTableAndBlockRead | OnTableRead) {
+            inner.verify_checksum()?;
+        }
+
         Ok(inner)
     }
 
@@ -348,9 +355,9 @@ impl TableInner {
 
         let table_index = self.fetch_index();
         for i in 0..table_index.offsets.len() {
-            let block = self.block(i, true)?;
             // When using OnBlockRead or OnTableAndBlockRead, we do not need to verify block
-            // checksum now
+            // checksum now. But we still need to check if there is an encoding error in block.
+            let block = self.block(i, true)?;
             if !matches!(self.opts.checksum_mode, OnBlockRead | OnTableAndBlockRead) {
                 block.verify_checksum()?;
             }
