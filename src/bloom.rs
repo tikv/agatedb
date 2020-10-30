@@ -1,12 +1,15 @@
 use bitvec::prelude::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
+/// Bloom implements bloom filter functionalities over
+/// a bit-slice of data.
 pub struct Bloom<'a> {
     filter: &'a BitSlice<Lsb0, u8>,
     k: u32,
 }
 
 impl<'a> Bloom<'a> {
+    /// Create a bloom filter from a byte slice
     pub fn new(buf: &'a [u8]) -> Self {
         let filter = &buf[..buf.len() - 4];
         let k = (&buf[buf.len() - 4..]).get_u32();
@@ -16,6 +19,7 @@ impl<'a> Bloom<'a> {
         }
     }
 
+    /// Get bloom filter bits per key from entries count and FPR
     pub fn bloom_bits_per_key(entries: usize, false_positive_rate: f64) -> usize {
         let size =
             -1.0 * (entries as f64) * false_positive_rate.ln() / (0.69314718056 as f64).powi(2);
@@ -23,6 +27,7 @@ impl<'a> Bloom<'a> {
         locs as usize
     }
 
+    /// Build bloom filter from key hashes
     pub fn build_from_key_hashes(keys: &[u32], bits_per_key: usize) -> Bytes {
         let k = ((bits_per_key as f64) * 0.69) as u32;
         let k = k.min(30).max(1);
@@ -47,6 +52,7 @@ impl<'a> Bloom<'a> {
         buf.freeze()
     }
 
+    /// Check if a bloom filter may contain some data
     pub fn may_contain(&self, mut h: u32) -> bool {
         if self.k > 30 {
             // potential new encoding for short bloom filters

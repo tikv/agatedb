@@ -66,7 +66,9 @@ pub struct TableInner {
     index_start: usize,
     /// length of index
     index_len: usize,
+    /// true if there's bloom filter in table
     has_bloom_filter: bool,
+    /// table options
     opts: Options,
 }
 
