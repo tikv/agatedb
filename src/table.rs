@@ -203,7 +203,7 @@ impl TableInner {
         self.estimated_size = self.table_size as u32;
 
         // bloom filter
-        self.has_bloom_filter = self.index.bloom_filter.len() > 0;
+        self.has_bloom_filter = !self.index.bloom_filter.is_empty();
 
         Ok(&self.index.offsets[0])
     }

@@ -14,7 +14,6 @@ skiplist = { path = "skiplist" }
 memmap = "0.7"
 farmhash = "1.1"
 prost = "0.6"
-bitvec = "0.19"
 
 [dev-dependencies]
 criterion = "0.3"
