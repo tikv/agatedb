@@ -145,3 +145,28 @@ pub struct ValuePointer {
     pub offset: u32,
 }
 
+
+pub struct EntryReader {
+    key: Vec<u8>,
+    value: Vec<u8>,
+    buf: Vec<u8>,
+    header: Header,
+    record_offset: u32,
+}
+
+impl EntryReader {
+    pub fn new() -> Self {
+        Self {
+            record_offset: 0,
+            key: vec![],
+            value: vec![],
+            buf: vec![0; crate::wal::MAX_HEADER_SIZE],
+            header: Header::default(),
+        }
+    }
+
+    /// Entry returns header, key and value.
+    pub fn entry<R: Read + Seek>(&mut self, reader: &mut BufReader<R>) -> Result<EntryRef> {
+        unimplemented!()
+    }
+}

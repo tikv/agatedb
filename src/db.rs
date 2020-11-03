@@ -316,7 +316,7 @@ mod tests {
         let tmp_dir = TempDir::new("agatedb").unwrap();
         let agate = AgateOptions::default()
             .create()
-            .in_memory(false)
+            .in_memory(true)
             .value_log_file_size(4096)
             .open(tmp_dir)
             .unwrap();
