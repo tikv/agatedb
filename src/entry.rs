@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use core::mem::MaybeUninit;
 
 const DELETE: u8 = 1 << 0;
 const VALUE_POINTER: u8 = 1 << 1;
