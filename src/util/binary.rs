@@ -161,23 +161,6 @@ pub fn varint_u64_bytes_len(mut n: u64) -> u32 {
     ((63 - n.leading_zeros()) * 9 + 73) / 64
 }
 
-#[inline]
-pub fn encode_bytes(data: &mut BytesMut, bytes: &[u8]) {
-    encode_varint_u32(data, bytes.len() as u32);
-    data.extend_from_slice(bytes);
-}
-
-#[inline]
-pub fn decode_bytes<'a>(data: &'a [u8]) -> Result<(&'a [u8], usize)> {
-    let (len, read) = decode_varint_u32(data)?;
-    let res = if data.len() > len as usize {
-        unsafe { data.get_unchecked(read as usize..len as usize) }
-    } else {
-        return Err(Error::VarDecode("Truncated"));
-    };
-    Ok((res, read as usize + len as usize))
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
