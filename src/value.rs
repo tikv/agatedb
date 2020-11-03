@@ -165,7 +165,7 @@ impl EntryReader {
     }
 
     /// Entry returns header, key and value.
-    pub fn entry<R: Read + Seek>(&mut self, reader: &mut BufReader<R>) -> Result<EntryRef> {
+    pub fn entry<R: Read + Seek>(&mut self, _reader: &mut BufReader<R>) -> Result<EntryRef> {
         unimplemented!()
     }
 }

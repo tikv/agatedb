@@ -6,13 +6,13 @@ use crate::util::binary::{
 use crate::value::EntryReader;
 use crate::value::ValuePointer;
 use crate::AgateOptions;
-use crate::Error;
+
 use crate::Result;
 use bytes::{BufMut, Bytes, BytesMut};
-use memmap::{MmapMut, MmapOptions};
-use std::fs::{File, OpenOptions};
+use memmap::MmapMut;
+use std::fs::File;
 use std::io::BufReader;
-use std::io::{Seek, SeekFrom};
+
 use std::path::PathBuf;
 
 pub const MAX_HEADER_SIZE: usize = 21;
@@ -100,7 +100,7 @@ pub struct Wal {
 }
 
 impl Wal {
-    pub fn open(path: PathBuf, opts: AgateOptions) -> Result<Wal> {
+    pub fn open(_path: PathBuf, _opts: AgateOptions) -> Result<Wal> {
         unimplemented!()
     }
 
@@ -108,7 +108,7 @@ impl Wal {
         unimplemented!()
     }
 
-    pub(crate) fn write_entry(&mut self, entry: &Entry) -> Result<()> {
+    pub(crate) fn write_entry(&mut self, _entry: &Entry) -> Result<()> {
         unimplemented!()
     }
 
@@ -120,23 +120,23 @@ impl Wal {
         unimplemented!()
     }
 
-    fn encode_entry(mut buf: &mut BytesMut, entry: &Entry) {
+    fn encode_entry(_buf: &mut BytesMut, _entry: &Entry) {
         unimplemented!()
     }
 
-    fn decode_entry(buf: &mut Bytes) -> Result<Entry> {
+    fn decode_entry(_buf: &mut Bytes) -> Result<Entry> {
         unimplemented!()
     }
 
-    fn read(&self, p: ValuePointer) -> Result<Bytes> {
+    fn read(&self, _p: ValuePointer) -> Result<Bytes> {
         unimplemented!()
     }
 
-    pub fn truncate(&mut self, end: u64) -> Result<()> {
+    pub fn truncate(&mut self, _end: u64) -> Result<()> {
         unimplemented!()
     }
 
-    fn done_writing(&mut self, offset: u32) -> Result<()> {
+    fn done_writing(&mut self, _offset: u32) -> Result<()> {
         unimplemented!()
     }
 
@@ -151,7 +151,7 @@ pub struct WalIterator<'a> {
 }
 
 impl<'a> WalIterator<'a> {
-    pub fn new(reader: BufReader<&'a mut File>) -> Self {
+    pub fn new(_reader: BufReader<&'a mut File>) -> Self {
         unimplemented!()
     }
 
