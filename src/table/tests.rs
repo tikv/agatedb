@@ -84,7 +84,7 @@ fn test_table_iterator() {
 
 #[test]
 fn test_seek_to_first() {
-    for n in vec![99, 100, 101, 199, 200, 250, 9999, 10000] {
+    for &n in &[99, 100, 101, 199, 200, 250, 9999, 10000] {
         let opts = get_test_table_options();
         let table = build_test_table(b"key", n, opts);
         let mut it = table.new_iterator(0);
@@ -97,7 +97,7 @@ fn test_seek_to_first() {
 
 #[test]
 fn test_seek_to_last() {
-    for n in vec![99, 100, 101, 199, 200, 250, 9999, 10000] {
+    for &n in &[99, 100, 101, 199, 200, 250, 9999, 10000] {
         let opts = get_test_table_options();
         let table = build_test_table(b"key", n, opts);
         let mut it = table.new_iterator(0);
@@ -168,7 +168,7 @@ fn test_seek_for_prev() {
 
 #[test]
 fn test_iterate_from_start() {
-    for n in vec![99, 100, 101, 199, 200, 250, 9999, 10000] {
+    for &n in &[99, 100, 101, 199, 200, 250, 9999, 10000] {
         let opts = get_test_table_options();
         let table = build_test_table(b"key", n, opts);
         let mut it = table.new_iterator(0);
@@ -191,7 +191,7 @@ fn test_iterate_from_start() {
 
 #[test]
 fn test_iterate_from_end() {
-    for n in vec![99, 100, 101, 199, 200, 250, 9999, 10000] {
+    for &n in &[99, 100, 101, 199, 200, 250, 9999, 10000] {
         let opts = get_test_table_options();
         let table = build_test_table(b"key", n, opts);
         let mut it = table.new_iterator(0);

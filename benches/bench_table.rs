@@ -28,8 +28,8 @@ fn bench_table_builder(c: &mut Criterion) {
 
         b.iter(|| {
             let mut builder = TableBuilder::new(opt.clone());
-            for j in 0..KEY_COUNT {
-                builder.add(&key_list[j], vs.clone(), 0);
+            for k in key_list.iter().take(KEY_COUNT) {
+                builder.add(k, vs.clone(), 0);
             }
             builder.finish()
         });

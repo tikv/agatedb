@@ -239,7 +239,7 @@ mod tests {
         assert_eq!(table.offsets_length(), block_first_keys.len());
 
         let idx = table.inner.read_table_index().unwrap();
-
+        assert_eq!(block_first_keys.len(), idx.offsets.len());
         for (i, k) in block_first_keys.iter().enumerate().take(idx.offsets.len()) {
             assert_eq!(*k, idx.offsets[i].key)
         }
