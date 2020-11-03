@@ -145,7 +145,6 @@ pub struct ValuePointer {
     pub offset: u32,
 }
 
-
 pub struct EntryReader {
     key: Vec<u8>,
     value: Vec<u8>,
