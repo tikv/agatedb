@@ -7,13 +7,13 @@ use crate::Error;
 use crate::Result;
 use bytes::{Buf, Bytes};
 use iterator::{Iterator as TableIterator, ITERATOR_NOCACHE, ITERATOR_REVERSED};
+use memmap::{Mmap, MmapOptions};
 use prost::Message;
 use proto::meta::{BlockOffset, Checksum, TableIndex};
 use std::fs;
-use std::io::{Read, Seek, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::Mutex;
 
 #[cfg(test)]
 mod tests;
@@ -24,8 +24,8 @@ mod tests;
 enum MmapFile {
     File {
         name: PathBuf,
-        // TODO: remove this mutex and allow multi-thread read
-        file: Mutex<fs::File>,
+        file: fs::File,
+        mmap: Mmap,
     },
     Memory {
         data: Bytes,
@@ -39,6 +39,15 @@ impl MmapFile {
             Self::File { .. } => false,
             Self::Memory { .. } => true,
         }
+    }
+
+    pub fn open(path: &Path, file: std::fs::File) -> Result<Self> {
+        let mmap = unsafe { MmapOptions::new().map(&file)? };
+        Ok(MmapFile::File {
+            file,
+            mmap,
+            name: path.to_path_buf(),
+        })
     }
 }
 
@@ -109,10 +118,7 @@ impl TableInner {
         let meta = f.metadata()?;
         let table_size = meta.len();
         let mut inner = TableInner {
-            file: MmapFile::File {
-                file: Mutex::new(f),
-                name: path.to_path_buf(),
-            },
+            file: MmapFile::open(path, f)?,
             table_size: table_size as usize,
             smallest: Bytes::new(),
             biggest: Bytes::new(),
@@ -383,13 +389,17 @@ impl TableInner {
                     Ok(data.slice(offset..offset + size))
                 }
             }
-            MmapFile::File { file, .. } => {
-                // TODO: use MmapFile
-                let mut file = file.lock().unwrap();
-                file.seek(std::io::SeekFrom::Start(offset as u64))?;
-                let mut buf = vec![0; size];
-                file.read_exact(&mut buf)?;
-                Ok(Bytes::from(buf))
+            MmapFile::File { mmap, .. } => {
+                if offset + size > mmap.len() {
+                    Err(Error::TableRead(format!(
+                        "out of range, offset={}, size={}, len={}",
+                        offset,
+                        size,
+                        mmap.len()
+                    )))
+                } else {
+                    Ok(Bytes::copy_from_slice(&mmap[offset..offset + size]))
+                }
             }
         }
     }
