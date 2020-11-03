@@ -1,72 +1,49 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-/// BitSlice allows getting individual bits on a u8 slice
-pub struct BitSlice<'a>(&'a [u8]);
+pub trait BitSlice {
+    fn get_bit(&self, idx: usize) -> bool;
+    fn bit_len(&self) -> usize;
+}
 
-impl<'a> BitSlice<'a> {
-    pub fn new(data: &'a [u8]) -> Self {
-        Self(data)
-    }
+pub trait BitSliceMut {
+    fn set_bit(&mut self, idx: usize, val: bool);
+}
 
-    pub fn len(&self) -> usize {
-        self.0.len() * 8
-    }
-
-    pub fn get(&self, idx: usize) -> bool {
+impl<'a, T: AsRef<[u8]>> BitSlice for T {
+    fn get_bit(&self, idx: usize) -> bool {
         let pos = idx / 8;
         let offset = idx % 8;
-        (self.0[pos] & (1 << offset)) != 0
+        (self.as_ref()[pos] & (1 << offset)) != 0
+    }
+
+    fn bit_len(&self) -> usize {
+        self.as_ref().len() * 8
     }
 }
 
-/// BitVec stores a u8 vector and allows modification on individual bits
-pub struct BitVec(Vec<u8>);
-
-impl BitVec {
-    pub fn with_capacity(nbits: usize) -> Self {
-        assert!(nbits % 8 == 0);
-        let vec_size = nbits / 8;
-        let mut data = Vec::with_capacity(vec_size);
-        data.resize(vec_size, 0);
-        Self(data)
-    }
-
-    pub fn set(&mut self, idx: usize, val: bool) {
+impl<'a, T: AsMut<[u8]>> BitSliceMut for T {
+    fn set_bit(&mut self, idx: usize, val: bool) {
         let pos = idx / 8;
         let offset = idx % 8;
         if val {
-            self.0[pos] |= 1 << offset;
+            self.as_mut()[pos] |= 1 << offset;
         } else {
-            self.0[pos] &= !(1 << offset);
+            self.as_mut()[pos] &= !(1 << offset);
         }
-    }
-
-    pub fn get(&self, idx: usize) -> bool {
-        let pos = idx / 8;
-        let offset = idx % 8;
-        (self.0[pos] & (1 << offset)) != 0
-    }
-
-    pub fn len(&self) -> usize {
-        self.0.len() * 8
-    }
-
-    pub fn as_slice(&self) -> &[u8] {
-        &self.0
     }
 }
 
 /// Bloom implements bloom filter functionalities over
 /// a bit-slice of data.
 pub struct Bloom<'a> {
-    filter: BitSlice<'a>,
+    filter: &'a [u8],
     k: u32,
 }
 
 impl<'a> Bloom<'a> {
     /// Create a bloom filter from a byte slice
     pub fn new(buf: &'a [u8]) -> Self {
-        let filter = BitSlice::new(&buf[..buf.len() - 4]);
+        let filter = &buf[..buf.len() - 4];
         let k = (&buf[buf.len() - 4..]).get_u32();
         Self { filter, k }
     }
@@ -87,13 +64,14 @@ impl<'a> Bloom<'a> {
         let nbytes = (nbits + 7) >> 3;
         // nbits is always multiplication of 8
         let nbits = nbytes << 3;
-        let mut filter = BitVec::with_capacity(nbits);
+        let mut filter = Vec::with_capacity(nbytes);
+        filter.resize(nbytes, 0);
         for h in keys {
             let mut h = *h;
             let delta = (h >> 17) | (h << 15);
             for _ in 0..k {
                 let bit_pos = (h as usize) % nbits;
-                filter.set(bit_pos, true);
+                filter.set_bit(bit_pos, true);
                 h = h.wrapping_add(delta);
             }
         }
@@ -109,11 +87,11 @@ impl<'a> Bloom<'a> {
             // potential new encoding for short bloom filters
             true
         } else {
-            let nbits = self.filter.len();
+            let nbits = self.filter.bit_len();
             let delta = (h >> 17) | (h << 15);
             for _ in 0..self.k {
                 let bit_pos = h % (nbits as u32);
-                if !self.filter.get(bit_pos as usize) {
+                if !self.filter.get_bit(bit_pos as usize) {
                     return false;
                 }
                 h = h.wrapping_add(delta);
