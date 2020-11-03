@@ -284,7 +284,7 @@ impl TableInner {
             checksum,
         });
 
-        if matches!(self.opts.checksum_mode, OnTableAndBlockRead | OnTableRead) {
+        if matches!(self.opts.checksum_mode, OnTableAndBlockRead | OnBlockRead) {
             blk.verify_checksum()?;
         }
 
