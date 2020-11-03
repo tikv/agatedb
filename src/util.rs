@@ -1,9 +1,15 @@
 pub mod binary;
 
+use crate::Result;
+pub use skiplist::FixedLengthSuffixComparator as Comparator;
 pub use skiplist::{FixedLengthSuffixComparator, KeyComparator};
 use std::{cmp, ptr};
 
-pub static COMPARATOR: FixedLengthSuffixComparator = FixedLengthSuffixComparator::new(8);
+pub static COMPARATOR: FixedLengthSuffixComparator = make_comparator();
+
+pub const fn make_comparator() -> FixedLengthSuffixComparator {
+    FixedLengthSuffixComparator::new(8)
+}
 
 unsafe fn u64(ptr: *const u8) -> u64 {
     ptr::read_unaligned(ptr as *const u64)
@@ -55,4 +61,15 @@ where
         }
     }
     i
+}
+
+pub fn fill_file(file: &mut impl std::io::Write, mut size: u64) -> Result<()> {
+    let buf = vec![0; 4096];
+    let buf_len = buf.len() as u64;
+    while size > buf_len {
+        size -= buf_len;
+        file.write_all(&buf)?;
+    }
+    file.write_all(&buf[..size as usize])?;
+    Ok(())
 }
