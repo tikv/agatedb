@@ -421,6 +421,7 @@ impl<T: AsRef<TableInner>> Iterator<T> {
         self.err.as_ref()
     }
 }
+
 impl<T: AsRef<TableInner>> AgateIterator for Iterator<T> {
     fn key(&self) -> &[u8] {
         &self.block_iterator.as_ref().unwrap().key

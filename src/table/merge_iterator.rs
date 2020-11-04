@@ -9,6 +9,10 @@ use crate::util::{KeyComparator, COMPARATOR};
 use crate::Value;
 
 type TableIterator = Iterator<Arc<TableInner>>;
+
+/// `Iterators` includes all iterator types for AgateDB.
+/// By packing them into an enum, we could reduce the
+/// overhead of dynamic dispatch.
 #[enum_dispatch(AgateIterator)]
 pub enum Iterators {
     MergeIterator(MergeIterator),
@@ -17,6 +21,9 @@ pub enum Iterators {
     VecIterator(tests::VecIterator),
 }
 
+/// `MergeIterator` merges two `Iterators` into one
+/// by sequentially emitting elements from two child
+/// iterators.
 pub struct MergeIterator {
     left: IteratorNode,
     right: IteratorNode,
@@ -25,6 +32,8 @@ pub struct MergeIterator {
     current_key: BytesMut,
 }
 
+/// `IteratorNode` buffers the iterator key in its own struct, to
+/// reduce the overhead of fetching key during merging iterators.
 struct IteratorNode {
     valid: bool,
     key: BytesMut,
@@ -146,6 +155,9 @@ impl MergeIterator {
         }
     }
 
+    /// Construct a single merge iterator from multiple iterators
+    ///
+    /// If the iterator emits elements in descending order, set `reverse` to true.
     pub fn from_iterators(mut iters: Vec<Box<Iterators>>, reverse: bool) -> Box<Iterators> {
         match iters.len() {
             0 => panic!("no element in iters"),
