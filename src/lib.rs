@@ -25,3 +25,4 @@ pub use value::Value;
 pub use db::{Agate, AgateOptions};
 pub use error::{Error, Result};
 pub use skiplist::Skiplist;
+pub use structs::AgateIterator;
