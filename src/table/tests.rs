@@ -1,3 +1,5 @@
+use std::ops::{Deref, DerefMut};
+
 use super::*;
 use crate::format::{key_with_ts, user_key};
 use crate::value::Value;
@@ -25,7 +27,7 @@ fn get_test_table_options() -> Options {
     }
 }
 
-fn build_test_table(prefix: &[u8], n: usize, mut opts: Options) -> Table {
+fn build_test_table(prefix: &[u8], n: usize, mut opts: Options) -> TableGuard {
     if opts.block_size == 0 {
         opts.block_size = 4 * 1024;
     }
@@ -42,7 +44,30 @@ fn build_test_table(prefix: &[u8], n: usize, mut opts: Options) -> Table {
     build_table(kv_pairs, opts)
 }
 
-fn build_table(mut kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> Table {
+/// TableGuard saves Table and TempDir, so as to ensure
+/// temporary directory is removed after table is closed.
+/// According to Rust RFC, the drop order is first `table` then
+/// `tmp_dir`.
+pub struct TableGuard {
+    table: Table,
+    tmp_dir: TempDir,
+}
+
+impl Deref for TableGuard {
+    type Target = Table;
+
+    fn deref(&self) -> &Table {
+        &self.table
+    }
+}
+
+impl DerefMut for TableGuard {
+    fn deref_mut(&mut self) -> &mut Table {
+        &mut self.table
+    }
+}
+
+fn build_table(mut kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> TableGuard {
     let mut builder = Builder::new(opts.clone());
     let tmp_dir = TempDir::new("agatedb").unwrap();
     let filename = tmp_dir.path().join("1.sst".to_string());
@@ -54,7 +79,10 @@ fn build_table(mut kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> Table {
     }
     let data = builder.finish();
 
-    Table::create(&filename, data, opts).unwrap()
+    TableGuard {
+        table: Table::create(&filename, data, opts).unwrap(),
+        tmp_dir,
+    }
     // you can also test in-memory table
     // Table::open_in_memory(data, 233, opts).unwrap()
     // `tmp_dir` will be dropped and the temp folder will be deleted
