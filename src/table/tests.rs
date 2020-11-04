@@ -4,6 +4,7 @@ use super::*;
 use crate::format::{key_with_ts, user_key};
 use crate::value::Value;
 use builder::Builder;
+use iterator::IteratorError;
 use tempdir::TempDir;
 
 fn key(prefix: &[u8], i: usize) -> Bytes {
@@ -50,7 +51,7 @@ fn build_test_table(prefix: &[u8], n: usize, mut opts: Options) -> TableGuard {
 /// `tmp_dir`.
 pub struct TableGuard {
     table: Table,
-    tmp_dir: TempDir,
+    _tmp_dir: TempDir,
 }
 
 impl Deref for TableGuard {
@@ -81,7 +82,7 @@ fn build_table(mut kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> TableGuard {
 
     TableGuard {
         table: Table::create(&filename, data, opts).unwrap(),
-        tmp_dir,
+        _tmp_dir: tmp_dir,
     }
     // you can also test in-memory table
     // Table::open_in_memory(data, 233, opts).unwrap()
@@ -371,4 +372,68 @@ fn test_table_big_values() {
     assert_eq!(n, count);
     // TODO: support max_version in table
     // assert_eq!(n, table.max_version());
+}
+
+#[test]
+fn test_iterator_error_eof() {
+    let opts = get_test_table_options();
+    let table = build_test_table(b"key", 10000, opts);
+
+    let mut it = table.new_iterator(0);
+    it.rewind();
+
+    while it.valid() {
+        it.next();
+    }
+
+    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+}
+
+#[test]
+fn test_iterator_use_without_init() {
+    let opts = get_test_table_options();
+    let table = build_test_table(b"key", 1000, opts);
+    let mut it = table.new_iterator(0);
+    // Generally, developers should call `rewind` before using an iterator.
+    // If iterator is not initialized, getting key directly from iterator
+    // will cause panic. Directly calling `next` will return
+    // the first entry.
+    it.next();
+    assert_eq!(user_key(it.key()), key(b"key", 0));
+}
+
+#[test]
+fn test_iterator_out_of_bound() {
+    let opts = get_test_table_options();
+    let table = build_test_table(b"key", 1000, opts);
+    let mut it = table.new_iterator(0);
+    it.seek_to_last();
+    assert!(it.error().is_none());
+    it.next();
+    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    it.next();
+    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    it.next();
+    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    it.rewind();
+    assert!(it.error().is_none());
+    assert_eq!(user_key(it.key()), key(b"key", 0));
+}
+
+#[test]
+fn test_iterator_out_of_bound_reverse() {
+    let opts = get_test_table_options();
+    let table = build_test_table(b"key", 1000, opts);
+    let mut it = table.new_iterator(ITERATOR_REVERSED);
+    it.seek_to_first();
+    assert!(it.error().is_none());
+    it.next();
+    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    it.next();
+    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    it.next();
+    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    it.rewind();
+    assert!(it.error().is_none());
+    assert_eq!(user_key(it.key()), key(b"key", 999));
 }

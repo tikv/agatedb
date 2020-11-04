@@ -44,7 +44,7 @@ fn bench_table_builder(c: &mut Criterion) {
 /// `tmp_dir`.
 pub struct TableGuard {
     table: Table,
-    tmp_dir: TempDir,
+    _tmp_dir: TempDir,
 }
 
 impl Deref for TableGuard {
@@ -82,7 +82,7 @@ fn get_table_for_benchmark(count: usize) -> TableGuard {
 
     TableGuard {
         table: Table::create(&filename, builder.finish(), opts).unwrap(),
-        tmp_dir,
+        _tmp_dir: tmp_dir,
     }
 }
 
