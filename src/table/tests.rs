@@ -86,9 +86,6 @@ fn build_table(mut kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> TableGuard {
     }
     // you can also test in-memory table
     // Table::open_in_memory(data, 233, opts).unwrap()
-    // `tmp_dir` will be dropped and the temp folder will be deleted
-    // when we return from this function. However, as we saves file
-    // descriptor to the file, we could still safely access that file.
 }
 
 #[test]
