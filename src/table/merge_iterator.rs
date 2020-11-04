@@ -1,4 +1,5 @@
 use bytes::{Bytes, BytesMut};
+use enum_dispatch::enum_dispatch;
 use std::sync::Arc;
 
 use super::iterator::Iterator;
@@ -8,6 +9,13 @@ use crate::util::{KeyComparator, COMPARATOR};
 use crate::Value;
 
 type TableIterator = Iterator<Arc<TableInner>>;
+#[enum_dispatch(AgateIterator)]
+pub enum Iterators {
+    MergeIterator(MergeIterator),
+    TableIterator(TableIterator),
+    #[cfg(test)]
+    VecIterator(tests::VecIterator),
+}
 
 pub struct MergeIterator {
     left: IteratorNode,
@@ -17,60 +25,14 @@ pub struct MergeIterator {
     current_key: BytesMut,
 }
 
-pub enum Iterators {
-    Merge(Box<MergeIterator>),
-    // TODO: Concat(ConcatIterator),
-    Table(Box<TableIterator>),
-}
-
-macro_rules! impl_iterators {
-    ($self: ident, $func: ident) => {
-        match $self {
-            Iterators::Merge(x) => x.$func(),
-            Iterators::Table(x) => x.$func(),
-            Iterators::Dynamic(x) => x.$func(),
-        }
-    };
-}
-
-impl Iterators {
-    pub fn valid(&self) -> bool {
-        impl_iterators!(self, valid)
-    }
-
-    pub fn key(&self) -> &[u8] {
-        impl_iterators!(self, key)
-    }
-
-    pub fn next(&mut self) {
-        impl_iterators!(self, next)
-    }
-
-    pub fn rewind(&mut self) {
-        impl_iterators!(self, next)
-    }
-
-    pub fn seek(&mut self, key: &Bytes) {
-        match self {
-            Iterators::Merge(x) => x.seek(key),
-            Iterators::Table(x) => x.seek(key),
-            Iterators::Dynamic(x) => x.seek(key),
-        }
-    }
-
-    pub fn value(&self) -> Value {
-        impl_iterators!(self, value)
-    }
-}
-
 struct IteratorNode {
     valid: bool,
     key: BytesMut,
-    iter: Iterators,
+    iter: Box<Iterators>,
 }
 
 impl IteratorNode {
-    fn new(iter: Iterators) -> Self {
+    fn new(iter: Box<Iterators>) -> Self {
         Self {
             valid: false,
             key: BytesMut::new(),
@@ -184,14 +146,14 @@ impl MergeIterator {
         }
     }
 
-    pub fn from_iterators(mut iters: Vec<Iterators>, reverse: bool) -> Iterators {
+    pub fn from_iterators(mut iters: Vec<Box<Iterators>>, reverse: bool) -> Box<Iterators> {
         match iters.len() {
             0 => panic!("no element in iters"),
             1 => iters.pop().unwrap(),
             2 => {
                 let right = iters.pop().unwrap();
                 let left = iters.pop().unwrap();
-                Iterators::Merge(Box::new(MergeIterator {
+                Box::new(Iterators::from(MergeIterator {
                     reverse,
                     left: IteratorNode::new(left),
                     right: IteratorNode::new(right),
@@ -203,7 +165,7 @@ impl MergeIterator {
                 let mid = iters.len() / 2;
                 let right = iters.split_off(mid);
                 let left = iters;
-                Iterators::Merge(Box::new(MergeIterator {
+                Box::new(Iterators::from(MergeIterator {
                     reverse,
                     left: IteratorNode::new(Self::from_iterators(left, reverse)),
                     right: IteratorNode::new(Self::from_iterators(right, reverse)),
@@ -251,5 +213,138 @@ impl AgateIterator for MergeIterator {
 
     fn valid(&self) -> bool {
         self.smaller().valid
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::format::{key_with_ts, user_key};
+
+    pub struct VecIterator {
+        vec: Vec<Bytes>,
+        pos: usize,
+    }
+
+    impl VecIterator {
+        pub fn new(vec: Vec<Bytes>) -> Self {
+            VecIterator { vec, pos: 0 }
+        }
+    }
+
+    impl AgateIterator for VecIterator {
+        fn next(&mut self) {
+            self.pos += 1;
+        }
+
+        fn rewind(&mut self) {
+            self.pos = 0;
+        }
+
+        fn seek(&mut self, key: &Bytes) {
+            let found_entry_idx = crate::util::search(self.vec.len(), |idx| {
+                use std::cmp::Ordering::*;
+                match COMPARATOR.compare_key(&self.vec[idx], &key) {
+                    Less => false,
+                    _ => true,
+                }
+            });
+            self.pos = found_entry_idx;
+        }
+
+        fn key(&self) -> &[u8] {
+            &self.vec[self.pos]
+        }
+
+        fn value(&self) -> Value {
+            Value::new(self.vec[self.pos].clone())
+        }
+
+        fn valid(&self) -> bool {
+            self.pos < self.vec.len()
+        }
+    }
+
+    fn gen_vec_data(n: usize, predicate: impl Fn(usize) -> bool) -> Vec<Bytes> {
+        (0..n)
+            .filter(|x| predicate(*x))
+            .map(|i| key_with_ts(format!("{:012x}", i).as_str(), 0))
+            .collect()
+    }
+
+    fn check_sequence(mut iter: Box<Iterators>, n: usize) {
+        let mut cnt = 0;
+        iter.rewind();
+        while iter.valid() {
+            assert_eq!(user_key(iter.key()), format!("{:012x}", cnt).as_bytes());
+            cnt += 1;
+            iter.next();
+        }
+        assert_eq!(cnt, n);
+    }
+
+    fn check_reverse_sequence(mut iter: Box<Iterators>, n: usize) {
+        let mut cnt: isize = n as isize - 1;
+        iter.rewind();
+        while iter.valid() {
+            assert_eq!(user_key(iter.key()), format!("{:012x}", cnt).as_bytes());
+            cnt -= 1;
+            iter.next();
+        }
+        assert_eq!(cnt, -1);
+    }
+
+    #[test]
+    fn test_merge_2iters_iterate() {
+        let a = gen_vec_data(10000, |x| x % 5 == 0);
+        let b = gen_vec_data(10000, |x| x % 5 != 0);
+        let mut rev_a = a.clone();
+        rev_a.reverse();
+        let mut rev_b = b.clone();
+        rev_b.reverse();
+
+        let iter_a = Box::new(Iterators::from(VecIterator::new(a)));
+        let iter_b = Box::new(Iterators::from(VecIterator::new(b)));
+        let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], false);
+
+        check_sequence(merge_iter, 10000);
+
+        let iter_a = Box::new(Iterators::from(VecIterator::new(rev_a)));
+        let iter_b = Box::new(Iterators::from(VecIterator::new(rev_b)));
+        let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], true);
+        check_reverse_sequence(merge_iter, 10000);
+    }
+
+    #[test]
+    fn test_merge_5iters_iterate() {
+        // randomly determine sequence of 5 iterators
+        let vec_map = vec![2, 4, 1, 3, 0];
+        let vec_map_size = vec_map.len();
+        let vecs: Vec<Vec<Bytes>> = vec_map
+            .into_iter()
+            .map(|i| gen_vec_data(10000, |x| x % vec_map_size == i))
+            .collect();
+        let rev_vecs: Vec<Vec<Bytes>> = vecs
+            .iter()
+            .map(|x| {
+                let mut y = x.clone();
+                y.reverse();
+                y
+            })
+            .collect();
+
+        let iters: Vec<Box<Iterators>> = vecs
+            .into_iter()
+            .map(|vec| Box::new(Iterators::from(VecIterator::new(vec))))
+            .collect();
+
+        check_sequence(MergeIterator::from_iterators(iters, false), 10000);
+
+        let rev_iters: Vec<Box<Iterators>> = rev_vecs
+            .into_iter()
+            .map(|vec| Box::new(Iterators::from(VecIterator::new(vec))))
+            .collect();
+
+        check_reverse_sequence(MergeIterator::from_iterators(rev_iters, true), 10000);
     }
 }

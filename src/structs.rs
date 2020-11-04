@@ -1,6 +1,8 @@
 use crate::value::Value;
 use bytes::Bytes;
+use enum_dispatch::enum_dispatch;
 
+#[enum_dispatch]
 pub trait AgateIterator {
     fn next(&mut self);
     fn rewind(&mut self);
