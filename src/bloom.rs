@@ -58,13 +58,16 @@ impl<'a> Bloom<'a> {
 
     /// Build bloom filter from key hashes
     pub fn build_from_key_hashes(keys: &[u32], bits_per_key: usize) -> Bytes {
+        // 0.69 is approximately ln(2)
         let k = ((bits_per_key as f64) * 0.69) as u32;
+        // limit k in [1, 30]
         let k = k.min(30).max(1);
+        // For small len(keys), we set a minimum bloom filter length to avoid high FPR
         let nbits = (keys.len() * bits_per_key).max(64);
         let nbytes = (nbits + 7) >> 3;
         // nbits is always multiplication of 8
         let nbits = nbytes << 3;
-        let mut filter = Vec::with_capacity(nbytes);
+        let mut filter = BytesMut::with_capacity(nbytes);
         filter.resize(nbytes, 0);
         for h in keys {
             let mut h = *h;
@@ -75,10 +78,8 @@ impl<'a> Bloom<'a> {
                 h = h.wrapping_add(delta);
             }
         }
-        let mut buf = BytesMut::new();
-        buf.put_slice(filter.as_slice());
-        buf.put_u32(k);
-        buf.freeze()
+        filter.put_u32(k);
+        filter.freeze()
     }
 
     /// Check if a bloom filter may contain some data
@@ -124,6 +125,7 @@ mod tests {
         .collect();
 
         let f = Bloom::new(&buf);
+        assert_eq!(f.k, 6);
 
         assert!(f.may_contain(check_hash[0]));
         assert!(f.may_contain(check_hash[1]));
