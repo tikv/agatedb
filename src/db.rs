@@ -1,13 +1,9 @@
 use super::memtable::{MemTable, MemTables};
 use super::{Error, Result};
 use crate::entry::Entry;
-use crate::format::get_ts;
-use crate::util::make_comparator;
-use crate::value::{self, Request, Value};
-use crate::wal::Wal;
-use bytes::Bytes;
-use skiplist::Skiplist;
-use std::collections::VecDeque;
+
+use crate::value::{Request, Value};
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -149,7 +145,7 @@ impl AgateOptions {
 }
 
 impl Core {
-    fn new(opts: AgateOptions) -> Result<Self> {
+    fn new(_opts: AgateOptions) -> Result<Self> {
         unimplemented!()
     }
 
@@ -160,9 +156,9 @@ impl Core {
     }
 
     fn open_mem_table<P: AsRef<Path>>(
-        base_path: P,
-        opts: AgateOptions,
-        file_id: usize,
+        _base_path: P,
+        _opts: AgateOptions,
+        _file_id: usize,
     ) -> Result<MemTable> {
         unimplemented!()
     }
@@ -180,7 +176,7 @@ impl Core {
         false
     }
 
-    pub(crate) fn get(&self, key: &[u8]) -> Result<Value> {
+    pub(crate) fn get(&self, _key: &[u8]) -> Result<Value> {
         unimplemented!()
     }
 
@@ -190,7 +186,7 @@ impl Core {
     /// 1. read lock of memtable list (only block flush)
     /// 2. write lock of mutable memtable WAL (won't block mut-table read).
     /// 3. level controller lock (TBD)
-    pub fn write_to_lsm(&self, request: Request) -> Result<()> {
+    pub fn write_to_lsm(&self, _request: Request) -> Result<()> {
         unimplemented!()
     }
 }

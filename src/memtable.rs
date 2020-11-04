@@ -1,7 +1,5 @@
-use crate::entry::Entry;
-use crate::format::get_ts;
 use crate::util::Comparator;
-use crate::value::{self, Value};
+use crate::value::Value;
 use crate::wal::Wal;
 use crate::AgateOptions;
 use crate::Result;
@@ -46,7 +44,7 @@ impl MemTable {
         unimplemented!()
     }
 
-    pub fn put(&self, key: Bytes, value: Value) -> Result<()> {
+    pub fn put(&self, _key: Bytes, _value: Value) -> Result<()> {
         unimplemented!()
     }
 
