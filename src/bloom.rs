@@ -50,9 +50,8 @@ impl<'a> Bloom<'a> {
 
     /// Get bloom filter bits per key from entries count and FPR
     pub fn bloom_bits_per_key(entries: usize, false_positive_rate: f64) -> usize {
-        let size =
-            -1.0 * (entries as f64) * false_positive_rate.ln() / (0.69314718056 as f64).powi(2);
-        let locs = 0.69314718056 * size / (entries as f64);
+        let size = -1.0 * (entries as f64) * false_positive_rate.ln() / 0.69314718056f64.powi(2);
+        let locs = (0.69314718056 * size / (entries as f64)).ceil();
         locs as usize
     }
 
@@ -64,9 +63,9 @@ impl<'a> Bloom<'a> {
         let k = k.min(30).max(1);
         // For small len(keys), we set a minimum bloom filter length to avoid high FPR
         let nbits = (keys.len() * bits_per_key).max(64);
-        let nbytes = (nbits + 7) >> 3;
+        let nbytes = (nbits + 7) / 8;
         // nbits is always multiplication of 8
-        let nbits = nbytes << 3;
+        let nbits = nbytes * 8;
         let mut filter = BytesMut::with_capacity(nbytes);
         filter.resize(nbytes, 0);
         for h in keys {
