@@ -53,7 +53,7 @@ impl Arena {
         unsafe { self.get_mut(ptr_offset as u32) as _ }
     }
 
-    pub unsafe fn get_mut<N>(&self, offset: u32) -> *mut N {
+    unsafe fn get_mut<N>(&self, offset: u32) -> *mut N {
         if offset == 0 {
             return ptr::null_mut();
         }

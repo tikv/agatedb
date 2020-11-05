@@ -202,7 +202,6 @@ impl<C: KeyComparator> Skiplist<C> {
                     next[i] = n;
                     assert_ne!(p, n);
                 }
-                // let next_offset = self.core.arena.offset(next[i]);
                 x.tower[i].store(next[i], Ordering::SeqCst);
                 match unsafe { &*prev[i] }.tower[i].compare_exchange(
                     next[i],
