@@ -4,8 +4,8 @@ mod merge_iterator;
 
 use crate::bloom::Bloom;
 use crate::checksum;
-use crate::opt::{ChecksumVerificationMode, Options};
 use crate::opt::Options;
+use crate::opt::{ChecksumVerificationMode, Options};
 use crate::structs::AgateIterator;
 use crate::Error;
 use crate::Result;
