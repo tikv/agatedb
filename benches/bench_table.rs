@@ -1,5 +1,6 @@
 mod common;
 
+use agatedb::opt::ChecksumVerificationMode::NoVerification;
 use agatedb::{Table, TableBuilder, TableOptions, Value};
 use bytes::Bytes;
 use common::rand_value;
@@ -24,6 +25,7 @@ fn bench_table_builder(c: &mut Criterion) {
             block_size: 4 * 1024,
             bloom_false_positive: 0.01,
             table_size: 5 << 20,
+            checksum_mode: NoVerification,
         };
 
         b.iter(|| {
@@ -44,6 +46,7 @@ fn get_table_for_benchmark(count: usize) -> Table {
         block_size: 4 * 1024,
         bloom_false_positive: 0.01,
         table_size: 0,
+        checksum_mode: NoVerification,
     };
 
     let mut builder = TableBuilder::new(opts.clone());
@@ -75,6 +78,7 @@ fn bench_table(c: &mut Criterion) {
         block_size: 4 * 1024,
         bloom_false_positive: 0.01,
         table_size: 0,
+        checksum_mode: NoVerification,
     };
 
     c.bench_function("table read and build", |b| {
