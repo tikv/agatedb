@@ -1,4 +1,4 @@
-use crate::entry::{Entry, EntryRef};
+use crate::entry::Entry;
 use crate::format::get_ts;
 use crate::util::Comparator;
 use crate::value::{self, Value};
