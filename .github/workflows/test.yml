@@ -2,9 +2,11 @@ on:
   push:
     branches:
     - master
+    - develop
   pull_request:
     branches:
     - master
+    - develop
     
 name: Test
 
@@ -33,6 +35,11 @@ jobs:
         with:
           command: fmt
           args: -- --check
+      - uses: actions-rs/cargo@v1
+        name: Compile all targets 🚀
+        with:
+          command: check
+          args: --all-features --workspace
       - uses: actions-rs/cargo@v1
         name: Running Tests 🚀
         with:
