@@ -195,6 +195,10 @@ impl MemTables {
         let old_mt = std::mem::replace(&mut self.mutable, memtable);
         self.immutable.push_back(old_mt);
     }
+
+    pub(crate) fn nums_of_memtable(&self) -> usize {
+        self.immutable.len() + 1
+    }
 }
 
 #[cfg(test)]

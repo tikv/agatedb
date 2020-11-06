@@ -11,13 +11,14 @@ use skiplist::Skiplist;
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::sync::RwLock;
 
 pub struct Core {
     mt: RwLock<MemTables>,
     opts: AgateOptions,
-    next_mem_fid: usize,
+    next_mem_fid: AtomicUsize,
     vlog: ValueLog,
 }
 
@@ -159,7 +160,7 @@ impl Core {
         let core = Self {
             mt: RwLock::new(MemTables::new(mt, VecDeque::new())),
             opts,
-            next_mem_fid: 1,
+            next_mem_fid: AtomicUsize::new(1),
             vlog: ValueLog::new(),
         };
 
@@ -204,9 +205,11 @@ impl Core {
         Ok(())
     }
 
-    fn new_mem_table(&mut self) -> Result<MemTable> {
-        let mt = Self::open_mem_table(&self.opts.path, self.opts.clone(), self.next_mem_fid)?;
-        self.next_mem_fid += 1;
+    fn new_mem_table(&self) -> Result<MemTable> {
+        let fid = self
+            .next_mem_fid
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let mt = Self::open_mem_table(&self.opts.path, self.opts.clone(), fid)?;
         Ok(mt)
     }
 
@@ -292,6 +295,44 @@ impl Core {
         Ok(())
     }
 
+    /// Calling ensure_room_for_write requires locking whole memtable
+    pub fn ensure_room_for_write(&self) -> Result<()> {
+        // we do not need to force flush memtable in in-memory mode as WAL is None
+        let mut mt = self.mt.write()?;
+        let mut force_flush = false;
+
+        if !force_flush && !self.opts.in_memory {
+            if mt.table_mut().should_flush_wal()? {
+                force_flush = true;
+            }
+        }
+
+        let mem_size = mt.table_mut().skl.mem_size();
+
+        if !force_flush && mt.table_mut().skl.mem_size() as u64 >= self.opts.mem_table_size {
+            force_flush = true;
+        }
+
+        if !force_flush {
+            return Ok(());
+        }
+
+        // TOO: use log library
+        // TODO: use flush channel
+
+        let memtable = self.new_mem_table()?;
+
+        mt.use_new_table(memtable);
+
+        println!(
+            "memtable flushed, {}, mt.size = {}",
+            mt.nums_of_memtable(),
+            mem_size
+        );
+
+        Ok(())
+    }
+
     /// Write requests should be only called in one thread. By calling this
     /// function, requests will be written into the LSM tree. Processing one
     /// request requires us to get write lock of WAL file. Hence, calling this
@@ -314,45 +355,14 @@ impl Core {
                 continue;
             }
             cnt += req.entries.len();
-        }
 
-        Ok(())
-    }
-
-    /// Calling ensure_room_for_write requires locking whole memtable
-    pub fn ensure_room_for_write(&mut self) -> Result<()> {
-        // we do not need to force flush memtable in in-memory mode as WAL is None
-        let mt = self.mt.read()?;
-        let mut force_flush = false;
-
-        if !force_flush && !self.opts.in_memory {
-            if mt.table_mut().should_flush_wal()? {
-                force_flush = true;
+            while let Err(err) = self.ensure_room_for_write() {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                println!("wait for room... {:?}", err)
             }
+
+            self.write_to_lsm(req)?;
         }
-
-        let mem_size = mt.table_mut().skl.mem_size();
-
-        if !force_flush && mt.table_mut().skl.mem_size() as u64 >= self.opts.mem_table_size {
-            force_flush = true;
-        }
-
-        if !force_flush {
-            return Ok(());
-        }
-
-        // TODO: find better way of using this lock
-        drop(mt);
-
-        // TODO: use log library
-        // TODO: use flush channel
-        println!("flushing memtable, mt.size = {}", mem_size);
-
-        let memtable = self.new_mem_table()?;
-
-        let mut mt = self.mt.write()?;
-
-        mt.use_new_table(memtable);
 
         Ok(())
     }
@@ -365,6 +375,10 @@ impl Agate {
 
     pub fn write_to_lsm(&self, request: Request) -> Result<()> {
         self.core.write_to_lsm(request)
+    }
+
+    pub fn write_requests(&self, request: Vec<Request>) -> Result<()> {
+        self.core.write_requests(request)
     }
 }
 
@@ -386,9 +400,10 @@ mod tests {
             .create()
             .in_memory(false)
             .value_log_file_size(4096)
-            .open(tmp_dir)
+            .open(&tmp_dir)
             .unwrap();
-        f(agate)
+        f(agate);
+        tmp_dir.close().unwrap();
     }
 
     #[test]
@@ -400,7 +415,39 @@ mod tests {
                 entries: vec![Entry::new(key.clone(), value.clone())],
             };
             agate.write_to_lsm(req).unwrap();
-            agate.get(&key).unwrap();
+            let value = agate.get(&key).unwrap();
+            assert_eq!(value.value, Bytes::from("2333333333333333"));
+        });
+    }
+
+    fn generate_requests(n: usize) -> Vec<Request> {
+        (0..n)
+            .map(|i| Request {
+                entries: vec![Entry::new(
+                    key_with_ts(BytesMut::from(format!("{:08x}", i).as_str()), 0),
+                    Bytes::from(i.to_string()),
+                )],
+            })
+            .collect()
+    }
+
+    fn verify_requests(n: usize, agate: &Agate) {
+        for i in 0..n {
+            let value = agate
+                .get(&key_with_ts(
+                    BytesMut::from(format!("{:08x}", i).as_str()),
+                    0,
+                ))
+                .unwrap();
+            assert_eq!(value.value, i.to_string());
+        }
+    }
+
+    #[test]
+    fn test_flush_memtable() {
+        with_agate_test(|agate| {
+            agate.write_requests(generate_requests(1000)).unwrap();
+            verify_requests(1000, &agate);
         });
     }
 }
