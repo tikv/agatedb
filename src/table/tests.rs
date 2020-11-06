@@ -25,7 +25,10 @@ fn get_test_table_options() -> Options {
     }
 }
 
-fn build_test_table(prefix: &[u8], n: usize, mut opts: Options) -> Table {
+/// Build a test table.
+///
+/// This function will be used in table builder test.
+pub(crate) fn build_test_table(prefix: &[u8], n: usize, mut opts: Options) -> Table {
     if opts.block_size == 0 {
         opts.block_size = 4 * 1024;
     }
