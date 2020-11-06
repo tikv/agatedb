@@ -212,6 +212,7 @@ mod tests {
     use crate::format::key_with_ts;
     use crate::table::tests::build_test_table;
     use crate::table::Table;
+    use crate::AgateIterator;
     use tempdir::TempDir;
 
     const TEST_KEYS_COUNT: usize = 100000;
