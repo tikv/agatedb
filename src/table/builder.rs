@@ -205,6 +205,7 @@ impl Builder {
         self.buf.put_u32(len as u32);
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
