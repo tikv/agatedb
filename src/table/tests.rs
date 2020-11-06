@@ -47,7 +47,7 @@ fn generate_table_data(prefix: &[u8], n: usize, mut opts: Options) -> Vec<(Bytes
     kv_pairs
 }
 
-pub(crate) fn build_test_table(prefix: &[u8], n: usize, opts: Options) -> Table {
+pub(crate) fn build_test_table(prefix: &[u8], n: usize, opts: Options) -> TableGuard {
     let kv_pairs = generate_table_data(prefix, n, opts.clone());
     build_table(kv_pairs, opts)
 }
