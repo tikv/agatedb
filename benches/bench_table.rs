@@ -2,7 +2,6 @@ mod common;
 
 use agatedb::opt::ChecksumVerificationMode::NoVerification;
 use agatedb::{AgateIterator, Table, TableBuilder, TableOptions, Value};
-use agatedb::{Table, TableBuilder, TableOptions, Value};
 use bytes::Bytes;
 use common::rand_value;
 use criterion::{criterion_group, criterion_main, Criterion};
