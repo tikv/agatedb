@@ -1,6 +1,7 @@
 use std::io;
 use std::result;
 
+use std::sync::PoisonError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -23,6 +24,12 @@ pub enum Error {
     VarDecode(&'static str),
     #[error("{0}")]
     TableRead(String),
+    #[error("Database Closed")]
+    DBClosed,
+    #[error("Lock Poison")]
+    PoisonError(String),
+    #[error("{0}")]
+    LogRead(String),
 }
 
 impl From<io::Error> for Error {
@@ -36,6 +43,13 @@ impl From<prost::DecodeError> for Error {
     #[inline]
     fn from(e: prost::DecodeError) -> Error {
         Error::Decode(Box::new(e))
+    }
+}
+
+impl<T: Sized> From<PoisonError<T>> for Error {
+    #[inline]
+    fn from(e: PoisonError<T>) -> Error {
+        Error::PoisonError(e.to_string())
     }
 }
 
