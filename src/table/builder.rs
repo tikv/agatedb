@@ -266,6 +266,7 @@ mod tests {
             block_size: 0,
             bloom_false_positive: if with_blooms { 0.01 } else { 0.0 },
             table_size: 0,
+            checksum_mode: crate::opt::ChecksumVerificationMode::OnTableAndBlockRead,
         };
 
         let table = build_test_table(key_prefix, key_count, opts);
