@@ -251,6 +251,10 @@ impl Wal {
         self.file.seek(SeekFrom::Start(0))?;
         Ok(WalIterator::new(BufReader::new(&mut self.file)))
     }
+
+    pub fn should_flush(&self) -> bool {
+        self.write_at as u64 > self.opts.value_log_file_size
+    }
 }
 
 pub struct WalIterator<'a> {

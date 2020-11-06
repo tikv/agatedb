@@ -4,6 +4,7 @@ use crate::entry::Entry;
 use crate::format::get_ts;
 use crate::util::make_comparator;
 use crate::value::{self, Request, Value};
+use crate::value_log::ValueLog;
 use crate::wal::Wal;
 use bytes::Bytes;
 use skiplist::Skiplist;
@@ -17,6 +18,7 @@ pub struct Core {
     mt: RwLock<MemTables>,
     opts: AgateOptions,
     next_mem_fid: usize,
+    vlog: ValueLog,
 }
 
 #[derive(Clone)]
@@ -158,6 +160,7 @@ impl Core {
             mt: RwLock::new(MemTables::new(mt, VecDeque::new())),
             opts,
             next_mem_fid: 1,
+            vlog: ValueLog::new(),
         };
 
         // TODO: initialize other structures
@@ -286,6 +289,71 @@ impl Core {
         if self.opts.sync_writes {
             mut_table.sync_wal()?;
         }
+        Ok(())
+    }
+
+    /// Write requests should be only called in one thread. By calling this
+    /// function, requests will be written into the LSM tree. Processing one
+    /// request requires us to get write lock of WAL file. Hence, calling this
+    /// function from multiple threads is okay, but only one request will proceed
+    /// and will cause lock contention.
+    pub fn write_requests(&self, requests: Vec<Request>) -> Result<()> {
+        if requests.is_empty() {
+            return Ok(());
+        }
+
+        // TODO: process subscriptions
+
+        self.vlog.write(&requests)?;
+
+        let mut cnt = 0;
+
+        // writing to LSM
+        for req in requests {
+            if req.entries.is_empty() {
+                continue;
+            }
+            cnt += req.entries.len();
+        }
+
+        Ok(())
+    }
+
+    /// Calling ensure_room_for_write requires locking whole memtable
+    pub fn ensure_room_for_write(&mut self) -> Result<()> {
+        // we do not need to force flush memtable in in-memory mode as WAL is None
+        let mt = self.mt.read()?;
+        let mut force_flush = false;
+
+        if !force_flush && !self.opts.in_memory {
+            if mt.table_mut().should_flush_wal()? {
+                force_flush = true;
+            }
+        }
+
+        let mem_size = mt.table_mut().skl.mem_size();
+
+        if !force_flush && mt.table_mut().skl.mem_size() as u64 >= self.opts.mem_table_size {
+            force_flush = true;
+        }
+
+        if !force_flush {
+            return Ok(());
+        }
+
+        // TODO: find better way of using this lock
+        drop(mt);
+
+        // TODO: use log library
+        // TODO: use flush channel
+        println!("flushing memtable, mt.size = {}", mem_size);
+
+        let memtable = self.new_mem_table()?;
+
+        let mut mt = self.mt.write()?;
+
+        mt.use_new_table(memtable);
+
         Ok(())
     }
 }
