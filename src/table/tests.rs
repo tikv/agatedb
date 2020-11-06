@@ -1,7 +1,10 @@
+use std::ops::{Deref, DerefMut};
+
 use super::*;
 use crate::format::{key_with_ts, user_key};
 use crate::value::Value;
 use builder::Builder;
+use iterator::IteratorError;
 use rand::prelude::*;
 use tempdir::TempDir;
 
@@ -44,23 +47,46 @@ fn generate_table_data(prefix: &[u8], n: usize, mut opts: Options) -> Vec<(Bytes
     kv_pairs
 }
 
-pub(crate) fn build_test_table(prefix: &[u8], n: usize, opts: Options) -> Table {
+pub(crate) fn build_test_table(prefix: &[u8], n: usize, opts: Options) -> TableGuard {
     let kv_pairs = generate_table_data(prefix, n, opts.clone());
     build_table(kv_pairs, opts)
 }
 
-fn build_table(kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> Table {
+/// TableGuard saves Table and TempDir, so as to ensure
+/// temporary directory is removed after table is closed.
+/// According to Rust RFC, the drop order is first `table` then
+/// `tmp_dir`.
+pub struct TableGuard {
+    table: Table,
+    _tmp_dir: TempDir,
+}
+
+impl Deref for TableGuard {
+    type Target = Table;
+
+    fn deref(&self) -> &Table {
+        &self.table
+    }
+}
+
+impl DerefMut for TableGuard {
+    fn deref_mut(&mut self) -> &mut Table {
+        &mut self.table
+    }
+}
+
+fn build_table(kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> TableGuard {
     let tmp_dir = TempDir::new("agatedb").unwrap();
     let filename = tmp_dir.path().join("1.sst".to_string());
 
     let data = build_table_data(kv_pairs, opts.clone());
 
-    Table::create(&filename, data, opts).unwrap()
+    TableGuard {
+        table: Table::create(&filename, data, opts).unwrap(),
+        _tmp_dir: tmp_dir,
+    }
     // you can also test in-memory table
     // Table::open_in_memory(data, 233, opts).unwrap()
-    // `tmp_dir` will be dropped and the temp folder will be deleted
-    // when we return from this function. However, as we saves file
-    // descriptor to the file, we could still safely access that file.
 }
 
 fn build_table_data(mut kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> Bytes {
@@ -358,6 +384,69 @@ fn test_table_big_values() {
 }
 
 #[test]
+fn test_iterator_error_eof() {
+    let opts = get_test_table_options();
+    let table = build_test_table(b"key", 10000, opts);
+
+    let mut it = table.new_iterator(0);
+    it.rewind();
+
+    while it.valid() {
+        it.next();
+    }
+
+    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+}
+
+#[test]
+fn test_iterator_use_without_init() {
+    let opts = get_test_table_options();
+    let table = build_test_table(b"key", 1000, opts);
+    let mut it = table.new_iterator(0);
+    // Generally, developers should call `rewind` before using an iterator.
+    // If iterator is not initialized, getting key directly from iterator
+    // will cause panic. Directly calling `next` will return
+    // the first entry.
+    it.next();
+    assert_eq!(user_key(it.key()), key(b"key", 0));
+}
+
+#[test]
+fn test_iterator_out_of_bound() {
+    let opts = get_test_table_options();
+    let table = build_test_table(b"key", 1000, opts);
+    let mut it = table.new_iterator(0);
+    it.seek_to_last();
+    assert!(it.error().is_none());
+    it.next();
+    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    it.next();
+    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    it.next();
+    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    it.rewind();
+    assert!(it.error().is_none());
+    assert_eq!(user_key(it.key()), key(b"key", 0));
+}
+
+#[test]
+fn test_iterator_out_of_bound_reverse() {
+    let opts = get_test_table_options();
+    let table = build_test_table(b"key", 1000, opts);
+    let mut it = table.new_iterator(ITERATOR_REVERSED);
+    it.seek_to_first();
+    assert!(it.error().is_none());
+    it.next();
+    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    it.next();
+    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    it.next();
+    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    it.rewind();
+    assert!(it.error().is_none());
+    assert_eq!(user_key(it.key()), key(b"key", 999));
+}
+
 fn test_table_checksum() {
     let mut rng = thread_rng();
     let opts = get_test_table_options();
