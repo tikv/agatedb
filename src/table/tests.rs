@@ -5,6 +5,7 @@ use crate::format::{key_with_ts, user_key};
 use crate::value::Value;
 use builder::Builder;
 use iterator::IteratorError;
+use rand::prelude::*;
 use tempdir::TempDir;
 
 fn key(prefix: &[u8], i: usize) -> Bytes {
@@ -25,10 +26,11 @@ fn get_test_table_options() -> Options {
         block_size: 4 * 1024,
         table_size: 0,
         bloom_false_positive: 0.01,
+        checksum_mode: ChecksumVerificationMode::OnTableRead,
     }
 }
 
-fn build_test_table(prefix: &[u8], n: usize, mut opts: Options) -> TableGuard {
+fn generate_table_data(prefix: &[u8], n: usize, mut opts: Options) -> Vec<(Bytes, Bytes)> {
     if opts.block_size == 0 {
         opts.block_size = 4 * 1024;
     }
@@ -42,6 +44,11 @@ fn build_test_table(prefix: &[u8], n: usize, mut opts: Options) -> TableGuard {
         kv_pairs.push((k, v));
     }
 
+    kv_pairs
+}
+
+pub(crate) fn build_test_table(prefix: &[u8], n: usize, opts: Options) -> Table {
+    let kv_pairs = generate_table_data(prefix, n, opts.clone());
     build_table(kv_pairs, opts)
 }
 
@@ -68,17 +75,11 @@ impl DerefMut for TableGuard {
     }
 }
 
-fn build_table(mut kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> TableGuard {
-    let mut builder = Builder::new(opts.clone());
+fn build_table(kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> TableGuard {
     let tmp_dir = TempDir::new("agatedb").unwrap();
     let filename = tmp_dir.path().join("1.sst".to_string());
 
-    kv_pairs.sort_by(|x, y| x.0.cmp(&y.0));
-
-    for (k, v) in kv_pairs {
-        builder.add(&key_with_ts(&k[..], 0), Value::new_with_meta(v, b'A', 0), 0);
-    }
-    let data = builder.finish();
+    let data = build_table_data(kv_pairs, opts.clone());
 
     TableGuard {
         table: Table::create(&filename, data, opts).unwrap(),
@@ -86,6 +87,16 @@ fn build_table(mut kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> TableGuard {
     }
     // you can also test in-memory table
     // Table::open_in_memory(data, 233, opts).unwrap()
+}
+
+fn build_table_data(mut kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> Bytes {
+    let mut builder = Builder::new(opts);
+    kv_pairs.sort_by(|x, y| x.0.cmp(&y.0));
+
+    for (k, v) in kv_pairs {
+        builder.add(&key_with_ts(&k[..], 0), Value::new_with_meta(v, b'A', 0), 0);
+    }
+    builder.finish()
 }
 
 #[test]
@@ -338,6 +349,7 @@ fn test_table_big_values() {
         block_size: 4 * 1024,
         bloom_false_positive: 0.01,
         table_size: (n as u64) * (1 << 20),
+        checksum_mode: ChecksumVerificationMode::OnTableRead,
     };
     let mut builder = Builder::new(opts.clone());
 
@@ -433,4 +445,17 @@ fn test_iterator_out_of_bound_reverse() {
     it.rewind();
     assert!(it.error().is_none());
     assert_eq!(user_key(it.key()), key(b"key", 999));
+}
+
+fn test_table_checksum() {
+    let mut rng = thread_rng();
+    let opts = get_test_table_options();
+    let kv_pairs = generate_table_data(b"k", 10000, opts.clone());
+    let mut table_data = build_table_data(kv_pairs, opts.clone()).to_vec();
+    let start = rng.gen_range(0, table_data.len() - 100);
+    rng.fill_bytes(&mut table_data[start..start + 100]);
+    assert!(matches!(
+        Table::open_in_memory(Bytes::from(table_data), 233, opts),
+        Err(Error::InvalidChecksum(_))
+    ));
 }

@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+mod bloom;
 mod checksum;
 mod db;
 mod entry;
@@ -7,7 +8,8 @@ mod format;
 mod levels;
 mod memtable;
 mod ops;
-mod opt;
+pub mod opt;
+mod structs;
 mod table;
 mod util;
 mod value;
@@ -22,3 +24,4 @@ pub use value::Value;
 pub use db::{Agate, AgateOptions};
 pub use error::{Error, Result};
 pub use skiplist::Skiplist;
+pub use structs::AgateIterator;
