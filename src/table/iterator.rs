@@ -319,7 +319,7 @@ impl<T: AsRef<TableInner>> Iterator<T> {
         let idx = util::search(self.table.as_ref().offsets_length(), |idx| {
             use std::cmp::Ordering::*;
             let block_offset = self.table.as_ref().offsets(idx).unwrap();
-            !matches!(COMPARATOR.compare_key(&block_offset.key, &key), Greater)
+            matches!(COMPARATOR.compare_key(&block_offset.key, &key), Greater)
         });
 
         if idx == 0 {
