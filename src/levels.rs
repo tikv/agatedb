@@ -1,7 +1,6 @@
-use crate::db::Core as AgateCore;
 use crate::format::get_ts;
 use crate::structs::AgateIterator;
-use crate::table::{MergeIterator, TableIterator, TableIterators};
+use crate::table::{MergeIterator, TableIterators};
 use crate::value::Value;
 use crate::{AgateOptions, Table};
 use crate::{Error, Result};

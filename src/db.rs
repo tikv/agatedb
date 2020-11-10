@@ -552,6 +552,16 @@ mod tests {
         with_agate_test(|_| {});
     }
 
+    fn helper_dump_dir(path: &Path) {
+        for entry in fs::read_dir(path).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_file() {
+                println!("{:?}", path);
+            }
+        }
+    }
+
     fn with_agate_test(f: impl FnOnce(Agate) -> ()) {
         let tmp_dir = TempDir::new("agatedb").unwrap();
         let agate = AgateOptions::default()
@@ -561,6 +571,7 @@ mod tests {
             .open(&tmp_dir)
             .unwrap();
         f(agate);
+        helper_dump_dir(tmp_dir.path());
         tmp_dir.close().unwrap();
     }
 
