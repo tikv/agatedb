@@ -128,11 +128,11 @@ impl TableInner {
             index: TableIndex::default(),
             index_start: 0,
             index_len: 0,
-            opts: opts.clone(),
+            opts: opts,
         };
         inner.init_biggest_and_smallest()?;
 
-        if matches!(opts.checksum_mode, OnTableAndBlockRead | OnTableRead) {
+        if matches!(inner.opts.checksum_mode, OnTableAndBlockRead | OnTableRead) {
             inner.verify_checksum()?;
         }
 

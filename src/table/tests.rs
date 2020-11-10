@@ -360,7 +360,8 @@ fn test_table_big_values() {
 #[test]
 fn test_table_checksum() {
     let mut rng = thread_rng();
-    let opts = get_test_table_options();
+    let mut opts = get_test_table_options();
+    opts.checksum_mode = ChecksumVerificationMode::OnTableAndBlockRead;
     let kv_pairs = generate_table_data(b"k", 10000, opts.clone());
     let mut table_data = build_table_data(kv_pairs, opts.clone()).to_vec();
     let start = rng.gen_range(0, table_data.len() - 100);
