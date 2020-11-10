@@ -3,6 +3,9 @@ use tempfile::tempdir;
 
 use super::*;
 use crate::format::{append_ts, key_with_ts};
+use crate::entry::Entry;
+
+use tempdir::TempDir;
 
 #[test]
 fn test_open_mem_tables() {
@@ -45,21 +48,14 @@ fn test_ensure_room_for_write() {
     let mut opts = AgateOptions::default();
     let tmp_dir = tempdir().unwrap();
     opts.dir = tmp_dir.path().to_path_buf();
+    opts.value_dir = opts.dir.clone();
 
     // Wal::zero_next_entry will need MAX_HEADER_SIZE bytes free space.
     // So we should put bytes more than value_log_file_size but less than
     // 2*value_log_file_size - MAX_HEADER_SIZE.
     opts.value_log_file_size = 25;
 
-    let mt = Core::open_mem_table(&opts, 1).unwrap();
-
-    let mts = MemTables::new(mt, VecDeque::new());
-
-    let mut core = Core {
-        mts: RwLock::new(mts),
-        opts,
-        next_mem_fid: AtomicUsize::new(2),
-    };
+    let mut core = Core::new(opts).unwrap();
 
     {
         let mts = core.mts.read().unwrap();
@@ -107,4 +103,67 @@ pub fn helper_dump_dir(path: &Path) {
     for path in result {
         println!("{:?}", path);
     }
+}
+
+fn with_agate_test(f: impl FnOnce(Agate) -> ()) {
+    let tmp_dir = TempDir::new("agatedb").unwrap();
+    let agate = AgateOptions::default()
+        .create()
+        .in_memory(false)
+        .value_log_file_size(4096)
+        .open(&tmp_dir)
+        .unwrap();
+    f(agate);
+    helper_dump_dir(tmp_dir.path());
+    tmp_dir.close().unwrap();
+}
+
+#[test]
+fn test_simple_get_put() {
+    with_agate_test(|agate| {
+        let key = key_with_ts(BytesMut::from("2333"), 0);
+        let value = Bytes::from("2333333333333333");
+        let req = Request {
+            entries: vec![Entry::new(key.clone(), value.clone())],
+            ptrs: vec![],
+            done: None,
+        };
+        agate.write_to_lsm(req).unwrap();
+        let value = agate.get(&key).unwrap();
+        assert_eq!(value.value, Bytes::from("2333333333333333"));
+    });
+}
+
+fn generate_requests(n: usize) -> Vec<Request> {
+    (0..n)
+        .map(|i| Request {
+            entries: vec![Entry::new(
+                key_with_ts(BytesMut::from(format!("{:08x}", i).as_str()), 0),
+                Bytes::from(i.to_string()),
+            )],
+            ptrs: vec![],
+            done: None,
+        })
+        .collect()
+}
+
+fn verify_requests(n: usize, agate: &Agate) {
+    for i in 0..n {
+        let value = agate
+            .get(&key_with_ts(
+                BytesMut::from(format!("{:08x}", i).as_str()),
+                0,
+            ))
+            .unwrap();
+        assert_eq!(value.value, i.to_string());
+    }
+}
+
+#[test]
+fn test_flush_memtable() {
+    with_agate_test(|agate| {
+        agate.write_requests(generate_requests(2000)).unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        verify_requests(2000, &agate);
+    });
 }

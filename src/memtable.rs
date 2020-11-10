@@ -2,7 +2,7 @@ use std::{
     collections::VecDeque,
     mem::{self, ManuallyDrop, MaybeUninit},
     ptr,
-    sync::{atomic::AtomicBool, RwLock},
+    sync::{atomic::AtomicBool, RwLock, Arc},
 };
 
 use bytes::Bytes;
@@ -34,10 +34,36 @@ pub struct MemTable {
     core: RwLock<MemTableCore>,
 
     save_after_close: AtomicBool,
+    id: usize,
 }
 
 impl MemTable {
-    pub fn new(skl: Skiplist<Comparator>, wal: Option<Wal>, opt: AgateOptions) -> Self {
+    /*
+    pub fn with_capacity(table_size: u32, max_count: usize) -> MemTable {
+        let c = make_comparator();
+        MemTable {
+            mutable: Skiplist::with_capacity(c, table_size),
+            immutable: VecDeque::with_capacity(max_count - 1),
+        }
+    }
+
+    pub fn view(&self) -> MemTableView {
+        // Maybe flush is better.
+        assert!(self.immutable.len() + 1 <= 20);
+        let mut array: [MaybeUninit<Skiplist<Flsc>>; 20] =
+            unsafe { MaybeUninit::uninit().assume_init() };
+        array[0] = MaybeUninit::new(self.mutable.clone());
+        for (i, s) in self.immutable.iter().enumerate() {
+            array[i + 1] = MaybeUninit::new(s.clone());
+        }
+        MemTableView {
+            tables: unsafe { ManuallyDrop::new(mem::transmute(array)) },
+            len: self.immutable.len() + 1,
+        }
+    }
+    */
+
+    pub fn new(id: usize, skl: Skiplist<Comparator>, wal: Option<Wal>, opt: AgateOptions) -> Self {
         Self {
             skl,
             opt,
@@ -46,6 +72,7 @@ impl MemTable {
                 max_version: 0,
             }),
             save_after_close: AtomicBool::new(false),
+            id,
         }
     }
 
@@ -138,12 +165,17 @@ impl MemTable {
         }
         Ok(())
     }
+
+    pub fn id(&self) -> usize {
+        self.id
+    }
 }
 
 impl Drop for MemTable {
     fn drop(&mut self) {
         crate::util::no_fail(self.drop_no_fail(), "MemTable::drop");
     }
+    
 }
 
 pub struct MemTablesView {
@@ -168,12 +200,12 @@ impl Drop for MemTablesView {
 }
 
 pub struct MemTables {
-    mutable: MemTable,
-    immutable: VecDeque<MemTable>,
+    mutable: Arc<MemTable>,
+    immutable: VecDeque<Arc<MemTable>>,
 }
 
 impl MemTables {
-    pub(crate) fn new(mutable: MemTable, immutable: VecDeque<MemTable>) -> Self {
+    pub(crate) fn new(mutable: Arc<MemTable>, immutable: VecDeque<Arc<MemTable>>) -> Self {
         Self { mutable, immutable }
     }
 
@@ -194,17 +226,25 @@ impl MemTables {
     }
 
     /// Get mutable memtable
-    pub fn table_mut(&self) -> &MemTable {
-        &self.mutable
+    pub fn table_mut(&self) -> Arc<MemTable> {
+        self.mutable.clone()
     }
 
-    pub(crate) fn use_new_table(&mut self, memtable: MemTable) {
+    pub fn table_imm(&self, idx: usize) -> Arc<MemTable> {
+        self.immutable[idx].clone()
+    }
+
+    pub(crate) fn use_new_table(&mut self, memtable: Arc<MemTable>) {
         let old_mt = std::mem::replace(&mut self.mutable, memtable);
         self.immutable.push_back(old_mt);
     }
 
     pub(crate) fn nums_of_memtable(&self) -> usize {
         self.immutable.len() + 1
+    }
+
+    pub fn pop_imm(&mut self) {
+        self.immutable.pop_front().unwrap();
     }
 }
 
@@ -224,9 +264,9 @@ mod tests {
     use super::*;
     use crate::{format::append_ts, util::make_comparator};
 
-    fn get_memtable(data: Vec<(Bytes, Value)>) -> MemTable {
+    fn get_memtable(data: Vec<(Bytes, Value)>) -> Arc<MemTable> {
         let skl = Skiplist::with_capacity(make_comparator(), 4 * 1024 * 1024);
-        let memtable = MemTable::new(skl, None, AgateOptions::default());
+        let memtable = Arc::new(MemTable::new(0, skl, None, AgateOptions::default()));
 
         for (k, v) in data {
             assert!(memtable.put(k, v).is_ok());
@@ -255,7 +295,7 @@ mod tests {
                 [d2, d3, d4]
                     .iter()
                     .map(|x| get_memtable(x.to_vec()))
-                    .collect::<Vec<MemTable>>(),
+                    .collect::<Vec<Arc<MemTable>>>(),
             ),
         };
         let view = mem_tables.view();
