@@ -9,9 +9,8 @@ use bytes::Bytes;
 use skiplist::Skiplist;
 use std::collections::VecDeque;
 use std::mem::{self, ManuallyDrop, MaybeUninit};
-
 use std::ptr;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 const MEMTABLE_VIEW_MAX: usize = 20;
 
@@ -28,6 +27,7 @@ pub struct MemTable {
     pub(crate) skl: Skiplist<Comparator>,
     opt: AgateOptions,
     core: RwLock<MemTableCore>,
+    id: usize,
 }
 
 impl MemTable {
@@ -56,7 +56,7 @@ impl MemTable {
     }
     */
 
-    pub fn new(skl: Skiplist<Comparator>, wal: Option<Wal>, opt: AgateOptions) -> Self {
+    pub fn new(id: usize, skl: Skiplist<Comparator>, wal: Option<Wal>, opt: AgateOptions) -> Self {
         Self {
             skl,
             opt,
@@ -64,6 +64,7 @@ impl MemTable {
                 wal,
                 max_version: 0,
             }),
+            id,
         }
     }
 
@@ -137,6 +138,10 @@ impl MemTable {
             Ok(false)
         }
     }
+
+    pub fn id(&self) -> usize {
+        self.id
+    }
 }
 
 pub struct MemTablesView {
@@ -161,12 +166,12 @@ impl Drop for MemTablesView {
 }
 
 pub struct MemTables {
-    mutable: MemTable,
-    immutable: VecDeque<MemTable>,
+    mutable: Arc<MemTable>,
+    immutable: VecDeque<Arc<MemTable>>,
 }
 
 impl MemTables {
-    pub(crate) fn new(mutable: MemTable, immutable: VecDeque<MemTable>) -> Self {
+    pub(crate) fn new(mutable: Arc<MemTable>, immutable: VecDeque<Arc<MemTable>>) -> Self {
         Self { mutable, immutable }
     }
 
@@ -187,17 +192,25 @@ impl MemTables {
     }
 
     /// Get mutable memtable
-    pub fn table_mut(&self) -> &MemTable {
-        &self.mutable
+    pub fn table_mut(&self) -> Arc<MemTable> {
+        self.mutable.clone()
     }
 
-    pub(crate) fn use_new_table(&mut self, memtable: MemTable) {
+    pub fn table_imm(&self, idx: usize) -> Arc<MemTable> {
+        self.immutable[idx].clone()
+    }
+
+    pub(crate) fn use_new_table(&mut self, memtable: Arc<MemTable>) {
         let old_mt = std::mem::replace(&mut self.mutable, memtable);
         self.immutable.push_back(old_mt);
     }
 
     pub(crate) fn nums_of_memtable(&self) -> usize {
         self.immutable.len() + 1
+    }
+
+    pub fn pop_imm(&mut self) {
+        self.immutable.pop_front().unwrap();
     }
 }
 
@@ -210,12 +223,12 @@ mod tests {
         FixedLengthSuffixComparator::new(0)
     }
 
-    fn get_memtable(data: Vec<(String, String)>) -> MemTable {
+    fn get_memtable(data: Vec<(String, String)>) -> Arc<MemTable> {
         let skl = Skiplist::with_capacity(get_comparator(), 4 * 1024 * 1024);
         for (k, v) in data {
             assert!(skl.put(k, v).is_none());
         }
-        MemTable::new(skl, None, AgateOptions::default())
+        Arc::new(MemTable::new(0, skl, None, AgateOptions::default()))
     }
 
     #[test]
@@ -234,7 +247,7 @@ mod tests {
                 [d2, d3, d4]
                     .iter()
                     .map(|x| get_memtable(x.to_vec()))
-                    .collect::<Vec<MemTable>>(),
+                    .collect::<Vec<Arc<MemTable>>>(),
             ),
         };
         let view = mem_tables.view();

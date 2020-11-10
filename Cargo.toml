@@ -15,6 +15,8 @@ memmap = "0.7"
 farmhash = "1.1"
 prost = "0.6"
 enum_dispatch = "0.3"
+crossbeam-channel = "0.5"
+yatp = { git = "https://github.com/tikv/yatp.git" }
 
 [dev-dependencies]
 criterion = "0.3"

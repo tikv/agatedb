@@ -3,6 +3,7 @@ use crate::entry::Entry;
 use crate::{Error, Result};
 use bytes::Bytes;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 const MAX_KEY_LENGTH: usize = 65000;
 
@@ -12,7 +13,7 @@ pub struct Transaction {
 
     update: bool,
     pending_writes: HashMap<Bytes, Entry>,
-    agate: Agate,
+    agate: Arc<crate::db::Core>,
 }
 
 impl Agate {
@@ -22,7 +23,7 @@ impl Agate {
             commit_ts: 0,
             update,
             pending_writes: HashMap::default(),
-            agate: self.clone(),
+            agate: self.core.clone(),
         }
     }
 }

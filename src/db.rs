@@ -2,7 +2,7 @@ use super::memtable::{MemTable, MemTables};
 use super::{Error, Result};
 use crate::entry::Entry;
 use crate::format::get_ts;
-use crate::levels::LevelController;
+use crate::levels::LevelsController;
 use crate::opt;
 use crate::util::{has_any_prefixes, make_comparator};
 use crate::value::{self, Request, Value};
@@ -10,30 +10,41 @@ use crate::value_log::ValueLog;
 use crate::wal::Wal;
 use crate::{Table, TableBuilder, TableOptions};
 use bytes::Bytes;
+use crossbeam_channel::{Receiver, Sender};
 use skiplist::Skiplist;
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
-use std::sync::Arc;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
+use yatp::task::callback::Handle;
 
 pub struct Core {
     mts: RwLock<MemTables>,
     pub(crate) opts: AgateOptions,
     next_mem_fid: AtomicUsize,
     vlog: ValueLog,
-    lvctl: LevelController,
+    lvctl: LevelsController,
+    flush_channel: (Sender<Option<FlushTask>>, Receiver<Option<FlushTask>>),
 }
 
-#[derive(Clone)]
 pub struct Agate {
-    core: Arc<Core>,
+    pub(crate) core: Arc<Core>,
+    pool: yatp::ThreadPool<yatp::task::callback::TaskCell>,
 }
 
 struct FlushTask {
-    mt: MemTable,
+    mt: Arc<MemTable>,
     drop_prefixes: Vec<Bytes>,
+}
+
+impl FlushTask {
+    pub fn new(mt: Arc<MemTable>) -> Self {
+        Self {
+            mt,
+            drop_prefixes: vec![],
+        }
+    }
 }
 
 const MEMTABLE_FILE_EXT: &str = ".mem";
@@ -49,6 +60,32 @@ impl Agate {
         unimplemented!()
     }
     */
+
+    fn new(core: Arc<Core>) -> Self {
+        let flush_core = core.clone();
+
+        let agate = Self {
+            core,
+            pool: yatp::Builder::new("agatedb").build_callback_pool(),
+        };
+
+        agate
+            .pool
+            .spawn(move |_: &mut Handle<'_>| flush_core.flush_memtable().unwrap());
+
+        agate
+    }
+
+    fn close(&self) {
+        self.core.flush_channel.0.send(None).unwrap();
+    }
+}
+
+impl Drop for Agate {
+    fn drop(&mut self) {
+        self.close();
+        self.pool.shutdown();
+    }
 }
 
 #[derive(Clone)]
@@ -69,8 +106,12 @@ pub struct AgateOptions {
 
     pub value_threshold: usize,
     pub num_memtables: usize,
+
     pub block_size: usize,
     pub bloom_false_positive: f64,
+
+    pub num_level_zero_tables: usize,
+    pub num_level_zero_tables_stall: usize,
 
     pub value_log_file_size: u64,
     pub value_log_max_entries: u32,
@@ -100,6 +141,8 @@ impl Default for AgateOptions {
             checksum_mode: opt::ChecksumVerificationMode::NoVerification,
             block_size: 4 << 10,
             bloom_false_positive: 0.01,
+            num_level_zero_tables: 5,
+            num_level_zero_tables_stall: 15,
         }
         // TODO: add other options
     }
@@ -166,9 +209,7 @@ impl AgateOptions {
         }
 
         // TODO: open or create manifest
-        Ok(Agate {
-            core: Arc::new(Core::new(self.clone())?),
-        })
+        Ok(Agate::new(Arc::new(Core::new(self.clone())?)))
     }
 
     fn skip_vlog(&self, entry: &Entry) -> bool {
@@ -188,11 +229,12 @@ impl Core {
 
         // create agate core
         let core = Self {
-            mts: RwLock::new(MemTables::new(mt, VecDeque::new())),
-            opts,
+            mts: RwLock::new(MemTables::new(Arc::new(mt), VecDeque::new())),
+            opts: opts.clone(),
             next_mem_fid: AtomicUsize::new(1),
             vlog: ValueLog::new(),
-            lvctl: LevelController {},
+            lvctl: LevelsController::new(opts.clone())?,
+            flush_channel: crossbeam_channel::bounded(opts.num_memtables),
         };
 
         // TODO: initialize other structures
@@ -216,12 +258,12 @@ impl Core {
         // TODO: refactor skiplist to use `u64`
         let skl = Skiplist::with_capacity(c, opts.arena_size() as u32);
         if opts.in_memory {
-            return Ok(MemTable::new(skl, None, opts.clone()));
+            return Ok(MemTable::new(file_id, skl, None, opts.clone()));
         }
         let wal = Wal::open(path, opts.clone())?;
         // TODO: delete WAL when skiplist ref count becomes zero
 
-        let mem_table = MemTable::new(skl, Some(wal), opts.clone());
+        let mem_table = MemTable::new(file_id, skl, Some(wal), opts.clone());
 
         mem_table.update_skip_list()?;
 
@@ -249,7 +291,7 @@ impl Core {
         false
     }
 
-    pub(crate) fn get(&self, key: &[u8]) -> Result<Value> {
+    pub(crate) fn get(&self, key: &Bytes) -> Result<Value> {
         if self.is_closed() {
             return Err(Error::DBClosed);
         }
@@ -277,7 +319,7 @@ impl Core {
         }
 
         // max_value will be used in level controller
-        panic!("value not available in memtable") // Should get from level controller
+        self.lvctl.get(&key, max_value, 0)
     }
 
     /// `write_to_lsm` will only be called in write thread (or write coroutine).
@@ -329,18 +371,18 @@ impl Core {
     /// Calling ensure_room_for_write requires locking whole memtable
     pub fn ensure_room_for_write(&self) -> Result<()> {
         // we do not need to force flush memtable in in-memory mode as WAL is None
-        let mut mt = self.mts.write()?;
+        let mut mts = self.mts.write()?;
         let mut force_flush = false;
 
         if !force_flush && !self.opts.in_memory {
-            if mt.table_mut().should_flush_wal()? {
+            if mts.table_mut().should_flush_wal()? {
                 force_flush = true;
             }
         }
 
-        let mem_size = mt.table_mut().skl.mem_size();
+        let mem_size = mts.table_mut().skl.mem_size();
 
-        if !force_flush && mt.table_mut().skl.mem_size() as u64 >= self.opts.mem_table_size {
+        if !force_flush && mts.table_mut().skl.mem_size() as u64 >= self.opts.mem_table_size {
             force_flush = true;
         }
 
@@ -348,20 +390,28 @@ impl Core {
             return Ok(());
         }
 
-        // TOO: use log library
-        // TODO: use flush channel
+        // TODO: use log library
 
-        let memtable = self.new_mem_table()?;
+        match self
+            .flush_channel
+            .0
+            .try_send(Some(FlushTask::new(mts.table_mut().clone())))
+        {
+            Ok(_) => {
+                let memtable = self.new_mem_table()?;
 
-        mt.use_new_table(memtable);
+                mts.use_new_table(Arc::new(memtable));
 
-        println!(
-            "memtable flushed, {}, mt.size = {}",
-            mt.nums_of_memtable(),
-            mem_size
-        );
+                println!(
+                    "memtable flushed, total={}, mt.size = {}",
+                    mts.nums_of_memtable(),
+                    mem_size
+                );
 
-        Ok(())
+                Ok(())
+            }
+            Err(_) => Err(Error::WriteNoRoom(())),
+        }
     }
 
     /// build L0 table from memtable
@@ -405,10 +455,37 @@ impl Core {
             let data = builder.finish();
             table = Table::open_in_memory(data, file_id, table_opts)?;
         } else {
-            table = Table::create(&PathBuf::new(), builder.finish(), table_opts)?;
+            table = Table::create(
+                &crate::table::new_filename(file_id, &self.opts.path),
+                builder.finish(),
+                table_opts,
+            )?;
         }
 
-        self.lvctl.add_l0_table(table);
+        self.lvctl.add_l0_table(table)?;
+
+        Ok(())
+    }
+
+    fn flush_memtable(&self) -> Result<()> {
+        for ft in self.flush_channel.1.clone() {
+            if let Some(ft) = ft {
+                let flush_id = ft.mt.id();
+                match self.handle_flush_task(ft) {
+                    Ok(_) => {
+                        let mut mts = self.mts.write()?;
+                        assert_eq!(flush_id, mts.table_imm(0).id());
+                        mts.pop_imm();
+                    }
+                    Err(err) => {
+                        println!("error while flushing memtable to disk: {:?}", err);
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                    }
+                }
+            } else {
+                break;
+            }
+        }
 
         Ok(())
     }
@@ -450,7 +527,7 @@ impl Core {
 }
 
 impl Agate {
-    pub fn get(&self, key: &[u8]) -> Result<Value> {
+    pub fn get(&self, key: &Bytes) -> Result<Value> {
         self.core.get(key)
     }
 
@@ -527,8 +604,8 @@ mod tests {
     #[test]
     fn test_flush_memtable() {
         with_agate_test(|agate| {
-            agate.write_requests(generate_requests(3000)).unwrap();
-            verify_requests(3000, &agate);
+            agate.write_requests(generate_requests(2000)).unwrap();
+            verify_requests(2000, &agate);
         });
     }
 }

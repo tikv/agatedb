@@ -1,5 +1,6 @@
 pub mod binary;
 
+use crate::format::user_key;
 use crate::Result;
 use bytes::Bytes;
 pub use skiplist::FixedLengthSuffixComparator as Comparator;
@@ -77,4 +78,11 @@ pub fn fill_file(file: &mut impl std::io::Write, mut size: u64) -> Result<()> {
 
 pub fn has_any_prefixes(s: &[u8], list_of_prefixes: &[Bytes]) -> bool {
     list_of_prefixes.iter().any(|y| s.starts_with(y))
+}
+
+pub fn same_key(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    return user_key(a) == user_key(b);
 }
