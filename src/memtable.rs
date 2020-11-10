@@ -128,6 +128,15 @@ impl MemTable {
         }
         Ok(())
     }
+
+    pub(crate) fn should_flush_wal(&self) -> Result<bool> {
+        let core = self.core.read()?;
+        if let Some(ref wal) = core.wal {
+            Ok(wal.should_flush())
+        } else {
+            Ok(false)
+        }
+    }
 }
 
 pub struct MemTablesView {
@@ -180,6 +189,15 @@ impl MemTables {
     /// Get mutable memtable
     pub fn table_mut(&self) -> &MemTable {
         &self.mutable
+    }
+
+    pub(crate) fn use_new_table(&mut self, memtable: MemTable) {
+        let old_mt = std::mem::replace(&mut self.mutable, memtable);
+        self.immutable.push_back(old_mt);
+    }
+
+    pub(crate) fn nums_of_memtable(&self) -> usize {
+        self.immutable.len() + 1
     }
 }
 
