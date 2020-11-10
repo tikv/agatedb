@@ -1,6 +1,7 @@
 use std::io;
 use std::result;
 
+use crossbeam_channel::SendError;
 use std::sync::PoisonError;
 use thiserror::Error;
 
@@ -30,6 +31,13 @@ pub enum Error {
     PoisonError(String),
     #[error("{0}")]
     LogRead(String),
+    #[error("Send error {0}")]
+    SendError(String),
+    #[error("No room for write")]
+    WriteNoRoom(()),
+    // TODO: split custom error to their concrete types
+    #[error("{0}")]
+    CustomError(String),
 }
 
 impl From<io::Error> for Error {
@@ -50,6 +58,13 @@ impl<T: Sized> From<PoisonError<T>> for Error {
     #[inline]
     fn from(e: PoisonError<T>) -> Error {
         Error::PoisonError(e.to_string())
+    }
+}
+
+impl<T: Sized> From<SendError<T>> for Error {
+    #[inline]
+    fn from(e: SendError<T>) -> Error {
+        Error::SendError(e.to_string())
     }
 }
 

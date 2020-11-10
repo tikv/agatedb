@@ -1,6 +1,8 @@
 pub(crate) mod builder;
 mod iterator;
-mod merge_iterator;
+pub mod merge_iterator;
+pub use merge_iterator::{Iterators as TableIterators, MergeIterator};
+pub type TableIterator = RefTableIterator<Arc<TableInner>>;
 
 use crate::bloom::Bloom;
 use crate::checksum;
@@ -10,7 +12,7 @@ use crate::Error;
 use crate::Result;
 
 use bytes::{Buf, Bytes};
-use iterator::{Iterator as TableIterator, ITERATOR_NOCACHE, ITERATOR_REVERSED};
+use iterator::{Iterator as RefTableIterator, ITERATOR_NOCACHE, ITERATOR_REVERSED};
 use memmap::{Mmap, MmapOptions};
 use prost::Message;
 use proto::meta::{BlockOffset, Checksum, TableIndex};
@@ -84,6 +86,9 @@ pub struct TableInner {
     opts: Options,
 }
 
+/// Table is simply an Arc to its internal TableInner structure.
+/// You may clone it without much overhead.
+#[derive(Clone)]
 pub struct Table {
     inner: Arc<TableInner>,
 }
@@ -177,7 +182,7 @@ impl TableInner {
     fn init_biggest_and_smallest(&mut self) -> Result<()> {
         let ko = self.init_index()?;
         self.smallest = Bytes::from(ko.key.clone());
-        let mut it = TableIterator::new(&self, ITERATOR_REVERSED | ITERATOR_NOCACHE);
+        let mut it = RefTableIterator::new(&self, ITERATOR_REVERSED | ITERATOR_NOCACHE);
         it.rewind();
         if !it.valid() {
             return Err(Error::TableRead(format!(
@@ -530,8 +535,8 @@ impl Table {
     }
 
     /// Get an iterator to this table
-    pub fn new_iterator(&self, opt: usize) -> TableIterator<Arc<TableInner>> {
-        TableIterator::new(self.inner.clone(), opt)
+    pub fn new_iterator(&self, opt: usize) -> TableIterator {
+        RefTableIterator::new(self.inner.clone(), opt)
     }
 
     /// Get max version of this table
@@ -546,4 +551,17 @@ impl Table {
     pub fn does_not_have(&self, hash: u32) -> bool {
         self.inner.does_not_have(hash)
     }
+
+    /// Get size of SST
+    pub fn size(&self) -> u64 {
+        self.inner.size()
+    }
+}
+
+fn id_to_filename(id: u64) -> String {
+    format!("{:06}.sst", id)
+}
+
+pub fn new_filename<P: AsRef<Path>>(id: u64, dir: P) -> PathBuf {
+    dir.as_ref().join(id_to_filename(id))
 }

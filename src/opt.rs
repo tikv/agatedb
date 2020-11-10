@@ -1,3 +1,5 @@
+use super::TableOptions;
+
 #[derive(Debug, Clone)]
 pub struct Options {
     /// size of each block inside SST
@@ -9,7 +11,8 @@ pub struct Options {
     /// checksum mode
     pub checksum_mode: ChecksumVerificationMode,
 }
-#[derive(Debug, Clone)]
+
+#[derive(Debug, Clone, Copy)]
 pub enum ChecksumVerificationMode {
     NoVerification,
     OnTableRead,
@@ -18,4 +21,15 @@ pub enum ChecksumVerificationMode {
     // OnTableAndBlockRead indicates checksum should be verified
     // on SSTable opening and on every block read.
     OnTableAndBlockRead,
+}
+
+pub fn build_table_options(db: &crate::db::Core) -> TableOptions {
+    let opt = &db.opts;
+    // get latest data key
+    TableOptions {
+        table_size: opt.base_table_size,
+        block_size: opt.block_size,
+        bloom_false_positive: opt.bloom_false_positive,
+        checksum_mode: opt.checksum_mode,
+    }
 }
