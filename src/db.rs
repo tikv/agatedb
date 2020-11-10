@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::sync::RwLock;
 
 pub struct Core {
-    mt: RwLock<MemTables>,
+    mts: RwLock<MemTables>,
     opts: AgateOptions,
     next_mem_fid: AtomicUsize,
     vlog: ValueLog,
@@ -25,6 +25,11 @@ pub struct Core {
 #[derive(Clone)]
 pub struct Agate {
     core: Arc<Core>,
+}
+
+struct FlushTask {
+    mt: MemTable,
+    drop_prefixes: Vec<Bytes>
 }
 
 const MEMTABLE_FILE_EXT: &str = ".mem";
@@ -158,7 +163,7 @@ impl Core {
 
         // create agate core
         let core = Self {
-            mt: RwLock::new(MemTables::new(mt, VecDeque::new())),
+            mts: RwLock::new(MemTables::new(mt, VecDeque::new())),
             opts,
             next_mem_fid: AtomicUsize::new(1),
             vlog: ValueLog::new(),
@@ -223,7 +228,7 @@ impl Core {
             return Err(Error::DBClosed);
         }
 
-        let view = self.mt.read()?.view();
+        let view = self.mts.read()?.view();
         let mut max_value = Value::default();
 
         let version = get_ts(key);
@@ -258,7 +263,7 @@ impl Core {
     pub fn write_to_lsm(&self, request: Request) -> Result<()> {
         // TODO: check entries and pointers
 
-        let memtables = self.mt.read()?;
+        let memtables = self.mts.read()?;
         let mut_table = memtables.table_mut();
 
         for entry in request.entries.into_iter() {
@@ -298,7 +303,7 @@ impl Core {
     /// Calling ensure_room_for_write requires locking whole memtable
     pub fn ensure_room_for_write(&self) -> Result<()> {
         // we do not need to force flush memtable in in-memory mode as WAL is None
-        let mut mt = self.mt.write()?;
+        let mut mt = self.mts.write()?;
         let mut force_flush = false;
 
         if !force_flush && !self.opts.in_memory {
@@ -331,6 +336,11 @@ impl Core {
         );
 
         Ok(())
+    }
+
+    /// build L0 table from memtable
+    pub fn build_l0_table() {
+
     }
 
     /// Write requests should be only called in one thread. By calling this
