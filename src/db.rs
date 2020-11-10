@@ -2,10 +2,13 @@ use super::memtable::{MemTable, MemTables};
 use super::{Error, Result};
 use crate::entry::Entry;
 use crate::format::get_ts;
-use crate::util::make_comparator;
+use crate::levels::LevelController;
+use crate::opt;
+use crate::util::{has_any_prefixes, make_comparator};
 use crate::value::{self, Request, Value};
 use crate::value_log::ValueLog;
 use crate::wal::Wal;
+use crate::{Table, TableBuilder, TableOptions};
 use bytes::Bytes;
 use skiplist::Skiplist;
 use std::collections::VecDeque;
@@ -17,9 +20,10 @@ use std::sync::RwLock;
 
 pub struct Core {
     mts: RwLock<MemTables>,
-    opts: AgateOptions,
+    pub(crate) opts: AgateOptions,
     next_mem_fid: AtomicUsize,
     vlog: ValueLog,
+    lvctl: LevelController,
 }
 
 #[derive(Clone)]
@@ -29,7 +33,7 @@ pub struct Agate {
 
 struct FlushTask {
     mt: MemTable,
-    drop_prefixes: Vec<Bytes>
+    drop_prefixes: Vec<Bytes>,
 }
 
 const MEMTABLE_FILE_EXT: &str = ".mem";
@@ -53,14 +57,25 @@ pub struct AgateOptions {
     // TODO: docs
     pub in_memory: bool,
     pub sync_writes: bool,
-
     pub create_if_not_exists: bool,
-    pub num_memtables: usize,
+
+    // Memtable options
     pub mem_table_size: u64,
+    pub base_table_size: u64,
+    pub base_level_size: u64,
+    pub level_size_multiplier: usize,
+    pub table_size_multiplier: usize,
+    pub max_levels: usize,
 
     pub value_threshold: usize,
+    pub num_memtables: usize,
+    pub block_size: usize,
+    pub bloom_false_positive: f64,
+
     pub value_log_file_size: u64,
     pub value_log_max_entries: u32,
+
+    pub checksum_mode: opt::ChecksumVerificationMode,
 }
 
 impl Default for AgateOptions {
@@ -68,13 +83,23 @@ impl Default for AgateOptions {
         Self {
             create_if_not_exists: false,
             path: PathBuf::new(),
+            // memtable options
             mem_table_size: 64 << 20,
+            base_table_size: 2 << 20,
+            base_level_size: 10 << 20,
+            table_size_multiplier: 2,
+            level_size_multiplier: 10,
+            max_levels: 7,
+            // agate options
             num_memtables: 20,
             in_memory: false,
             sync_writes: false,
             value_threshold: 1 << 10,
             value_log_file_size: 1 << 30 - 1,
             value_log_max_entries: 1000000,
+            checksum_mode: opt::ChecksumVerificationMode::NoVerification,
+            block_size: 4 << 10,
+            bloom_false_positive: 0.01,
         }
         // TODO: add other options
     }
@@ -167,6 +192,7 @@ impl Core {
             opts,
             next_mem_fid: AtomicUsize::new(1),
             vlog: ValueLog::new(),
+            lvctl: LevelController {},
         };
 
         // TODO: initialize other structures
@@ -339,8 +365,52 @@ impl Core {
     }
 
     /// build L0 table from memtable
-    pub fn build_l0_table() {
+    fn build_l0_table(ft: FlushTask, table_opts: TableOptions) -> TableBuilder {
+        let mut iter = ft.mt.skl.iter_ref();
+        let mut builder = TableBuilder::new(table_opts);
+        iter.seek_to_first();
+        while iter.valid() {
+            if !ft.drop_prefixes.is_empty() && has_any_prefixes(iter.key(), &ft.drop_prefixes) {
+                continue;
+            }
+            // TODO: reduce encode / decode by using something like flatbuffer
+            let mut vs = Value::default();
+            vs.decode(iter.value());
+            if vs.meta & value::VALUE_POINTER != 0 {
+                panic!("value pointer not supported");
+            }
+            builder.add(iter.key(), vs, 0); // TODO: support vlog length
+            iter.next();
+        }
+        builder
+    }
 
+    /// handle_flush_task must run serially.
+    fn handle_flush_task(&self, ft: FlushTask) -> Result<()> {
+        if ft.mt.skl.is_empty() {
+            return Ok(());
+        }
+        let table_opts = opt::build_table_options(&self);
+        let mut builder = Self::build_l0_table(ft, table_opts.clone());
+
+        if builder.is_empty() {
+            builder.finish();
+            return Ok(());
+        }
+
+        let file_id = self.lvctl.reserve_file_id();
+        let table;
+
+        if self.opts.in_memory {
+            let data = builder.finish();
+            table = Table::open_in_memory(data, file_id, table_opts)?;
+        } else {
+            table = Table::create(&PathBuf::new(), builder.finish(), table_opts)?;
+        }
+
+        self.lvctl.add_l0_table(table);
+
+        Ok(())
     }
 
     /// Write requests should be only called in one thread. By calling this

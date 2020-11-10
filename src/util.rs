@@ -1,6 +1,7 @@
 pub mod binary;
 
 use crate::Result;
+use bytes::Bytes;
 pub use skiplist::FixedLengthSuffixComparator as Comparator;
 pub use skiplist::{FixedLengthSuffixComparator, KeyComparator};
 use std::{cmp, ptr};
@@ -72,4 +73,8 @@ pub fn fill_file(file: &mut impl std::io::Write, mut size: u64) -> Result<()> {
     }
     file.write_all(&buf[..size as usize])?;
     Ok(())
+}
+
+pub fn has_any_prefixes(s: &[u8], list_of_prefixes: &[Bytes]) -> bool {
+    list_of_prefixes.iter().any(|y| s.starts_with(y))
 }
