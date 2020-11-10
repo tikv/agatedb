@@ -224,8 +224,25 @@ impl TableInner {
         Ok(&self.index.offsets[0])
     }
 
-    fn key_splits(&mut self, _n: usize, _prefix: Bytes) -> Vec<String> {
-        unimplemented!()
+    // split the table into at least (n - 1) ranges (when n >= blocks) based on block offsets
+    fn key_splits(&mut self, n: usize, prefix: Bytes) -> Vec<Bytes> {
+        if n == 0 {
+            return vec![];
+        }
+
+        let offset_length = self.offsets_length();
+        let jump = (offset_length / n).max(1);
+
+        let mut result = vec![];
+
+        for i in (0..offset_length).step_by(jump) {
+            let block = self.offsets(i).unwrap();
+            if block.key.starts_with(&prefix) {
+                result.push(Bytes::copy_from_slice(&block.key))
+            }
+        }
+
+        result
     }
 
     fn fetch_index(&self) -> &TableIndex {
