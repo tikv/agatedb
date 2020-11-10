@@ -334,10 +334,9 @@ impl Core {
     }
 
     /// Write requests should be only called in one thread. By calling this
-    /// function, requests will be written into the LSM tree. Processing one
-    /// request requires us to get write lock of WAL file. Hence, calling this
-    /// function from multiple threads is okay, but only one request will proceed
-    /// and will cause lock contention.
+    /// function, requests will be written into the LSM tree.
+    ///
+    /// TODO: ensure only one thread calls this function by using Mutex.
     pub fn write_requests(&self, requests: Vec<Request>) -> Result<()> {
         if requests.is_empty() {
             return Ok(());
@@ -363,6 +362,8 @@ impl Core {
 
             self.write_to_lsm(req)?;
         }
+
+        println!("{} entries written", cnt);
 
         Ok(())
     }
@@ -446,8 +447,8 @@ mod tests {
     #[test]
     fn test_flush_memtable() {
         with_agate_test(|agate| {
-            agate.write_requests(generate_requests(1000)).unwrap();
-            verify_requests(1000, &agate);
+            agate.write_requests(generate_requests(3000)).unwrap();
+            verify_requests(3000, &agate);
         });
     }
 }
