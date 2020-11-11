@@ -39,7 +39,7 @@ pub enum Error {
     #[error("{0}")]
     CustomError(String),
     #[error("{0}")]
-    TxnTooBig(String)
+    TxnTooBig(String),
 }
 
 impl From<io::Error> for Error {

@@ -138,7 +138,7 @@ impl Value {
 #[derive(Clone)]
 pub struct Request {
     pub entries: Vec<Entry>,
-    pub ptrs: Vec<ValuePointer>
+    pub ptrs: Vec<ValuePointer>,
 }
 
 #[derive(Clone, Default)]

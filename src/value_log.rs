@@ -1,4 +1,4 @@
-use crate::value::{Request, ValuePointer, self};
+use crate::value::{self, Request, ValuePointer};
 use crate::wal::Wal;
 use crate::AgateOptions;
 use crate::{Error, Result};
@@ -14,7 +14,9 @@ fn vlog_file_path(dir: impl AsRef<Path>, fid: u32) -> PathBuf {
 }
 
 struct Core {
-    files_map: HashMap<u32, Wal>,
+    // TODO: use scheme like memtable to separate current vLog
+    // and previous logs, so as to reduce usage of RwLock.
+    files_map: HashMap<u32, Arc<RwLock<Wal>>>,
     max_fid: u32,
     files_to_delete: Vec<u32>,
     num_entries_written: u32,
@@ -63,20 +65,21 @@ impl ValueLog {
         Ok(())
     }
 
-    fn create_vlog_file(&self, core: &mut Core) -> Result<u32> {
+    fn create_vlog_file(&self) -> Result<(u32, Arc<RwLock<Wal>>)> {
         let mut core = self.core.write()?;
         let fid = core.max_fid + 1;
         let path = self.file_path(fid);
         let wal = Wal::open(path, self.opts.clone())?;
         // TODO: only create new files
-        assert!(core.files_map.insert(fid, wal).is_none());
+        let wal = Arc::new(RwLock::new(wal));
+        assert!(core.files_map.insert(fid, wal.clone()).is_none());
         assert!(core.max_fid < fid);
         core.max_fid = fid;
         // TODO: add vlog header
         self.writeable_log_offset
             .store(0, std::sync::atomic::Ordering::SeqCst);
         core.num_entries_written = 0;
-        Ok(fid)
+        Ok((fid, wal))
     }
 
     fn sorted_fids(&self) -> Vec<u32> {
@@ -95,31 +98,33 @@ impl ValueLog {
         result
     }
 
-    fn open(&self) -> Result<()> {
+    pub fn open(&self) -> Result<()> {
         self.populate_files_map()?;
         if self.core.read()?.files_map.len() == 0 {
-            let core_arc = self.core.clone();
-            let mut core = core_arc.write()?;
-            self.create_vlog_file(&mut core)?;
+            self.create_vlog_file()?;
         }
         // TODO find empty files and iterate vlogs
         Ok(())
     }
 
     fn w_offset(&self) -> u32 {
-        self.writeable_log_offset.load(std::sync::atomic::Ordering::SeqCst)
+        self.writeable_log_offset
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// write is thread-unsafe and should not be called concurrently
     pub fn write(&self, requests: &[Request]) -> Result<()> {
         // TODO: validate writes
-        // TODO: refine lock design
-        let mut core = self.core.write()?;
+
+        let core = self.core.read()?;
         let mut current_log_id = core.max_fid;
+        let mut current_log = core.files_map.get(&current_log_id).unwrap().clone();
+        drop(core);
 
-        // TODO: sync writes
+        // TODO: sync writes before return
 
-        let write = |buf: &[u8], current_log: &mut Wal| -> Result<()> {
+        let write = |buf: &[u8], current_log: Arc<RwLock<Wal>>| -> Result<()> {
+            let mut current_log = current_log.write()?;
             if buf.is_empty() {
                 return Ok(());
             }
@@ -135,20 +140,21 @@ impl ValueLog {
                     current_log.size()
                 )));
             }
-            (&mut current_log.data()[start as usize..end_offset as usize])
-                .clone_from_slice(buf);
+            (&mut current_log.data()[start as usize..end_offset as usize]).clone_from_slice(buf);
             current_log.set_size(end_offset);
             Ok(())
         };
 
-        let mut to_disk = |current_log_id: u32, current_log: &mut Wal| -> Result<u32> {
+        let to_disk = |current_log: Arc<RwLock<Wal>>| -> Result<bool> {
+            let mut current_log = current_log.write()?;
+            let core = self.core.read()?;
             if self.w_offset() as u64 > self.opts.value_log_file_size
                 || core.num_entries_written > self.opts.value_log_max_entries
             {
                 current_log.done_writing(self.w_offset())?;
-                Ok(self.create_vlog_file(&mut core)?)
+                Ok(true)
             } else {
-                Ok(current_log_id)
+                Ok(false)
             }
         };
 
@@ -158,7 +164,6 @@ impl ValueLog {
             req.ptrs.clear();
 
             let mut written = 0;
-            let current_log = core.files_map.get_mut(&current_log_id).unwrap();
 
             for mut entry in req.entries {
                 buf.clear();
@@ -174,22 +179,28 @@ impl ValueLog {
                 p.offset = self.w_offset();
 
                 let orig_meta = entry.meta;
-                entry.meta = entry.meta & (! value::VALUE_FIN_TXN | value::VALUE_TXN);
+                entry.meta = entry.meta & (!value::VALUE_FIN_TXN | value::VALUE_TXN);
 
                 let plen = Wal::encode_entry(&mut buf, &entry);
                 entry.meta = orig_meta;
                 p.len = plen as u32;
                 req.ptrs.push(p);
-                write(&buf, current_log)?;
+                write(&buf, current_log.clone())?;
 
                 written += 1;
             }
 
-            to_disk(current_log_id, current_log)?;
+            if to_disk(current_log.clone())? {
+                let (log_id, log) = self.create_vlog_file()?;
+                current_log_id = log_id;
+                current_log = log;
+            }
 
+            let mut core = self.core.write()?;
             core.num_entries_written += written;
         }
 
+        // TODO: to_disk
         Ok(())
     }
 }

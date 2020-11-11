@@ -232,7 +232,7 @@ impl Core {
         let mt = Self::open_mem_table(&opts.path, opts.clone(), 0)?;
 
         // create agate core
-        let core = Self {
+        let mut core = Self {
             mts: RwLock::new(MemTables::new(Arc::new(mt), VecDeque::new())),
             opts: opts.clone(),
             next_mem_fid: AtomicUsize::new(1),
@@ -240,6 +240,10 @@ impl Core {
             lvctl: LevelsController::new(opts.clone())?,
             flush_channel: crossbeam_channel::bounded(opts.num_memtables),
         };
+
+        if let Some(ref mut vlog) = core.vlog {
+            vlog.open()?
+        }
 
         // TODO: initialize other structures
 
@@ -588,7 +592,7 @@ mod tests {
             let value = Bytes::from("2333333333333333");
             let req = Request {
                 entries: vec![Entry::new(key.clone(), value.clone())],
-                ptrs: vec![]
+                ptrs: vec![],
             };
             agate.write_to_lsm(req).unwrap();
             let value = agate.get(&key).unwrap();
@@ -603,7 +607,7 @@ mod tests {
                     key_with_ts(BytesMut::from(format!("{:08x}", i).as_str()), 0),
                     Bytes::from(i.to_string()),
                 )],
-                ptrs: vec![]
+                ptrs: vec![],
             })
             .collect()
     }

@@ -173,7 +173,7 @@ impl Wal {
         range.fill(0);
         Ok(())
     }
-    
+
     pub(crate) fn encode_entry(mut buf: &mut BytesMut, entry: &Entry) -> usize {
         let header = Header {
             key_len: entry.key.len() as u32,
@@ -192,7 +192,7 @@ impl Wal {
         buf.extend_from_slice(&entry.value);
 
         // TODO: add CRC32 check
-        
+
         return buf.len();
     }
 
