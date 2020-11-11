@@ -73,6 +73,8 @@ impl Agate {
             .pool
             .spawn(move |_: &mut Handle<'_>| flush_core.flush_memtable().unwrap());
 
+        agate.core.clone().lvctl.start_compact(&agate.pool);
+
         agate
     }
 
@@ -117,6 +119,8 @@ pub struct AgateOptions {
     pub value_log_file_size: u64,
     pub value_log_max_entries: u32,
 
+    pub num_compactors: usize,
+
     pub checksum_mode: opt::ChecksumVerificationMode,
 }
 
@@ -145,6 +149,7 @@ impl Default for AgateOptions {
             bloom_false_positive: 0.01,
             num_level_zero_tables: 5,
             num_level_zero_tables_stall: 15,
+            num_compactors: 4
         }
         // TODO: add other options
     }

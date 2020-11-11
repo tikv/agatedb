@@ -6,7 +6,7 @@ use crate::{AgateOptions, Table};
 use crate::{Error, Result};
 use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
-use std::sync::RwLock;
+use std::sync::{RwLock, Arc};
 
 use bytes::Bytes;
 
@@ -84,7 +84,7 @@ impl LevelHandler {
     }
 }
 
-pub struct LevelsController {
+struct Core {
     next_file_id: AtomicU64,
     // `levels[i].level == i` should be ensured
     levels: Vec<RwLock<LevelHandler>>,
@@ -93,8 +93,12 @@ pub struct LevelsController {
     cpt_status: RwLock<CompactStatus>,
 }
 
-impl LevelsController {
-    pub fn new(opts: AgateOptions) -> Result<Self> {
+pub struct LevelsController {
+    core: Arc<Core>
+}
+
+impl Core {
+    fn new(opts: AgateOptions) -> Result<Self> {
         let mut levels = vec![];
         let mut cpt_status_levels = vec![];
         for i in 0..opts.max_levels {
@@ -117,12 +121,12 @@ impl LevelsController {
         Ok(lvctl)
     }
 
-    pub fn reserve_file_id(&self) -> u64 {
+    fn reserve_file_id(&self) -> u64 {
         self.next_file_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
 
-    pub fn add_l0_table(&self, table: Table) -> Result<()> {
+    fn add_l0_table(&self, table: Table) -> Result<()> {
         if !self.opts.in_memory {
             // TODO: update manifest
         }
@@ -136,7 +140,7 @@ impl LevelsController {
         Ok(())
     }
 
-    pub fn get(&self, key: &Bytes, max_value: Value, start_level: usize) -> Result<Value> {
+    fn get(&self, key: &Bytes, max_value: Value, start_level: usize) -> Result<Value> {
         // TODO: check is_closed
 
         let version = get_ts(key);
@@ -167,5 +171,35 @@ impl LevelsController {
         }
 
         Ok(max_value)
+    }
+}
+
+impl LevelsController {
+    pub fn new(opts: AgateOptions) -> Result<Self> {
+        Ok(Self {
+            core: Arc::new(Core::new(opts)?)
+        })
+    }
+
+    pub fn add_l0_table(&self, table: Table) -> Result<()> {
+        self.core.add_l0_table(table)
+    }
+
+    pub fn get(&self, key: &Bytes, max_value: Value, start_level: usize) -> Result<Value> {
+        self.core.get(key, max_value, start_level)
+    }
+
+    pub fn reserve_file_id(&self) -> u64 {
+        self.core.reserve_file_id()
+    }
+
+    fn run_compactor(&self, idx: usize, pool: &yatp::ThreadPool<yatp::task::callback::TaskCell>) {
+        
+    }
+
+    pub fn start_compact(&self, pool: &yatp::ThreadPool<yatp::task::callback::TaskCell>) {
+        for i in 0..self.core.opts.num_compactors {
+            self.run_compactor(i, pool);
+        }
     }
 }
