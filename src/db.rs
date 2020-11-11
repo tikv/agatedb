@@ -23,7 +23,7 @@ pub struct Core {
     mts: RwLock<MemTables>,
     pub(crate) opts: AgateOptions,
     next_mem_fid: AtomicUsize,
-    vlog: ValueLog,
+    vlog: Option<ValueLog>,
     lvctl: LevelsController,
     flush_channel: (Sender<Option<FlushTask>>, Receiver<Option<FlushTask>>),
 }
@@ -91,6 +91,7 @@ impl Drop for Agate {
 #[derive(Clone)]
 pub struct AgateOptions {
     pub path: PathBuf,
+    pub value_dir: PathBuf,
     // TODO: docs
     pub in_memory: bool,
     pub sync_writes: bool,
@@ -124,6 +125,7 @@ impl Default for AgateOptions {
         Self {
             create_if_not_exists: false,
             path: PathBuf::new(),
+            value_dir: PathBuf::new(),
             // memtable options
             mem_table_size: 64 << 20,
             base_table_size: 2 << 20,
@@ -197,6 +199,8 @@ impl AgateOptions {
         self.fix_options()?;
 
         self.path = path.as_ref().to_path_buf();
+        // TODO: allow specify value dir
+        self.value_dir = path.as_ref().to_path_buf();
 
         if !self.in_memory {
             if !self.path.exists() {
@@ -212,7 +216,7 @@ impl AgateOptions {
         Ok(Agate::new(Arc::new(Core::new(self.clone())?)))
     }
 
-    fn skip_vlog(&self, entry: &Entry) -> bool {
+    pub(crate) fn skip_vlog(&self, entry: &Entry) -> bool {
         entry.value.len() < self.value_threshold
     }
 
@@ -232,7 +236,7 @@ impl Core {
             mts: RwLock::new(MemTables::new(Arc::new(mt), VecDeque::new())),
             opts: opts.clone(),
             next_mem_fid: AtomicUsize::new(1),
-            vlog: ValueLog::new(),
+            vlog: ValueLog::new(opts.clone()),
             lvctl: LevelsController::new(opts.clone())?,
             flush_channel: crossbeam_channel::bounded(opts.num_memtables),
         };
@@ -501,7 +505,9 @@ impl Core {
 
         // TODO: process subscriptions
 
-        self.vlog.write(&requests)?;
+        if let Some(ref vlog) = self.vlog {
+            vlog.write(&requests)?;
+        }
 
         let mut cnt = 0;
 
@@ -582,6 +588,7 @@ mod tests {
             let value = Bytes::from("2333333333333333");
             let req = Request {
                 entries: vec![Entry::new(key.clone(), value.clone())],
+                ptrs: vec![]
             };
             agate.write_to_lsm(req).unwrap();
             let value = agate.get(&key).unwrap();
@@ -596,6 +603,7 @@ mod tests {
                     key_with_ts(BytesMut::from(format!("{:08x}", i).as_str()), 0),
                     Bytes::from(i.to_string()),
                 )],
+                ptrs: vec![]
             })
             .collect()
     }

@@ -131,7 +131,7 @@ impl Wal {
             size: mmap_file.len() as u32,
             mmap_file,
             opts,
-            write_at: 0,
+            write_at: 0, // TODO: current implementation doesn't have keyID and baseIV header
             buf: BytesMut::new(),
         };
 
@@ -173,8 +173,8 @@ impl Wal {
         range.fill(0);
         Ok(())
     }
-
-    fn encode_entry(mut buf: &mut BytesMut, entry: &Entry) {
+    
+    pub(crate) fn encode_entry(mut buf: &mut BytesMut, entry: &Entry) -> usize {
         let header = Header {
             key_len: entry.key.len() as u32,
             value_len: entry.value.len() as u32,
@@ -192,6 +192,8 @@ impl Wal {
         buf.extend_from_slice(&entry.value);
 
         // TODO: add CRC32 check
+        
+        return buf.len();
     }
 
     fn decode_entry(buf: &mut Bytes) -> Result<Entry> {
@@ -239,7 +241,7 @@ impl Wal {
         Ok(())
     }
 
-    fn done_writing(&mut self, offset: u32) -> Result<()> {
+    pub(crate) fn done_writing(&mut self, offset: u32) -> Result<()> {
         if self.opts.sync_writes {
             self.file.sync_all()?;
         }
@@ -254,6 +256,18 @@ impl Wal {
 
     pub fn should_flush(&self) -> bool {
         self.write_at as u64 > self.opts.value_log_file_size
+    }
+
+    pub(crate) fn size(&self) -> u32 {
+        self.size
+    }
+
+    pub(crate) fn set_size(&mut self, size: u32) {
+        self.size = size;
+    }
+
+    pub(crate) fn data(&mut self) -> &mut MmapMut {
+        &mut self.mmap_file
     }
 }
 

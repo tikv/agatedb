@@ -135,10 +135,13 @@ impl Value {
     }
 }
 
+#[derive(Clone)]
 pub struct Request {
     pub entries: Vec<Entry>,
+    pub ptrs: Vec<ValuePointer>
 }
 
+#[derive(Clone, Default)]
 pub struct ValuePointer {
     pub file_id: u32,
     pub len: u32,

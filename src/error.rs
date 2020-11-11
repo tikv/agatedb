@@ -38,6 +38,8 @@ pub enum Error {
     // TODO: split custom error to their concrete types
     #[error("{0}")]
     CustomError(String),
+    #[error("{0}")]
+    TxnTooBig(String)
 }
 
 impl From<io::Error> for Error {
