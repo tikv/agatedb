@@ -10,10 +10,10 @@ pub use opt::AgateOptions;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::RwLock;
+use std::sync::Mutex;
 
 pub struct Core {
-    mt: RwLock<MemTables>,
+    mt: Mutex<MemTables>,
     opts: AgateOptions,
     next_mem_fid: usize,
 }

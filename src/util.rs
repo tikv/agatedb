@@ -62,15 +62,3 @@ where
     }
     i
 }
-
-/// Fill a file with 0.
-pub fn fill_file(file: &mut impl std::io::Write, mut size: u64) -> Result<()> {
-    let buf = vec![0; 4096];
-    let buf_len = buf.len() as u64;
-    while size > buf_len {
-        size -= buf_len;
-        file.write_all(&buf)?;
-    }
-    file.write_all(&buf[..size as usize])?;
-    Ok(())
-}
