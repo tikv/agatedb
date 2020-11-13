@@ -120,7 +120,7 @@ impl Wal {
                 .write(true)
                 .open(&path)?;
             // TODO: use mmap to specify size instead of filling up the file
-            crate::util::fill_file(&mut file, 2 * opts.value_log_file_size)?;
+            file.set_len(2 * opts.value_log_file_size)?;
             file.sync_all()?;
             (file, true)
         };
@@ -264,6 +264,11 @@ impl Wal {
 
     pub(crate) fn set_size(&mut self, size: u32) {
         self.size = size;
+    }
+
+    pub(crate) fn set_len(&mut self, len: u64) -> Result<()> {
+        self.file.set_len(len)?;
+        Ok(())
     }
 
     pub(crate) fn data(&mut self) -> &mut MmapMut {

@@ -133,12 +133,11 @@ impl ValueLog {
                 .writeable_log_offset
                 .fetch_add(n, std::sync::atomic::Ordering::SeqCst);
             let end_offset = start + n;
+
+            // expand file size if space is not enough
+            // TODO: handle value >= 4GB case
             if end_offset >= current_log.size() {
-                return Err(Error::TxnTooBig(format!(
-                    "end_offset: {}, len: {}",
-                    end_offset,
-                    current_log.size()
-                )));
+                current_log.set_len(end_offset as u64)?;
             }
             (&mut current_log.data()[start as usize..end_offset as usize]).clone_from_slice(buf);
             current_log.set_size(end_offset);

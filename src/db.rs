@@ -367,7 +367,7 @@ impl Core {
                         version: 0,
                     },
                 )?;
-                unimplemented!()
+                // TODO: add value pointer
             }
         }
         if self.opts.sync_writes {
@@ -530,8 +530,6 @@ impl Core {
             self.write_to_lsm(req)?;
         }
 
-        println!("{} entries written", cnt);
-
         Ok(())
     }
 }
@@ -577,7 +575,7 @@ mod tests {
         let agate = AgateOptions::default()
             .create()
             .in_memory(false)
-            .value_log_file_size(4096)
+            .value_log_file_size(4 << 20)
             .open(&tmp_dir)
             .unwrap();
         f(agate);
@@ -600,12 +598,23 @@ mod tests {
         });
     }
 
-    fn generate_requests(n: usize) -> Vec<Request> {
+    fn with_payload(mut buf: BytesMut, payload: usize, fill_char: u8) -> Bytes {
+        let mut payload_buf = vec![];
+        payload_buf.resize(payload, fill_char);
+        buf.extend_from_slice(&payload_buf);
+        buf.freeze()
+    }
+
+    fn generate_requests(n: usize, payload: usize) -> Vec<Request> {
         (0..n)
             .map(|i| Request {
                 entries: vec![Entry::new(
                     key_with_ts(BytesMut::from(format!("{:08x}", i).as_str()), 0),
-                    Bytes::from(i.to_string()),
+                    with_payload(
+                        BytesMut::from(format!("{:08x}", i).as_str()),
+                        payload,
+                        (i % 256) as u8,
+                    ),
                 )],
                 ptrs: vec![],
             })
@@ -627,8 +636,22 @@ mod tests {
     #[test]
     fn test_flush_memtable() {
         with_agate_test(|agate| {
-            agate.write_requests(generate_requests(2000)).unwrap();
+            agate.write_requests(generate_requests(2000, 0)).unwrap();
             verify_requests(2000, &agate);
+        });
+    }
+
+    #[test]
+    fn test_flush_memtable_bigvalue() {
+        with_agate_test(|agate| {
+            let requests = generate_requests(100, 1 << 20);
+            // as 
+            for request in requests {
+                agate
+                .write_requests(vec![request])
+                .unwrap();
+            }
+            verify_requests(100, &agate);
         });
     }
 }
