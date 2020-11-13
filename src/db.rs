@@ -93,4 +93,25 @@ impl Agate {
     pub fn write_to_lsm(&self, request: Request) -> Result<()> {
         self.core.write_to_lsm(request)
     }
+
+    pub fn open<P: AsRef<Path>>(mut opts: AgateOptions, path: P) -> Result<Self> {
+        opts.fix_options()?;
+
+        opts.path = path.as_ref().to_path_buf();
+
+        if !opts.in_memory {
+            if !opts.path.exists() {
+                if !opts.create_if_not_exists {
+                    return Err(Error::Config(format!("{:?} doesn't exist", opts.path)));
+                }
+                fs::create_dir_all(&opts.path)?;
+            }
+            // TODO: create wal path, acquire database path lock
+        }
+
+        // TODO: open or create manifest
+        Ok(Agate {
+            core: Arc::new(Core::new(opts.clone())?),
+        })
+    }
 }

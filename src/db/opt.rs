@@ -34,69 +34,13 @@ impl Default for AgateOptions {
 }
 
 impl AgateOptions {
-    pub fn create(&mut self) -> &mut AgateOptions {
-        self.create_if_not_exists = true;
-        self
-    }
-
-    pub fn path<P: Into<PathBuf>>(&mut self, p: P) -> &mut AgateOptions {
-        self.path = p.into();
-        self
-    }
-
-    pub fn num_memtables(&mut self, num_memtables: usize) -> &mut AgateOptions {
-        self.num_memtables = num_memtables;
-        self
-    }
-
-    pub fn in_memory(&mut self, in_memory: bool) -> &mut AgateOptions {
-        self.in_memory = in_memory;
-        self
-    }
-
-    pub fn sync_writes(&mut self, sync_writes: bool) -> &mut AgateOptions {
-        self.sync_writes = sync_writes;
-        self
-    }
-
-    pub fn value_log_file_size(&mut self, value_log_file_size: u64) -> &mut AgateOptions {
-        self.value_log_file_size = value_log_file_size;
-        self
-    }
-
-    pub fn value_log_max_entries(&mut self, value_log_max_entries: u32) -> &mut AgateOptions {
-        self.value_log_max_entries = value_log_max_entries;
-        self
-    }
-
-    fn fix_options(&mut self) -> Result<()> {
+    pub(crate) fn fix_options(&mut self) -> Result<()> {
         if self.in_memory {
             // TODO: find a way to check if path is set, if set, then panic with ConfigError
             self.sync_writes = false;
         }
 
         Ok(())
-    }
-
-    pub fn open<P: AsRef<Path>>(&mut self, path: P) -> Result<Agate> {
-        self.fix_options()?;
-
-        self.path = path.as_ref().to_path_buf();
-
-        if !self.in_memory {
-            if !self.path.exists() {
-                if !self.create_if_not_exists {
-                    return Err(Error::Config(format!("{:?} doesn't exist", self.path)));
-                }
-                fs::create_dir_all(&self.path)?;
-            }
-            // TODO: create wal path, acquire database path lock
-        }
-
-        // TODO: open or create manifest
-        Ok(Agate {
-            core: Arc::new(Core::new(self.clone())?),
-        })
     }
 
     fn skip_vlog(&self, entry: &Entry) -> bool {
