@@ -383,7 +383,7 @@ fn test_iterator_error_eof() {
         it.next();
     }
 
-    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    assert_eq!(it.error(), Some(&IteratorError::EOF));
 }
 
 #[test]
@@ -407,11 +407,11 @@ fn test_iterator_out_of_bound() {
     it.seek_to_last();
     assert!(it.error().is_none());
     it.next();
-    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    assert_eq!(it.error(), Some(&IteratorError::EOF));
     it.next();
-    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    assert_eq!(it.error(), Some(&IteratorError::EOF));
     it.next();
-    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    assert_eq!(it.error(), Some(&IteratorError::EOF));
     it.rewind();
     assert!(it.error().is_none());
     assert_eq!(user_key(it.key()), key(b"key", 0));
@@ -425,11 +425,11 @@ fn test_iterator_out_of_bound_reverse() {
     it.seek_to_first();
     assert!(it.error().is_none());
     it.next();
-    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    assert_eq!(it.error(), Some(&IteratorError::EOF));
     it.next();
-    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    assert_eq!(it.error(), Some(&IteratorError::EOF));
     it.next();
-    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    assert_eq!(it.error(), Some(&IteratorError::EOF));
     it.rewind();
     assert!(it.error().is_none());
     assert_eq!(user_key(it.key()), key(b"key", 999));
