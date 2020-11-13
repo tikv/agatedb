@@ -65,17 +65,6 @@ where
     i
 }
 
-pub fn fill_file(file: &mut impl std::io::Write, mut size: u64) -> Result<()> {
-    let buf = vec![0; 4096];
-    let buf_len = buf.len() as u64;
-    while size > buf_len {
-        size -= buf_len;
-        file.write_all(&buf)?;
-    }
-    file.write_all(&buf[..size as usize])?;
-    Ok(())
-}
-
 pub fn has_any_prefixes(s: &[u8], list_of_prefixes: &[Bytes]) -> bool {
     list_of_prefixes.iter().any(|y| s.starts_with(y))
 }

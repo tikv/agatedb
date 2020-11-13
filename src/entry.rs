@@ -3,6 +3,7 @@ use bytes::Bytes;
 const DELETE: u8 = 1 << 0;
 const VALUE_POINTER: u8 = 1 << 1;
 
+#[derive(Clone)]
 pub struct Entry {
     pub key: Bytes,
     pub value: Bytes,

@@ -9,7 +9,7 @@ use crate::value::{self, Request, Value};
 use crate::value_log::ValueLog;
 use crate::wal::Wal;
 use crate::{Table, TableBuilder, TableOptions};
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use crossbeam_channel::{Receiver, Sender};
 use skiplist::Skiplist;
 use std::collections::VecDeque;
@@ -23,7 +23,7 @@ pub struct Core {
     mts: RwLock<MemTables>,
     pub(crate) opts: AgateOptions,
     next_mem_fid: AtomicUsize,
-    vlog: ValueLog,
+    vlog: Option<ValueLog>,
     lvctl: LevelsController,
     flush_channel: (Sender<Option<FlushTask>>, Receiver<Option<FlushTask>>),
 }
@@ -91,6 +91,7 @@ impl Drop for Agate {
 #[derive(Clone)]
 pub struct AgateOptions {
     pub path: PathBuf,
+    pub value_dir: PathBuf,
     // TODO: docs
     pub in_memory: bool,
     pub sync_writes: bool,
@@ -124,6 +125,7 @@ impl Default for AgateOptions {
         Self {
             create_if_not_exists: false,
             path: PathBuf::new(),
+            value_dir: PathBuf::new(),
             // memtable options
             mem_table_size: 64 << 20,
             base_table_size: 2 << 20,
@@ -197,6 +199,8 @@ impl AgateOptions {
         self.fix_options()?;
 
         self.path = path.as_ref().to_path_buf();
+        // TODO: allow specify value dir
+        self.value_dir = path.as_ref().to_path_buf();
 
         if !self.in_memory {
             if !self.path.exists() {
@@ -212,7 +216,7 @@ impl AgateOptions {
         Ok(Agate::new(Arc::new(Core::new(self.clone())?)))
     }
 
-    fn skip_vlog(&self, entry: &Entry) -> bool {
+    pub(crate) fn skip_vlog(&self, entry: &Entry) -> bool {
         entry.value.len() < self.value_threshold
     }
 
@@ -228,14 +232,18 @@ impl Core {
         let mt = Self::open_mem_table(&opts.path, opts.clone(), 0)?;
 
         // create agate core
-        let core = Self {
+        let mut core = Self {
             mts: RwLock::new(MemTables::new(Arc::new(mt), VecDeque::new())),
             opts: opts.clone(),
             next_mem_fid: AtomicUsize::new(1),
-            vlog: ValueLog::new(),
+            vlog: ValueLog::new(opts.clone()),
             lvctl: LevelsController::new(opts.clone())?,
             flush_channel: crossbeam_channel::bounded(opts.num_memtables),
         };
+
+        if let Some(ref mut vlog) = core.vlog {
+            vlog.open()?
+        }
 
         // TODO: initialize other structures
 
@@ -334,7 +342,7 @@ impl Core {
         let memtables = self.mts.read()?;
         let mut_table = memtables.table_mut();
 
-        for entry in request.entries.into_iter() {
+        for (idx, entry) in request.entries.into_iter().enumerate() {
             if self.opts.skip_vlog(&entry) {
                 // deletion, tombstone, and small values
                 mut_table.put(
@@ -348,18 +356,19 @@ impl Core {
                     },
                 )?;
             } else {
+                let mut vptr_buf = BytesMut::new();
+                request.ptrs[idx].encode(&mut vptr_buf);
                 // write pointer to memtable
                 mut_table.put(
                     entry.key,
                     Value {
-                        value: Bytes::new(),
+                        value: vptr_buf.freeze(),
                         meta: entry.meta | value::VALUE_POINTER,
                         user_meta: entry.user_meta,
                         expires_at: entry.expires_at,
                         version: 0,
                     },
                 )?;
-                unimplemented!()
             }
         }
         if self.opts.sync_writes {
@@ -494,14 +503,16 @@ impl Core {
     /// function, requests will be written into the LSM tree.
     ///
     /// TODO: ensure only one thread calls this function by using Mutex.
-    pub fn write_requests(&self, requests: Vec<Request>) -> Result<()> {
+    pub fn write_requests(&self, mut requests: Vec<Request>) -> Result<()> {
         if requests.is_empty() {
             return Ok(());
         }
 
         // TODO: process subscriptions
 
-        self.vlog.write(&requests)?;
+        if let Some(ref vlog) = self.vlog {
+            vlog.write(&mut requests)?;
+        }
 
         let mut cnt = 0;
 
@@ -519,8 +530,6 @@ impl Core {
 
             self.write_to_lsm(req)?;
         }
-
-        println!("{} entries written", cnt);
 
         Ok(())
     }
@@ -544,6 +553,7 @@ impl Agate {
 mod tests {
     use super::*;
     use crate::format::key_with_ts;
+    use crate::value::ValuePointer;
     use bytes::BytesMut;
     use tempdir::TempDir;
 
@@ -567,7 +577,7 @@ mod tests {
         let agate = AgateOptions::default()
             .create()
             .in_memory(false)
-            .value_log_file_size(4096)
+            .value_log_file_size(4 << 20)
             .open(&tmp_dir)
             .unwrap();
         f(agate);
@@ -582,6 +592,7 @@ mod tests {
             let value = Bytes::from("2333333333333333");
             let req = Request {
                 entries: vec![Entry::new(key.clone(), value.clone())],
+                ptrs: vec![],
             };
             agate.write_to_lsm(req).unwrap();
             let value = agate.get(&key).unwrap();
@@ -589,34 +600,70 @@ mod tests {
         });
     }
 
-    fn generate_requests(n: usize) -> Vec<Request> {
+    fn with_payload(mut buf: BytesMut, payload: usize, fill_char: u8) -> Bytes {
+        let mut payload_buf = vec![];
+        payload_buf.resize(payload, fill_char);
+        buf.extend_from_slice(&payload_buf);
+        buf.freeze()
+    }
+
+    fn generate_requests(n: usize, payload: usize) -> Vec<Request> {
         (0..n)
             .map(|i| Request {
                 entries: vec![Entry::new(
                     key_with_ts(BytesMut::from(format!("{:08x}", i).as_str()), 0),
-                    Bytes::from(i.to_string()),
+                    with_payload(
+                        BytesMut::from(format!("{:08}", i).as_str()),
+                        payload,
+                        (i % 256) as u8,
+                    ),
                 )],
+                ptrs: vec![],
             })
             .collect()
     }
 
     fn verify_requests(n: usize, agate: &Agate) {
         for i in 0..n {
-            let value = agate
-                .get(&key_with_ts(
-                    BytesMut::from(format!("{:08x}", i).as_str()),
-                    0,
-                ))
-                .unwrap();
-            assert_eq!(value.value, i.to_string());
+            let key = key_with_ts(BytesMut::from(format!("{:08x}", i).as_str()), 0);
+            let value = agate.get(&key).unwrap();
+
+            if value.meta & value::VALUE_POINTER != 0 {
+                let vlog = agate.core.vlog.as_ref().unwrap();
+                let mut vptr = ValuePointer::default();
+                vptr.decode(&value.value);
+                let kv = vlog.read(vptr).unwrap();
+                let key_length = key.len();
+                let v_key = &kv[..key_length];
+                let val = &kv[key_length..];
+                assert_eq!(key, v_key);
+                assert_eq!(&val[..8], format!("{:08}", i).as_bytes());
+                for j in &val[8..] {
+                    assert_eq!(*j, (i % 256) as u8);
+                }
+            } else {
+                assert_eq!(&value.value[..8], format!("{:08}", i).as_bytes());
+            }
         }
     }
 
     #[test]
     fn test_flush_memtable() {
         with_agate_test(|agate| {
-            agate.write_requests(generate_requests(2000)).unwrap();
+            agate.write_requests(generate_requests(2000, 0)).unwrap();
             verify_requests(2000, &agate);
+        });
+    }
+
+    #[test]
+    fn test_flush_memtable_bigvalue() {
+        with_agate_test(|agate| {
+            let requests = generate_requests(15, 1 << 20);
+            // as
+            for request in requests.chunks(4) {
+                agate.write_requests(request.to_vec()).unwrap();
+            }
+            verify_requests(15, &agate);
         });
     }
 }
