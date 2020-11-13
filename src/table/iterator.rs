@@ -1,6 +1,6 @@
 use super::builder::{Header, HEADER_SIZE};
 use super::{Block, TableInner};
-use crate::structs::AgateIterator;
+use crate::iterator_trait::AgateIterator;
 use crate::util::{self, KeyComparator, COMPARATOR};
 use crate::value::Value;
 use crate::Error;

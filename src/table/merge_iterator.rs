@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::iterator::Iterator;
 use super::TableInner;
-use crate::structs::AgateIterator;
+use crate::iterator_trait::AgateIterator;
 use crate::util::{KeyComparator, COMPARATOR};
 use crate::Value;
 

@@ -3,8 +3,8 @@ mod iterator;
 mod merge_iterator;
 
 use crate::checksum;
+use crate::iterator_trait::AgateIterator;
 use crate::opt::Options;
-use crate::structs::AgateIterator;
 use crate::Error;
 use crate::Result;
 
