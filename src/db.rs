@@ -9,7 +9,7 @@ use crate::value::{self, Request, Value};
 use crate::value_log::ValueLog;
 use crate::wal::Wal;
 use crate::{Table, TableBuilder, TableOptions};
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use crossbeam_channel::{Receiver, Sender};
 use skiplist::Skiplist;
 use std::collections::VecDeque;
@@ -342,7 +342,7 @@ impl Core {
         let memtables = self.mts.read()?;
         let mut_table = memtables.table_mut();
 
-        for entry in request.entries.into_iter() {
+        for (idx, entry) in request.entries.into_iter().enumerate() {
             if self.opts.skip_vlog(&entry) {
                 // deletion, tombstone, and small values
                 mut_table.put(
@@ -356,18 +356,19 @@ impl Core {
                     },
                 )?;
             } else {
+                let mut vptr_buf = BytesMut::new();
+                request.ptrs[idx].encode(&mut vptr_buf);
                 // write pointer to memtable
                 mut_table.put(
                     entry.key,
                     Value {
-                        value: Bytes::new(),
+                        value: vptr_buf.freeze(),
                         meta: entry.meta | value::VALUE_POINTER,
                         user_meta: entry.user_meta,
                         expires_at: entry.expires_at,
                         version: 0,
                     },
                 )?;
-                // TODO: add value pointer
             }
         }
         if self.opts.sync_writes {
@@ -502,7 +503,7 @@ impl Core {
     /// function, requests will be written into the LSM tree.
     ///
     /// TODO: ensure only one thread calls this function by using Mutex.
-    pub fn write_requests(&self, requests: Vec<Request>) -> Result<()> {
+    pub fn write_requests(&self, mut requests: Vec<Request>) -> Result<()> {
         if requests.is_empty() {
             return Ok(());
         }
@@ -510,7 +511,7 @@ impl Core {
         // TODO: process subscriptions
 
         if let Some(ref vlog) = self.vlog {
-            vlog.write(&requests)?;
+            vlog.write(&mut requests)?;
         }
 
         let mut cnt = 0;
@@ -552,6 +553,7 @@ impl Agate {
 mod tests {
     use super::*;
     use crate::format::key_with_ts;
+    use crate::value::ValuePointer;
     use bytes::BytesMut;
     use tempdir::TempDir;
 
@@ -611,7 +613,7 @@ mod tests {
                 entries: vec![Entry::new(
                     key_with_ts(BytesMut::from(format!("{:08x}", i).as_str()), 0),
                     with_payload(
-                        BytesMut::from(format!("{:08x}", i).as_str()),
+                        BytesMut::from(format!("{:08}", i).as_str()),
                         payload,
                         (i % 256) as u8,
                     ),
@@ -623,13 +625,25 @@ mod tests {
 
     fn verify_requests(n: usize, agate: &Agate) {
         for i in 0..n {
-            let value = agate
-                .get(&key_with_ts(
-                    BytesMut::from(format!("{:08x}", i).as_str()),
-                    0,
-                ))
-                .unwrap();
-            assert_eq!(value.value, i.to_string());
+            let key = key_with_ts(BytesMut::from(format!("{:08x}", i).as_str()), 0);
+            let value = agate.get(&key).unwrap();
+
+            if value.meta & value::VALUE_POINTER != 0 {
+                let vlog = agate.core.vlog.as_ref().unwrap();
+                let mut vptr = ValuePointer::default();
+                vptr.decode(&value.value);
+                let kv = vlog.read(vptr).unwrap();
+                let key_length = key.len();
+                let v_key = &kv[..key_length];
+                let val = &kv[key_length..];
+                assert_eq!(key, v_key);
+                assert_eq!(&val[..8], format!("{:08}", i).as_bytes());
+                for j in &val[8..] {
+                    assert_eq!(*j, (i % 256) as u8);
+                }
+            } else {
+                assert_eq!(&value.value[..8], format!("{:08}", i).as_bytes());
+            }
         }
     }
 
@@ -644,14 +658,12 @@ mod tests {
     #[test]
     fn test_flush_memtable_bigvalue() {
         with_agate_test(|agate| {
-            let requests = generate_requests(100, 1 << 20);
-            // as 
-            for request in requests {
-                agate
-                .write_requests(vec![request])
-                .unwrap();
+            let requests = generate_requests(15, 1 << 20);
+            // as
+            for request in requests.chunks(4) {
+                agate.write_requests(request.to_vec()).unwrap();
             }
-            verify_requests(100, &agate);
+            verify_requests(15, &agate);
         });
     }
 }

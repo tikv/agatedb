@@ -1,5 +1,5 @@
-use crate::value::{self, Request, ValuePointer};
-use crate::wal::Wal;
+use crate::value::{self, Request, Value, ValuePointer};
+use crate::wal::{Header, Wal};
 use crate::AgateOptions;
 use crate::{Error, Result};
 
@@ -113,7 +113,7 @@ impl ValueLog {
     }
 
     /// write is thread-unsafe and should not be called concurrently
-    pub fn write(&self, requests: &[Request]) -> Result<()> {
+    pub fn write(&self, requests: &mut [Request]) -> Result<()> {
         // TODO: validate writes
 
         let core = self.core.read()?;
@@ -158,13 +158,12 @@ impl ValueLog {
         };
 
         let mut buf = BytesMut::new();
-        for req in requests {
-            let mut req = req.clone();
+        for req in requests.iter_mut() {
             req.ptrs.clear();
 
             let mut written = 0;
 
-            for mut entry in req.entries {
+            for mut entry in req.entries.iter_mut() {
                 buf.clear();
 
                 if self.opts.skip_vlog(&entry) {
@@ -199,7 +198,65 @@ impl ValueLog {
             core.num_entries_written += written;
         }
 
-        // TODO: to_disk
+        if to_disk(current_log.clone())? {
+            self.create_vlog_file()?;
+        }
         Ok(())
+    }
+
+    fn get_file(&self, value_ptr: &ValuePointer) -> Result<Arc<RwLock<Wal>>> {
+        let core = self.core.read()?;
+        let file = core.files_map.get(&value_ptr.file_id).cloned();
+        if let Some(file) = file {
+            let max_fid = core.max_fid;
+            // TODO: read-only
+            if value_ptr.file_id == max_fid {
+                let current_offset = self.w_offset();
+                if value_ptr.offset >= current_offset {
+                    return Err(Error::CustomError(format!(
+                        "invalid offset {} > {}",
+                        value_ptr.offset, current_offset
+                    )));
+                }
+            }
+
+            Ok(file)
+        } else {
+            return Err(Error::CustomError(format!(
+                "vlog {} not found",
+                value_ptr.file_id
+            )));
+        }
+    }
+
+    /// Read data from vlogs.
+    ///
+    /// TODO: let user to decide when to unlock
+    pub(crate) fn read(&self, value_ptr: ValuePointer) -> Result<Bytes> {
+        let log_file = self.get_file(&value_ptr)?;
+        let r = log_file.read()?;
+        let buf = r.read(&value_ptr)?;
+        drop(r);
+
+        // TODO: verify checksum
+
+        let mut header = Header::default();
+        let header_len = header.decode(&buf)?;
+        let kv = buf.slice(header_len..);
+
+        if (kv.len() as u32) < header.key_len + header.value_len {
+            return Err(Error::CustomError(
+                format!(
+                    "invalud read vp: {:?}, kvlen {}, {}:{}",
+                    value_ptr,
+                    kv.len(),
+                    header.key_len,
+                    header.key_len + header.value_len
+                )
+                .to_string(),
+            ));
+        }
+
+        Ok(kv)
     }
 }

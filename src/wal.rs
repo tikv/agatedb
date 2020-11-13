@@ -3,8 +3,7 @@ use crate::util::binary::{
     decode_varint_u32, decode_varint_u64, encode_varint_u32_to_array, encode_varint_u64_to_array,
     varint_u32_bytes_len, varint_u64_bytes_len,
 };
-use crate::value::EntryReader;
-use crate::value::ValuePointer;
+use crate::value::{EntryReader, ValuePointer};
 use crate::AgateOptions;
 use crate::Error;
 use crate::Result;
@@ -212,7 +211,7 @@ impl Wal {
         })
     }
 
-    fn read(&self, p: ValuePointer) -> Result<Bytes> {
+    pub(crate) fn read(&self, p: &ValuePointer) -> Result<Bytes> {
         let offset = p.offset;
         let size = self.mmap_file.len() as u64;
         let value_size = p.len;
