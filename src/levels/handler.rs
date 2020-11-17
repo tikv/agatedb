@@ -1,25 +1,16 @@
-use crate::closer::Closer;
-use crate::format::get_ts;
 use crate::structs::AgateIterator;
 use crate::table::{MergeIterator, TableIterators};
 use crate::value::Value;
+use crate::Result;
 use crate::{AgateOptions, Table};
-use crate::{Error, Result};
-
-use std::collections::HashMap;
-use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, RwLock};
-use std::time::Duration;
 
 use bytes::Bytes;
-use crossbeam_channel::{select, tick};
-use yatp::task::callback::Handle;
 
 pub struct LevelHandler {
     opts: AgateOptions,
-    level: usize,
-    tables: Vec<Table>,
-    total_size: u64,
+    pub level: usize,
+    pub tables: Vec<Table>,
+    pub total_size: u64,
 }
 
 impl LevelHandler {

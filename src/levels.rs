@@ -1,13 +1,13 @@
 mod compaction;
 mod handler;
 
-use compaction::{CompactDef, CompactStatus, CompactionPriority, LevelCompactStatus};
+use compaction::{CompactDef, CompactStatus, CompactionPriority, LevelCompactStatus, Targets};
 use handler::LevelHandler;
 
 use crate::closer::Closer;
 use crate::format::get_ts;
 use crate::structs::AgateIterator;
-use crate::table::{MergeIterator, TableIterators};
+
 use crate::value::Value;
 use crate::{AgateOptions, Table};
 use crate::{Error, Result};
@@ -132,7 +132,7 @@ impl Core {
             next_level = self.levels[level + 1].clone();
         };
 
-        let compact_def = CompactDef {
+        let _compact_def = CompactDef {
             compactor_id: idx,
             this_level: self.levels[level].clone(),
             next_level,
@@ -226,12 +226,6 @@ impl Core {
         x.reverse();
         x
     }
-}
-
-struct Targets {
-    base_level: usize,
-    target_size: Vec<u64>,
-    file_size: Vec<u64>,
 }
 
 impl LevelsController {
