@@ -6,7 +6,6 @@ use handler::LevelHandler;
 
 use crate::closer::Closer;
 use crate::format::get_ts;
-use crate::structs::AgateIterator;
 
 use crate::value::Value;
 use crate::{AgateOptions, Table};
@@ -120,6 +119,7 @@ impl Core {
 
     // pick some tables on that level and compact it to next level
     fn do_compact(&self, idx: usize, level: usize) -> Result<()> {
+        println!("compact #{} on level {}", idx, level);
         assert!(level < self.opts.max_levels);
 
         let next_level;

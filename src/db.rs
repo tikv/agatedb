@@ -236,7 +236,8 @@ impl AgateOptions {
 
     fn arena_size(&self) -> u64 {
         // TODO: take other options into account
-        self.mem_table_size as u64
+        // TODO: don't just multiply 2
+        self.mem_table_size as u64 * 2
     }
 }
 
@@ -590,12 +591,15 @@ mod tests {
 
     fn with_agate_test(f: impl FnOnce(Agate) -> ()) {
         let tmp_dir = TempDir::new("agatedb").unwrap();
-        let agate = AgateOptions::default()
+        let mut options = AgateOptions::default();
+
+        options
             .create()
             .in_memory(false)
-            .value_log_file_size(4 << 20)
-            .open(&tmp_dir)
-            .unwrap();
+            .value_log_file_size(4 << 20);
+
+        options.mem_table_size = 1 << 14;
+        let agate = options.open(&tmp_dir).unwrap();
         f(agate);
         helper_dump_dir(tmp_dir.path());
         tmp_dir.close().unwrap();
@@ -668,6 +672,17 @@ mod tests {
         with_agate_test(|agate| {
             agate.write_requests(generate_requests(2000, 0)).unwrap();
             verify_requests(2000, &agate);
+        });
+    }
+
+    #[test]
+    fn test_flush_l1() {
+        with_agate_test(|agate| {
+            let requests = generate_requests(10000, 0);
+            for request in requests.chunks(100) {
+                agate.write_requests(request.to_vec()).unwrap();
+            }
+            verify_requests(10000, &agate);
         });
     }
 
