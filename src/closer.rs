@@ -37,7 +37,7 @@ mod tests {
 
         let (tx, rx) = unbounded::<()>();
 
-        for i in 0..10 {
+        for _i in 0..10 {
             let closer = closer.clone();
             let tx = tx.clone();
             pool.spawn(move |_: &mut Handle<'_>| {

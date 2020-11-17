@@ -179,7 +179,7 @@ impl Core {
     }
 
     // pick some tables on that level and compact it to next level
-    fn do_compact(&self, idx: usize, level: usize) -> Result<()> {
+    fn do_compact(&self, _idx: usize, _level: usize) -> Result<()> {
         Ok(())
     }
 }

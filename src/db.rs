@@ -545,6 +545,8 @@ impl Core {
             self.write_to_lsm(req)?;
         }
 
+        println!("{} entries written", cnt);
+
         Ok(())
     }
 }
