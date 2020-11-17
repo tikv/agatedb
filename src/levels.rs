@@ -1,3 +1,9 @@
+mod compaction;
+mod handler;
+
+use compaction::{CompactDef, CompactStatus, CompactionPriority, LevelCompactStatus};
+use handler::LevelHandler;
+
 use crate::closer::Closer;
 use crate::format::get_ts;
 use crate::structs::AgateIterator;
@@ -15,84 +21,10 @@ use bytes::Bytes;
 use crossbeam_channel::{select, tick};
 use yatp::task::callback::Handle;
 
-#[derive(Default)]
-struct LevelCompactStatus {
-    ranges: (),
-    del_size: u64,
-}
-
-struct CompactStatus {
-    levels: Vec<LevelCompactStatus>,
-    tables: HashMap<u64, ()>,
-}
-struct LevelHandler {
-    opts: AgateOptions,
-    level: usize,
-    tables: Vec<Table>,
-    total_size: u64,
-}
-
-impl LevelHandler {
-    pub fn new(opts: AgateOptions, level: usize) -> Self {
-        Self {
-            opts,
-            level,
-            tables: vec![],
-            total_size: 0,
-        }
-    }
-
-    pub fn try_add_l0_table(&mut self, table: Table) -> bool {
-        assert_eq!(self.level, 0);
-        if self.tables.len() >= self.opts.num_level_zero_tables_stall {
-            return false;
-        }
-
-        self.total_size += table.size();
-        self.tables.push(table);
-
-        true
-    }
-
-    pub fn num_tables(&self) -> usize {
-        self.tables.len()
-    }
-
-    pub fn get(&self, key: &Bytes) -> Result<Option<Value>> {
-        // TODO: Add binary search logic. For now we just merge iterate all tables.
-        // TODO: fix wrong logic. This function now just checks if we found the correct key,
-        // regardless of their version.
-
-        if self.tables.is_empty() {
-            return Ok(None);
-        }
-
-        let iters: Vec<Box<TableIterators>> = self
-            .tables
-            .iter()
-            .map(|x| x.new_iterator(0))
-            .map(|x| Box::new(TableIterators::from(x)))
-            .collect();
-        let mut iter = MergeIterator::from_iterators(iters, false);
-
-        iter.seek(key);
-
-        if !iter.valid() {
-            return Ok(None);
-        }
-
-        if !crate::util::same_key(&key, iter.key()) {
-            return Ok(None);
-        }
-
-        Ok(Some(iter.value()))
-    }
-}
-
 struct Core {
     next_file_id: AtomicU64,
     // `levels[i].level == i` should be ensured
-    levels: Vec<RwLock<LevelHandler>>,
+    levels: Vec<Arc<RwLock<LevelHandler>>>,
     opts: AgateOptions,
     // TODO: agate oracle, manifest should be added here
     cpt_status: RwLock<CompactStatus>,
@@ -107,7 +39,7 @@ impl Core {
         let mut levels = vec![];
         let mut cpt_status_levels = vec![];
         for i in 0..opts.max_levels {
-            levels.push(RwLock::new(LevelHandler::new(opts.clone(), i)));
+            levels.push(Arc::new(RwLock::new(LevelHandler::new(opts.clone(), i))));
             cpt_status_levels.push(LevelCompactStatus::default());
         }
 
@@ -178,10 +110,128 @@ impl Core {
         Ok(max_value)
     }
 
+    fn fill_tables_l0(&self) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn fill_tables(&self) -> Result<()> {
+        unimplemented!()
+    }
+
     // pick some tables on that level and compact it to next level
-    fn do_compact(&self, _idx: usize, _level: usize) -> Result<()> {
+    fn do_compact(&self, idx: usize, level: usize) -> Result<()> {
+        assert!(level < self.opts.max_levels);
+
+        let next_level;
+
+        if level == 0 {
+            self.fill_tables_l0()?;
+            next_level = self.levels[1].clone();
+        } else {
+            self.fill_tables()?;
+            next_level = self.levels[level + 1].clone();
+        };
+
+        let compact_def = CompactDef {
+            compactor_id: idx,
+            this_level: self.levels[level].clone(),
+            next_level,
+        };
+
         Ok(())
     }
+
+    fn level_targets(&self) -> Targets {
+        let adjust = |size| {
+            if size < self.opts.base_level_size {
+                self.opts.base_level_size
+            } else {
+                size
+            }
+        };
+
+        let mut targets = Targets {
+            base_level: 0,
+            target_size: vec![0; self.levels.len()],
+            file_size: vec![0; self.levels.len()],
+        };
+
+        let mut db_size = self.last_level().read().unwrap().total_size;
+
+        for i in self.levels.len() - 1..0 {
+            let ltarget = adjust(db_size);
+            targets.target_size[i] = ltarget;
+            if targets.base_level == 0 && ltarget <= self.opts.base_level_size {
+                targets.base_level = i;
+            }
+            db_size /= self.opts.level_size_multiplier as u64;
+        }
+
+        let mut tsz = self.opts.base_level_size;
+
+        for i in 0..self.levels.len() {
+            if i == 0 {
+                targets.file_size[i] = self.opts.mem_table_size;
+            } else if i <= targets.base_level {
+                targets.file_size[i] = tsz;
+            } else {
+                tsz *= self.opts.table_size_multiplier as u64;
+                targets.file_size[i] = tsz;
+            }
+        }
+
+        targets
+    }
+
+    fn last_level(&self) -> &Arc<RwLock<LevelHandler>> {
+        self.levels.last().unwrap()
+    }
+
+    fn pick_compact_levels(&self) -> Vec<CompactionPriority> {
+        let targets = Arc::new(self.level_targets());
+        let mut prios = vec![];
+
+        let mut add_priority = |level, score| {
+            let pri = CompactionPriority {
+                level,
+                score,
+                adjusted: score,
+                targets: targets.clone(),
+                drop_prefixes: vec![],
+            };
+            prios.push(pri);
+        };
+
+        add_priority(
+            0,
+            self.levels[0].read().unwrap().num_tables() as f64
+                / self.opts.num_level_zero_tables as f64,
+        );
+
+        let cpt_status = self.cpt_status.read().unwrap();
+
+        for i in 1..self.levels.len() {
+            let del_size = cpt_status.levels[i].del_size;
+            let level = self.levels[i].read().unwrap();
+            let size = level.total_size - del_size;
+            add_priority(i, size as f64 / targets.target_size[i] as f64);
+        }
+
+        assert_eq!(prios.len(), self.levels.len());
+
+        // TODO: adjust score
+
+        let mut x: Vec<CompactionPriority> = prios.into_iter().filter(|x| x.score > 1.0).collect();
+        x.sort_by(|x, y| x.adjusted.partial_cmp(&y.adjusted).unwrap());
+        x.reverse();
+        x
+    }
+}
+
+struct Targets {
+    base_level: usize,
+    target_size: Vec<u64>,
+    file_size: Vec<u64>,
 }
 
 impl LevelsController {
@@ -215,7 +265,7 @@ impl LevelsController {
             let run_once = || {
                 // TODO: automatically determine compact prio,
                 // now we always compact from L0 to Ln
-                for level in 0..max_levels {
+                for level in 0..(max_levels - 1) {
                     if let Err(err) = core.do_compact(idx, level) {
                         println!("error while compaction: {:?}", err);
                     }
