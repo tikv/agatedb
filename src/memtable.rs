@@ -9,7 +9,7 @@ use std::collections::VecDeque;
 use std::mem::{self, ManuallyDrop, MaybeUninit};
 
 use std::ptr;
-use std::sync::RwLock;
+use std::sync::Mutex;
 
 const MEMTABLE_VIEW_MAX: usize = 20;
 
@@ -25,7 +25,7 @@ struct MemTableCore {
 pub struct MemTable {
     pub(crate) skl: Skiplist<Comparator>,
     opt: AgateOptions,
-    core: RwLock<MemTableCore>,
+    core: Mutex<MemTableCore>,
 }
 
 impl MemTable {
@@ -33,7 +33,7 @@ impl MemTable {
         Self {
             skl,
             opt,
-            core: RwLock::new(MemTableCore {
+            core: Mutex::new(MemTableCore {
                 wal,
                 max_version: 0,
             }),

@@ -80,7 +80,7 @@ impl Core {
     /// 1. read lock of memtable list (only block flush)
     /// 2. write lock of mutable memtable WAL (won't block mut-table read).
     /// 3. level controller lock (TBD)
-    pub fn write_to_lsm(&self, _request: Request) -> Result<()> {
+    pub(crate) fn write_to_lsm(&self, _request: Request) -> Result<()> {
         unimplemented!()
     }
 }
@@ -97,11 +97,11 @@ impl Agate {
     pub fn open<P: AsRef<Path>>(mut opts: AgateOptions, path: P) -> Result<Self> {
         opts.fix_options()?;
 
-        opts.path = path.as_ref().to_path_buf();
+        opts.dir = path.as_ref().to_path_buf();
 
         if !opts.in_memory {
-            if !opts.path.exists() {
-                fs::create_dir_all(&opts.path)?;
+            if !opts.dir.exists() {
+                fs::create_dir_all(&opts.dir)?;
             }
             // TODO: create wal path, acquire database path lock
         }

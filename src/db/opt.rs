@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Clone)]
 pub struct AgateOptions {
-    pub path: PathBuf,
+    pub dir: PathBuf,
     pub value_dir: PathBuf,
     // TODO: docs
     pub in_memory: bool,
@@ -32,7 +32,7 @@ pub struct AgateOptions {
 impl Default for AgateOptions {
     fn default() -> Self {
         Self {
-            path: PathBuf::new(),
+            dir: PathBuf::new(),
             value_dir: PathBuf::new(),
             // memtable options
             mem_table_size: 64 << 20,
