@@ -4,8 +4,8 @@ use super::*;
 use crate::format::{key_with_ts, user_key};
 use crate::value::Value;
 use builder::Builder;
-use rand::prelude::*;
 use iterator::IteratorError;
+use rand::prelude::*;
 use tempdir::TempDir;
 
 fn key(prefix: &[u8], i: usize) -> Bytes {
@@ -31,7 +31,6 @@ fn get_test_table_options() -> Options {
 }
 
 fn generate_table_data(prefix: &[u8], n: usize, mut opts: Options) -> Vec<(Bytes, Bytes)> {
-fn build_test_table(prefix: &[u8], n: usize, mut opts: Options) -> TableGuard {
     if opts.block_size == 0 {
         opts.block_size = 4 * 1024;
     }
@@ -48,7 +47,7 @@ fn build_test_table(prefix: &[u8], n: usize, mut opts: Options) -> TableGuard {
     kv_pairs
 }
 
-fn build_test_table(prefix: &[u8], n: usize, opts: Options) -> Table {
+fn build_test_table(prefix: &[u8], n: usize, opts: Options) -> TableGuard {
     let kv_pairs = generate_table_data(prefix, n, opts.clone());
     build_table(kv_pairs, opts)
 }
@@ -76,8 +75,7 @@ impl DerefMut for TableGuard {
     }
 }
 
-fn build_table(mut kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> TableGuard {
-    let mut builder = Builder::new(opts.clone());
+fn build_table(kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> TableGuard {
     let tmp_dir = TempDir::new("agatedb").unwrap();
     let filename = tmp_dir.path().join("1.sst".to_string());
 
