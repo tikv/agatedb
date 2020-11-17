@@ -7,7 +7,7 @@ use bytes::{Bytes, BytesMut};
 use std::sync::Arc;
 
 /// Errors that may encounter during iterator operation
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum IteratorError {
     EOF,
     // TODO: As we need to clone Error from block iterator to table iterator,

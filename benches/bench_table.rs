@@ -1,6 +1,8 @@
 mod common;
 
 use agatedb::ChecksumVerificationMode::NoVerification;
+use std::ops::{Deref, DerefMut};
+
 use agatedb::{Table, TableBuilder, TableOptions, Value};
 use bytes::Bytes;
 use common::rand_value;
@@ -38,7 +40,30 @@ fn bench_table_builder(c: &mut Criterion) {
     });
 }
 
-fn get_table_for_benchmark(count: usize) -> Table {
+/// TableGuard saves Table and TempDir, so as to ensure
+/// temporary directory is removed after table is closed.
+/// According to Rust RFC, the drop order is first `table` then
+/// `tmp_dir`.
+pub struct TableGuard {
+    table: Table,
+    _tmp_dir: TempDir,
+}
+
+impl Deref for TableGuard {
+    type Target = Table;
+
+    fn deref(&self) -> &Table {
+        &self.table
+    }
+}
+
+impl DerefMut for TableGuard {
+    fn deref_mut(&mut self) -> &mut Table {
+        &mut self.table
+    }
+}
+
+fn get_table_for_benchmark(count: usize) -> TableGuard {
     let tmp_dir = TempDir::new("agatedb").unwrap();
 
     let opts = TableOptions {
@@ -58,7 +83,10 @@ fn get_table_for_benchmark(count: usize) -> Table {
         builder.add(&k, Value::new(v), 0);
     }
 
-    Table::create(&filename, builder.finish(), opts).unwrap()
+    TableGuard {
+        table: Table::create(&filename, builder.finish(), opts).unwrap(),
+        _tmp_dir: tmp_dir,
+    }
 }
 
 fn bench_table(c: &mut Criterion) {
