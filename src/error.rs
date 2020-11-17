@@ -26,8 +26,6 @@ pub enum Error {
     TableRead(String),
     #[error("Database Closed")]
     DBClosed,
-    #[error("Lock Poison")]
-    PoisonError(String),
     #[error("{0}")]
     LogRead(String),
 }
@@ -43,13 +41,6 @@ impl From<prost::DecodeError> for Error {
     #[inline]
     fn from(e: prost::DecodeError) -> Error {
         Error::Decode(Box::new(e))
-    }
-}
-
-impl<T: Sized> From<PoisonError<T>> for Error {
-    #[inline]
-    fn from(e: PoisonError<T>) -> Error {
-        Error::PoisonError(e.to_string())
     }
 }
 
