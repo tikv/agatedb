@@ -177,6 +177,11 @@ impl Core {
 
         Ok(max_value)
     }
+
+    // pick some tables on that level and compact it to next level
+    fn do_compact(&self, idx: usize, level: usize) -> Result<()> {
+        Ok(())
+    }
 }
 
 impl LevelsController {
@@ -204,8 +209,18 @@ impl LevelsController {
         closer: Closer,
         pool: &yatp::ThreadPool<yatp::task::callback::TaskCell>,
     ) {
-        let run_once = || {};
+        let max_levels = self.core.opts.max_levels;
+        let core = self.core.clone();
         pool.spawn(move |_: &mut Handle<'_>| {
+            let run_once = || {
+                // TODO: automatically determine compact prio,
+                // now we always compact from L0 to Ln
+                for level in 0..max_levels {
+                    if let Err(err) = core.do_compact(idx, level) {
+                        println!("error while compaction: {:?}", err);
+                    }
+                }
+            };
             let ticker = tick(Duration::from_millis(50));
             select! {
                 recv(ticker) -> _ => return,
