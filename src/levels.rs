@@ -1,12 +1,11 @@
 mod compaction;
 mod handler;
 
-use compaction::{CompactDef, CompactStatus, CompactionPriority, LevelCompactStatus, Targets};
+use compaction::{CompactDef, CompactStatus, CompactionPriority, LevelCompactStatus, Targets, KeyRange};
 use handler::LevelHandler;
 
 use crate::closer::Closer;
-use crate::format::get_ts;
-
+use crate::format::{get_ts, key_with_ts, user_key};
 use crate::value::Value;
 use crate::{AgateOptions, Table};
 use crate::{Error, Result};
@@ -117,6 +116,54 @@ impl Core {
         unimplemented!()
     }
 
+    fn run_compact_def(&self, idx: usize, level: usize, compact_def: CompactDef) -> Result<()> {
+        if compact_def.targets.file_size.len() == 0 {
+            return Err(Error::CustomError("targets not set".to_string()));
+        }
+
+        let this_level = compact_def.this_level;
+        let next_level = compact_def.next_level;
+        let this_level_id = this_level.read().unwrap().level;
+        let next_level_id = next_level.read().unwrap().level;
+
+        assert_eq!(compact_def.splits.len(), 0);
+
+        if this_level_id == 0 && next_level_id == 0 {
+
+        } else {
+            self.add_splits(&mut compact_def);
+        }
+
+        if compact_def.splits.len() == 0 {
+            compact_def.splits.push(KeyRange::default());
+        }
+
+        Ok(())
+    }
+
+    fn add_splits(&self, compact_def: &mut CompactDef) {
+        const N: usize = 3;
+        let mut skr = compact_def.this_range.clone();
+        skr.extend(compact_def.next_range);
+
+        let mut add_range = |right| {
+            skr.right = right;
+            compact_def.splits.push(skr.clone());
+            skr.left = skr.right.clone();
+        };
+
+        for (i, table) in compact_def.bot.iter().enumerate() {
+            if i == compact_def.bot.len() - 1 {
+                add_range(Bytes::new());
+                return;
+            }
+
+            if i % N == N - 1 {
+               right = key_with_ts(BytesMut::, ts)
+            }
+        }
+    }
+
     // pick some tables on that level and compact it to next level
     fn do_compact(&self, idx: usize, mut cpt_prio: CompactionPriority) -> Result<()> {
         let level = cpt_prio.level;
@@ -142,11 +189,11 @@ impl Core {
 
         if let Err(err) = self.run_compact_def(idx, level, compact_def) {
             println!("failed on compaction {:?}", err);
-            self.cpt_status.delete(compact_def);
+            self.cpt_status.write().unwrap().delete(compact_def);
         }
 
         println!("compaction success");
-        self.cpt_status.delete(compact_def);
+        self.cpt_status.write().unwrap().delete(compact_def);
 
         Ok(())
     }

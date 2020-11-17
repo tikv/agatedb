@@ -556,6 +556,11 @@ impl Table {
     pub fn size(&self) -> u64 {
         self.inner.size()
     }
+
+    /// Get ID of SST
+    pub fn id(&self) -> u64 {
+        self.inner.id()
+    }
 }
 
 fn id_to_filename(id: u64) -> String {

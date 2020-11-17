@@ -5,7 +5,9 @@ use std::sync::{Arc, RwLock};
 use bytes::Bytes;
 
 use super::LevelHandler;
+use crate::Table;
 
+#[derive(PartialEq, Clone)]
 pub enum KeyRange {
     Bound { left: Bytes, right: Bytes },
     Inf,
@@ -39,8 +41,17 @@ impl Default for KeyRange {
 
 #[derive(Default)]
 pub struct LevelCompactStatus {
-    pub ranges: (),
+    pub ranges: Vec<KeyRange>,
     pub del_size: u64,
+}
+
+impl LevelCompactStatus {
+    pub fn remove(&mut self, dst: KeyRange) -> bool {
+        let prev_ranges_len = self.ranges.len();
+        self.ranges = self.ranges.into_iter().filter(|x| x != &dst).collect();
+
+        prev_ranges_len != self.ranges.len()
+    }
 }
 
 pub struct CompactStatus {
@@ -57,9 +68,14 @@ pub struct CompactDef {
     pub next_range: KeyRange,
     pub splits: Vec<KeyRange>,
 
-    this_size: u64,
+    pub top: Vec<Table>,
+    pub bot: Vec<Table>,
 
-    drop_prefixes: Vec<Bytes>,
+    pub this_size: u64,
+
+    pub drop_prefixes: Vec<Bytes>,
+
+    pub targets: Targets
 }
 
 impl CompactDef {
@@ -77,6 +93,9 @@ impl CompactDef {
             splits: vec![],
             this_size: 0,
             drop_prefixes: vec![],
+            top: vec![],
+            bot: vec![],
+            targets: Targets::new()
         }
     }
 }
@@ -87,12 +106,29 @@ impl CompactStatus {
         let tl = compact_def.this_level.read().unwrap().level;
         assert!(tl < self.levels.len() - 1);
 
-        let this_level = &mut self.levels[compact_def.this_level.read().unwrap().level];
+        let this_level_id = compact_def.this_level.read().unwrap().level;
+        let this_level = &mut self.levels[this_level_id];
         let next_level_id = compact_def.next_level.read().unwrap().level;
 
         this_level.del_size -= compact_def.this_size;
-        let found = this_level.remove(compact_def.this_range);
-        if !compact_def.next_range.is_empty() {}
+        let mut found = this_level.remove(compact_def.this_range);
+        drop(this_level);
+        if !compact_def.next_range.is_empty() {
+            let next_level = &mut self.levels[next_level_id];
+            found = next_level.remove(compact_def.next_range) && found;
+        }
+
+        if !found {
+            let this = compact_def.this_range;
+            let next = compact_def.next_range;
+
+            panic!("key range not found");
+        }
+
+        for table in compact_def.top {
+            assert!(self.tables.get(&table.id()).is_some());
+            // TODO: delete table
+        }
     }
 }
 
@@ -109,4 +145,14 @@ pub struct Targets {
     pub base_level: usize,
     pub target_size: Vec<u64>,
     pub file_size: Vec<u64>,
+}
+
+impl Targets {
+    pub fn new() -> Self {
+        Self {
+            base_level: 0,
+            target_size: vec![],
+            file_size: vec![]
+        }
+    }
 }
