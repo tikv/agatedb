@@ -1,5 +1,6 @@
 use super::memtable::{MemTable, MemTables};
 use super::{Error, Result};
+use crate::closer::Closer;
 use crate::entry::Entry;
 use crate::format::get_ts;
 use crate::levels::LevelsController;
@@ -30,6 +31,7 @@ pub struct Core {
 
 pub struct Agate {
     pub(crate) core: Arc<Core>,
+    closer: Closer,
     pool: yatp::ThreadPool<yatp::task::callback::TaskCell>,
 }
 
@@ -63,9 +65,10 @@ impl Agate {
 
     fn new(core: Arc<Core>) -> Self {
         let flush_core = core.clone();
-
+        let closer = Closer::new();
         let agate = Self {
             core,
+            closer: closer.clone(),
             pool: yatp::Builder::new("agatedb").build_callback_pool(),
         };
 
@@ -73,13 +76,19 @@ impl Agate {
             .pool
             .spawn(move |_: &mut Handle<'_>| flush_core.flush_memtable().unwrap());
 
-        agate.core.clone().lvctl.start_compact(&agate.pool);
+        agate
+            .core
+            .clone()
+            .lvctl
+            .start_compact(closer.clone(), &agate.pool);
 
         agate
     }
 
     fn close(&self) {
+        // TODO: use closer for flush channel
         self.core.flush_channel.0.send(None).unwrap();
+        self.closer.close();
     }
 }
 
@@ -149,7 +158,7 @@ impl Default for AgateOptions {
             bloom_false_positive: 0.01,
             num_level_zero_tables: 5,
             num_level_zero_tables_stall: 15,
-            num_compactors: 4
+            num_compactors: 4,
         }
         // TODO: add other options
     }
@@ -664,7 +673,6 @@ mod tests {
     fn test_flush_memtable_bigvalue() {
         with_agate_test(|agate| {
             let requests = generate_requests(15, 1 << 20);
-            // as
             for request in requests.chunks(4) {
                 agate.write_requests(request.to_vec()).unwrap();
             }

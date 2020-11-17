@@ -3,6 +3,7 @@
 
 mod bloom;
 mod checksum;
+mod closer;
 mod db;
 mod entry;
 mod error;

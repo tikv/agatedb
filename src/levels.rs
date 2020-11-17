@@ -1,14 +1,19 @@
+use crate::closer::Closer;
 use crate::format::get_ts;
 use crate::structs::AgateIterator;
 use crate::table::{MergeIterator, TableIterators};
 use crate::value::Value;
 use crate::{AgateOptions, Table};
 use crate::{Error, Result};
+
 use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
-use std::sync::{RwLock, Arc};
+use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use bytes::Bytes;
+use crossbeam_channel::{select, tick};
+use yatp::task::callback::Handle;
 
 #[derive(Default)]
 struct LevelCompactStatus {
@@ -94,7 +99,7 @@ struct Core {
 }
 
 pub struct LevelsController {
-    core: Arc<Core>
+    core: Arc<Core>,
 }
 
 impl Core {
@@ -177,7 +182,7 @@ impl Core {
 impl LevelsController {
     pub fn new(opts: AgateOptions) -> Result<Self> {
         Ok(Self {
-            core: Arc::new(Core::new(opts)?)
+            core: Arc::new(Core::new(opts)?),
         })
     }
 
@@ -193,13 +198,29 @@ impl LevelsController {
         self.core.reserve_file_id()
     }
 
-    fn run_compactor(&self, _idx: usize, _pool: &yatp::ThreadPool<yatp::task::callback::TaskCell>) {
-        
+    fn run_compactor(
+        &self,
+        idx: usize,
+        closer: Closer,
+        pool: &yatp::ThreadPool<yatp::task::callback::TaskCell>,
+    ) {
+        let run_once = || {};
+        pool.spawn(move |_: &mut Handle<'_>| {
+            let ticker = tick(Duration::from_millis(50));
+            select! {
+                recv(ticker) -> _ => return,
+                recv(closer.has_been_closed()) -> _ => run_once()
+            }
+        });
     }
 
-    pub fn start_compact(&self, pool: &yatp::ThreadPool<yatp::task::callback::TaskCell>) {
+    pub fn start_compact(
+        &self,
+        closer: Closer,
+        pool: &yatp::ThreadPool<yatp::task::callback::TaskCell>,
+    ) {
         for i in 0..self.core.opts.num_compactors {
-            self.run_compactor(i, pool);
+            self.run_compactor(i, closer.clone(), pool);
         }
     }
 }
