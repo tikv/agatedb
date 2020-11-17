@@ -69,7 +69,7 @@ impl Header {
     }
 
     /// Decode header from bytes
-    pub fn decode(&mut self, bytes: &[u8]) -> Result<usize> {
+    pub fn decode(&mut self, bytes: &mut Bytes) -> Result<usize> {
         self.meta = bytes[0];
         self.user_meta = bytes[1];
         let mut read = 2;
