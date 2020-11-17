@@ -118,9 +118,15 @@ impl Core {
     }
 
     // pick some tables on that level and compact it to next level
-    fn do_compact(&self, idx: usize, level: usize) -> Result<()> {
+    fn do_compact(&self, idx: usize, mut cpt_prio: CompactionPriority) -> Result<()> {
+        let level = cpt_prio.level;
+        assert!(level + 1 < self.opts.max_levels);
+
+        if cpt_prio.targets.base_level == 0 {
+            cpt_prio.targets = Arc::new(self.level_targets());
+        }
+
         println!("compact #{} on level {}", idx, level);
-        assert!(level < self.opts.max_levels);
 
         let next_level;
 
@@ -132,11 +138,15 @@ impl Core {
             next_level = self.levels[level + 1].clone();
         };
 
-        let _compact_def = CompactDef {
-            compactor_id: idx,
-            this_level: self.levels[level].clone(),
-            next_level,
-        };
+        let compact_def = CompactDef::new(idx, self.levels[level].clone(), next_level);
+
+        if let Err(err) = self.run_compact_def(idx, level, compact_def) {
+            println!("failed on compaction {:?}", err);
+            self.cpt_status.delete(compact_def);
+        }
+
+        println!("compaction success");
+        self.cpt_status.delete(compact_def);
 
         Ok(())
     }
@@ -256,15 +266,36 @@ impl LevelsController {
         let max_levels = self.core.opts.max_levels;
         let core = self.core.clone();
         pool.spawn(move |_: &mut Handle<'_>| {
-            let run_once = || {
-                // TODO: automatically determine compact prio,
-                // now we always compact from L0 to Ln
-                for level in 0..(max_levels - 1) {
-                    if let Err(err) = core.do_compact(idx, level) {
-                        println!("error while compaction: {:?}", err);
+            let move_l0_to_front =
+                |prios: Vec<CompactionPriority>| match prios.iter().position(|x| x.level == 0) {
+                    Some(pos) => {
+                        let mut result = vec![];
+                        result.push(prios[pos].clone());
+                        result.extend_from_slice(&prios[..idx]);
+                        result.extend_from_slice(&prios[idx + 1..]);
+                        result
                     }
+                    _ => prios,
+                };
+
+            let run_once = || {
+                let mut prios = core.pick_compact_levels();
+                if idx == 0 {
+                    prios = move_l0_to_front(prios);
+                }
+
+                for p in prios {
+                    if idx == 0 && p.level == 0 {
+                        // allow worker zero to run level 0
+                    } else if p.adjusted < 1.0 {
+                        break;
+                    }
+
+                    // TODO: handle error
+                    core.do_compact(idx, p).unwrap();
                 }
             };
+
             let ticker = tick(Duration::from_millis(50));
             select! {
                 recv(ticker) -> _ => return,
