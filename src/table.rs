@@ -128,7 +128,7 @@ impl TableInner {
             index: TableIndex::default(),
             index_start: 0,
             index_len: 0,
-            opts: opts,
+            opts,
         };
         inner.init_biggest_and_smallest()?;
 
