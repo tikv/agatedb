@@ -113,7 +113,7 @@ impl Wal {
                 false,
             )
         } else {
-            let mut file = OpenOptions::new()
+            let file = OpenOptions::new()
                 .create_new(true)
                 .read(true)
                 .write(true)

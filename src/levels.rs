@@ -193,7 +193,7 @@ impl LevelsController {
         self.core.reserve_file_id()
     }
 
-    fn run_compactor(&self, idx: usize, pool: &yatp::ThreadPool<yatp::task::callback::TaskCell>) {
+    fn run_compactor(&self, _idx: usize, _pool: &yatp::ThreadPool<yatp::task::callback::TaskCell>) {
         
     }
 
