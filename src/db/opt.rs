@@ -3,15 +3,28 @@ use super::*;
 #[derive(Clone)]
 pub struct AgateOptions {
     pub path: PathBuf,
+    pub value_dir: PathBuf,
     // TODO: docs
     pub in_memory: bool,
     pub sync_writes: bool,
 
-    pub create_if_not_exists: bool,
-    pub num_memtables: usize,
+    // Memtable options
     pub mem_table_size: u64,
+    pub base_table_size: u64,
+    pub base_level_size: u64,
+    pub level_size_multiplier: usize,
+    pub table_size_multiplier: usize,
+    pub max_levels: usize,
 
     pub value_threshold: usize,
+    pub num_memtables: usize,
+
+    pub block_size: usize,
+    pub bloom_false_positive: f64,
+
+    pub num_level_zero_tables: usize,
+    pub num_level_zero_tables_stall: usize,
+
     pub value_log_file_size: u64,
     pub value_log_max_entries: u32,
 }
@@ -19,15 +32,26 @@ pub struct AgateOptions {
 impl Default for AgateOptions {
     fn default() -> Self {
         Self {
-            create_if_not_exists: false,
             path: PathBuf::new(),
+            value_dir: PathBuf::new(),
+            // memtable options
             mem_table_size: 64 << 20,
+            base_table_size: 2 << 20,
+            base_level_size: 10 << 20,
+            table_size_multiplier: 2,
+            level_size_multiplier: 10,
+            max_levels: 7,
+            // agate options
             num_memtables: 20,
             in_memory: false,
             sync_writes: false,
             value_threshold: 1 << 10,
             value_log_file_size: 1 << 30 - 1,
             value_log_max_entries: 1000000,
+            block_size: 4 << 10,
+            bloom_false_positive: 0.01,
+            num_level_zero_tables: 5,
+            num_level_zero_tables_stall: 15,
         }
         // TODO: add other options
     }
