@@ -1,6 +1,5 @@
 pub mod binary;
 
-use crate::Result;
 pub use skiplist::FixedLengthSuffixComparator as Comparator;
 pub use skiplist::{FixedLengthSuffixComparator, KeyComparator};
 use std::{cmp, ptr};

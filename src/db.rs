@@ -1,7 +1,7 @@
 mod opt;
 
 use super::memtable::{MemTable, MemTables};
-use super::{Error, Result};
+use super::Result;
 use crate::entry::Entry;
 use crate::value::{Request, Value};
 
@@ -101,9 +101,6 @@ impl Agate {
 
         if !opts.in_memory {
             if !opts.path.exists() {
-                if !opts.create_if_not_exists {
-                    return Err(Error::Config(format!("{:?} doesn't exist", opts.path)));
-                }
                 fs::create_dir_all(&opts.path)?;
             }
             // TODO: create wal path, acquire database path lock
