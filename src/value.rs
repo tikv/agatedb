@@ -1,6 +1,20 @@
+use crate::entry::Entry;
+use crate::entry::EntryRef;
+use crate::wal::Header;
+use crate::Result;
 use bytes::{BufMut, Bytes, BytesMut};
+use std::io::BufReader;
+use std::io::{Read, Seek};
 use std::mem::MaybeUninit;
 
+pub const VALUE_DELETE: u8 = 1 << 0;
+pub const VALUE_POINTER: u8 = 1 << 1;
+pub const VALUE_DISCARD_EARLIER_VERSIONS: u8 = 1 << 2;
+pub const VALUE_MERGE_ENTRY: u8 = 1 << 3;
+pub const VALUE_TXN: u8 = 1 << 6;
+pub const VALUE_FIN_TXN: u8 = 1 << 7;
+
+/// Value of a kv pair is packed into `Value` struct with extra information.
 #[derive(Default, Debug, Clone)]
 pub struct Value {
     pub meta: u8,
@@ -8,6 +22,15 @@ pub struct Value {
     pub expires_at: u64,
     pub value: Bytes,
     pub version: u64,
+}
+
+impl Into<Bytes> for Value {
+    fn into(self) -> Bytes {
+        // TODO: we can reduce unnecessary copy by re-writing `encode`
+        let mut buf = BytesMut::new();
+        self.encode(&mut buf);
+        buf.freeze()
+    }
 }
 
 #[inline]
@@ -110,5 +133,43 @@ impl Value {
         let written = encode_var(&mut arr[2..], self.expires_at);
         buf.put_slice(&arr[..written + 2]);
         buf.put_slice(&self.value);
+    }
+}
+
+/// A request contains multiple entries to be written into LSM tree.
+pub struct Request {
+    pub entries: Vec<Entry>,
+}
+
+/// `ValuePointer` records the position of value saved in value log.
+pub struct ValuePointer {
+    pub file_id: u32,
+    pub len: u32,
+    pub offset: u32,
+}
+
+/// `EntryReader` reads entries from `BufReader`.
+pub struct EntryReader {
+    key: Vec<u8>,
+    value: Vec<u8>,
+    buf: Vec<u8>,
+    header: Header,
+    record_offset: u32,
+}
+
+impl EntryReader {
+    pub fn new() -> Self {
+        Self {
+            record_offset: 0,
+            key: vec![],
+            value: vec![],
+            buf: vec![0; crate::wal::MAX_HEADER_SIZE],
+            header: Header::default(),
+        }
+    }
+
+    /// Entry returns header, key and value.
+    pub fn entry<R: Read + Seek>(&mut self, _reader: &mut BufReader<R>) -> Result<EntryRef> {
+        unimplemented!()
     }
 }
