@@ -146,7 +146,7 @@ impl TableInner {
         let table_size = data.len();
         let mut inner = TableInner {
             file: MmapFile::Memory { data },
-            opts: opts.clone(),
+            opts,
             table_size,
             id,
             smallest: Bytes::new(),
@@ -159,7 +159,7 @@ impl TableInner {
         };
         inner.init_biggest_and_smallest()?;
 
-        if matches!(opts.checksum_mode, OnTableAndBlockRead | OnTableRead) {
+        if matches!(inner.opts.checksum_mode, OnTableAndBlockRead | OnTableRead) {
             inner.verify_checksum()?;
         }
 
