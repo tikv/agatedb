@@ -9,6 +9,8 @@ use handler::LevelHandler;
 
 use crate::closer::Closer;
 use crate::format::{get_ts, key_with_ts, user_key};
+use crate::table::{MergeIterator, TableIterators};
+use crate::util::{KeyComparator, COMPARATOR};
 use crate::value::Value;
 use crate::{AgateOptions, Table};
 use crate::{Error, Result};
@@ -267,6 +269,62 @@ impl Core {
     }
 
     fn compact_build_tables(&self, level: usize, compact_def: &CompactDef) -> Result<Vec<Table>> {
+        // TODO: this implementation is very very trivial
+
+        // TODO: check prefix
+
+        let mut valid = vec![];
+
+        for table in &compact_def.bot {
+            // TODO: check valid
+            valid.push(table.clone());
+        }
+
+        let make_iterator = || {
+            let mut iters = vec![];
+
+            if level == 0 {
+                for table in compact_def.top.iter().rev() {
+                    iters.push(Box::new(TableIterators::from(
+                        table.new_iterator(crate::table::ITERATOR_NOCACHE),
+                    )));
+                }
+            } else if compact_def.top.len() > 0 {
+                assert_eq!(compact_def.top.len(), 1);
+                iters.push(Box::new(TableIterators::from(
+                    compact_def.top[0].new_iterator(crate::table::ITERATOR_NOCACHE),
+                )));
+            }
+            for table in &valid {
+                iters.push(Box::new(TableIterators::from(
+                    table.new_iterator(crate::table::ITERATOR_NOCACHE),
+                )));
+            }
+            iters
+        };
+
+        let mut new_tables = vec![];
+        for kr in &compact_def.splits {
+            let iters = make_iterator();
+            new_tables.push(self.sub_compact(
+                MergeIterator::from_iterators(iters, false),
+                kr,
+                compact_def,
+            )?);
+        }
+
+        // TODO: sync dir
+        new_tables.sort_by(|x, y| COMPARATOR.compare_key(x.biggest(), y.biggest()));
+
+        Ok(new_tables)
+    }
+
+    fn sub_compact(
+        &self,
+        iter: Box<TableIterators>,
+        kr: &KeyRange,
+        compact_def: &CompactDef,
+    ) -> Result<Table> {
         unimplemented!()
     }
 

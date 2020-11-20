@@ -589,20 +589,29 @@ mod tests {
         }
     }
 
-    fn with_agate_test(f: impl FnOnce(Agate) -> ()) {
-        let tmp_dir = TempDir::new("agatedb").unwrap();
-        let mut options = AgateOptions::default();
+    fn with_agate_test(f: impl FnOnce(Agate) -> () + Send + 'static) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let tmp_dir = TempDir::new("agatedb").unwrap();
+            let mut options = AgateOptions::default();
+    
+            options
+                .create()
+                .in_memory(false)
+                .value_log_file_size(4 << 20);
+    
+            options.mem_table_size = 1 << 14;
+            let agate = options.open(&tmp_dir).unwrap();
+            f(agate);
+            helper_dump_dir(tmp_dir.path());
+            tmp_dir.close().unwrap();
+            tx.send(()).expect("failed to complete test");
+        });
 
-        options
-            .create()
-            .in_memory(false)
-            .value_log_file_size(4 << 20);
-
-        options.mem_table_size = 1 << 14;
-        let agate = options.open(&tmp_dir).unwrap();
-        f(agate);
-        helper_dump_dir(tmp_dir.path());
-        tmp_dir.close().unwrap();
+        match rx.recv_timeout(std::time::Duration::from_secs(60)) {
+            Ok(_) => handle.join().expect("thread panic"),
+            Err(_) => panic!("test timeout exceed")
+        }
     }
 
     #[test]
