@@ -147,6 +147,9 @@ impl Default for AgateOptions {
             level_size_multiplier: 10,
             max_levels: 7,
             // agate options
+            // although MEMTABLE_VIEW_MAX is 20, it is possible that
+            // during the compaction process, memtable would exceed num_memtables.
+            // therefore, set it to 5 for now.
             num_memtables: 5,
             in_memory: false,
             sync_writes: false,
