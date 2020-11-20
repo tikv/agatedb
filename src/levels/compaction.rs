@@ -6,35 +6,60 @@ use bytes::Bytes;
 
 use super::LevelHandler;
 use crate::Table;
+use crate::util::{COMPARATOR, KeyComparator};
 
-#[derive(PartialEq, Clone)]
-pub enum KeyRange {
-    Bound { left: Bytes, right: Bytes },
-    Inf,
+// TODO: use enum for this struct
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct KeyRange {
+    pub left: Bytes,
+    pub right: Bytes,
+    pub inf: bool,
 }
 
 impl KeyRange {
     pub fn is_empty(&self) -> bool {
-        match self {
-            KeyRange::Inf => false,
-            KeyRange::Bound { left, right } => left.is_empty() && right.is_empty(),
+        if self.inf {
+            false
+        } else {
+            self.left.is_empty() && self.right.is_empty()
         }
     }
 
     pub fn inf() -> Self {
-        KeyRange::Inf
+        Self {
+            left: Bytes::new(),
+            right: Bytes::new(),
+            inf: true
+        }
     }
 
     pub fn new(left: Bytes, right: Bytes) -> Self {
-        KeyRange::Bound { left, right }
+        Self { left, right, inf: false }
+    }
+
+    pub fn extend(&mut self, range: Self) {
+        if self.is_empty() {
+            *self = range;
+            return;
+        }
+        if range.left.len() == 0 || COMPARATOR.compare_key(&range.left, &self.left) == std::cmp::Ordering::Less {
+            self.left = range.left.clone();
+        }
+        if range.right.len() == 0 || COMPARATOR.compare_key(&range.left, &self.left) == std::cmp::Ordering::Greater {
+            self.right = range.right.clone();
+        }
+        if range.inf {
+            self.inf = true;
+        }
     }
 }
 
 impl Default for KeyRange {
     fn default() -> Self {
-        KeyRange::Bound {
+        Self {
             left: Bytes::new(),
             right: Bytes::new(),
+            inf: false
         }
     }
 }
@@ -46,9 +71,10 @@ pub struct LevelCompactStatus {
 }
 
 impl LevelCompactStatus {
-    pub fn remove(&mut self, dst: KeyRange) -> bool {
+    pub fn remove(&mut self, dst: &KeyRange) -> bool {
         let prev_ranges_len = self.ranges.len();
-        self.ranges = self.ranges.into_iter().filter(|x| x != &dst).collect();
+        // TODO: remove in place
+        self.ranges = self.ranges.iter().filter(|x| x != &dst).cloned().collect();
 
         prev_ranges_len != self.ranges.len()
     }
@@ -59,6 +85,7 @@ pub struct CompactStatus {
     pub tables: HashMap<u64, ()>,
 }
 
+#[derive(Clone)]
 pub struct CompactDef {
     pub compactor_id: usize,
     pub this_level: Arc<RwLock<LevelHandler>>,
@@ -75,7 +102,7 @@ pub struct CompactDef {
 
     pub drop_prefixes: Vec<Bytes>,
 
-    pub targets: Targets
+    pub targets: Targets,
 }
 
 impl CompactDef {
@@ -95,13 +122,13 @@ impl CompactDef {
             drop_prefixes: vec![],
             top: vec![],
             bot: vec![],
-            targets: Targets::new()
+            targets: Targets::new(),
         }
     }
 }
 
 impl CompactStatus {
-    pub fn delete(&mut self, compact_def: CompactDef) {
+    pub fn delete(&mut self, compact_def: &CompactDef) {
         // TODO: level is immutable, we could access it without read
         let tl = compact_def.this_level.read().unwrap().level;
         assert!(tl < self.levels.len() - 1);
@@ -111,28 +138,29 @@ impl CompactStatus {
         let next_level_id = compact_def.next_level.read().unwrap().level;
 
         this_level.del_size -= compact_def.this_size;
-        let mut found = this_level.remove(compact_def.this_range);
+        let mut found = this_level.remove(&compact_def.this_range);
         drop(this_level);
         if !compact_def.next_range.is_empty() {
             let next_level = &mut self.levels[next_level_id];
-            found = next_level.remove(compact_def.next_range) && found;
+            found = next_level.remove(&compact_def.next_range) && found;
         }
 
         if !found {
-            let this = compact_def.this_range;
-            let next = compact_def.next_range;
-
+            let this = compact_def.this_range.clone();
+            let next = compact_def.next_range.clone();
+            println!("looking for {:?} in this level", this);
+            println!("looking for {:?} in next level", next);
             panic!("key range not found");
         }
 
-        for table in compact_def.top {
+        for table in compact_def.top.iter() {
             assert!(self.tables.get(&table.id()).is_some());
             // TODO: delete table
         }
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CompactionPriority {
     pub level: usize,
     pub score: f64,
@@ -141,6 +169,7 @@ pub struct CompactionPriority {
     pub targets: Arc<Targets>,
 }
 
+#[derive(Clone, Debug)]
 pub struct Targets {
     pub base_level: usize,
     pub target_size: Vec<u64>,
@@ -152,7 +181,7 @@ impl Targets {
         Self {
             base_level: 0,
             target_size: vec![],
-            file_size: vec![]
+            file_size: vec![],
         }
     }
 }

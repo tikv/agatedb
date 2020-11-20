@@ -1,7 +1,9 @@
 mod compaction;
 mod handler;
 
-use compaction::{CompactDef, CompactStatus, CompactionPriority, LevelCompactStatus, Targets, KeyRange};
+use compaction::{
+    CompactDef, CompactStatus, CompactionPriority, KeyRange, LevelCompactStatus, Targets,
+};
 use handler::LevelHandler;
 
 use crate::closer::Closer;
@@ -15,7 +17,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use crossbeam_channel::{select, tick};
 use yatp::task::callback::Handle;
 
@@ -69,7 +71,7 @@ impl Core {
         while !self.levels[0].write()?.try_add_l0_table(table.clone()) {
             println!("L0 stalled");
             // TODO: enhance stall logic
-            std::thread::sleep(std::time::Duration::from_millis(10));
+            std::thread::sleep(std::time::Duration::from_millis(1000));
         }
 
         Ok(())
@@ -108,30 +110,63 @@ impl Core {
         Ok(max_value)
     }
 
-    fn fill_tables_l0(&self) -> Result<()> {
-        unimplemented!()
+    fn fill_tables_l0_to_lbase(&self, compact_def: &CompactDef) -> Result<()> {
+        Ok(())
     }
 
-    fn fill_tables(&self) -> Result<()> {
-        unimplemented!()
+    fn fill_tables_l0_to_l0(&self, compact_def: &mut CompactDef) -> Result<()> {
+        if compact_def.compactor_id != 0 {
+            return Err(Error::CustomError("only compactor zero can compact L0 to L0".to_string()));
+        }
+        // TODO: should compact_def be mutable?
+        compact_def.next_level = self.levels[0].clone();
+        compact_def.next_range = KeyRange::default();
+        compact_def.bot = vec![];
+
+        let this_level = compact_def.this_level.write().unwrap();
+        let next_level = compact_def.next_level.write().unwrap();
+        let cpt_status = self.cpt_status.write().unwrap();
+
+        let top = &mut this_level.tables;
+        let out = vec![];
+        let now = std::time::Instant::now();
+
+        Ok(())
     }
 
-    fn run_compact_def(&self, idx: usize, level: usize, compact_def: CompactDef) -> Result<()> {
+    fn fill_tables_l0(&self, compact_def: &mut CompactDef) -> Result<()> {
+        if let Err(err) = self.fill_tables_l0_to_lbase(compact_def) {
+            println!("error when fill L0 to Lbase {:?}", err);
+            return self.fill_tables_l0_to_l0(compact_def);
+        }
+        Ok(())
+    }
+
+    fn fill_tables(&self, compact_def: &CompactDef) -> Result<()> {
+        // TODO: implement this function
+        Ok(())
+    }
+
+    fn run_compact_def(
+        &self,
+        idx: usize,
+        level: usize,
+        compact_def: &mut CompactDef,
+    ) -> Result<()> {
         if compact_def.targets.file_size.len() == 0 {
             return Err(Error::CustomError("targets not set".to_string()));
         }
 
-        let this_level = compact_def.this_level;
-        let next_level = compact_def.next_level;
+        let this_level = compact_def.this_level.clone();
+        let next_level = compact_def.next_level.clone();
         let this_level_id = this_level.read().unwrap().level;
         let next_level_id = next_level.read().unwrap().level;
 
         assert_eq!(compact_def.splits.len(), 0);
 
         if this_level_id == 0 && next_level_id == 0 {
-
         } else {
-            self.add_splits(&mut compact_def);
+            self.add_splits(compact_def);
         }
 
         if compact_def.splits.len() == 0 {
@@ -143,23 +178,28 @@ impl Core {
 
     fn add_splits(&self, compact_def: &mut CompactDef) {
         const N: usize = 3;
+        // assume this_range is never inf
         let mut skr = compact_def.this_range.clone();
-        skr.extend(compact_def.next_range);
+        skr.extend(compact_def.next_range.clone());
 
-        let mut add_range = |right| {
+        let mut add_range = |splits: &mut Vec<KeyRange>, right| {
             skr.right = right;
-            compact_def.splits.push(skr.clone());
+            splits.push(skr.clone());
             skr.left = skr.right.clone();
         };
 
         for (i, table) in compact_def.bot.iter().enumerate() {
             if i == compact_def.bot.len() - 1 {
-                add_range(Bytes::new());
+                add_range(&mut compact_def.splits, Bytes::new());
                 return;
             }
 
             if i % N == N - 1 {
-               right = key_with_ts(BytesMut::, ts)
+                let biggest = table.biggest();
+                let mut buf = BytesMut::with_capacity(biggest.len() + 8);
+                buf.put(&biggest[..]);
+                let right = key_with_ts(buf, std::u64::MAX);
+                add_range(&mut compact_def.splits, right);
             }
         }
     }
@@ -175,25 +215,27 @@ impl Core {
 
         println!("compact #{} on level {}", idx, level);
 
-        let next_level;
+        let mut compact_def;
 
         if level == 0 {
-            self.fill_tables_l0()?;
-            next_level = self.levels[1].clone();
+            let next_level = self.levels[1].clone();
+            compact_def = CompactDef::new(idx, self.levels[level].clone(), next_level);
+            self.fill_tables_l0(&mut compact_def)?;
         } else {
-            self.fill_tables()?;
-            next_level = self.levels[level + 1].clone();
+            let next_level = self.levels[level + 1].clone();
+            compact_def = CompactDef::new(idx, self.levels[level].clone(), next_level);
+            self.fill_tables(&compact_def)?;
         };
 
-        let compact_def = CompactDef::new(idx, self.levels[level].clone(), next_level);
-
-        if let Err(err) = self.run_compact_def(idx, level, compact_def) {
+        if let Err(err) = self.run_compact_def(idx, level, &mut compact_def) {
             println!("failed on compaction {:?}", err);
-            self.cpt_status.write().unwrap().delete(compact_def);
+            self.cpt_status.write().unwrap().delete(&compact_def);
         }
 
+        // TODO: will compact_def be used now?
+
         println!("compaction success");
-        self.cpt_status.write().unwrap().delete(compact_def);
+        self.cpt_status.write().unwrap().delete(&compact_def);
 
         Ok(())
     }
@@ -330,6 +372,7 @@ impl LevelsController {
                 if idx == 0 {
                     prios = move_l0_to_front(prios);
                 }
+                println!("{:?}", prios);
 
                 for p in prios {
                     if idx == 0 && p.level == 0 {
@@ -344,9 +387,10 @@ impl LevelsController {
             };
 
             let ticker = tick(Duration::from_millis(50));
+
             select! {
-                recv(ticker) -> _ => return,
-                recv(closer.has_been_closed()) -> _ => run_once()
+                recv(ticker) -> _ => run_once(),
+                recv(closer.has_been_closed()) -> _ => return
             }
         });
     }

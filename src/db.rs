@@ -539,14 +539,14 @@ impl Core {
             cnt += req.entries.len();
 
             while let Err(err) = self.ensure_room_for_write() {
-                std::thread::sleep(std::time::Duration::from_millis(10));
+                std::thread::sleep(std::time::Duration::from_millis(1000));
                 println!("wait for room... {:?}", err)
             }
 
             self.write_to_lsm(req)?;
         }
 
-        println!("{} entries written", cnt);
+        // println!("{} entries written", cnt);
 
         Ok(())
     }

@@ -561,6 +561,14 @@ impl Table {
     pub fn id(&self) -> u64 {
         self.inner.id()
     }
+
+    pub fn biggest(&self) -> &Bytes {
+        self.inner.biggest()
+    }
+
+    pub fn smallest(&self) -> &Bytes {
+        self.inner.smallest()
+    }
 }
 
 fn id_to_filename(id: u64) -> String {
