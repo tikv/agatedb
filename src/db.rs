@@ -147,7 +147,7 @@ impl Default for AgateOptions {
             level_size_multiplier: 10,
             max_levels: 7,
             // agate options
-            num_memtables: 20,
+            num_memtables: 5,
             in_memory: false,
             sync_writes: false,
             value_threshold: 1 << 10,
