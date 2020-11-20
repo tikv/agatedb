@@ -2,7 +2,8 @@ mod compaction;
 mod handler;
 
 use compaction::{
-    CompactDef, CompactStatus, CompactionPriority, KeyRange, LevelCompactStatus, Targets,
+    get_key_range, get_key_range_single, CompactDef, CompactStatus, CompactionPriority, KeyRange,
+    LevelCompactStatus, Targets,
 };
 use handler::LevelHandler;
 
@@ -111,12 +112,51 @@ impl Core {
     }
 
     fn fill_tables_l0_to_lbase(&self, compact_def: &CompactDef) -> Result<()> {
+        let next_level = compact_def.next_level.write().unwrap();
+        if next_level.level == 0 {
+            panic!("base level can't be zero");
+        }
+
+        if compact_def.prios.adjusted > 0.0 && compact_def.prios.adjusted < 1.0 {
+            return Err(Error::CustomError(
+                "score less than 1.0, not compact to Lbase".to_string(),
+            ));
+        }
+
+        let this_level = compact_def.this_level.write().unwrap();
+        let next_level = compact_def.next_level.write().unwrap();
+
+        if this_level.tables.is_empty() {
+            return Err(Error::CustomError("not table in this level".to_string()));
+        }
+
+        if compact_def.drop_prefixes.is_empty() {
+            let mut out = vec![];
+            let kr = KeyRange::default();
+            for table in this_level.tables.iter() {
+                let dkr = get_key_range_single(table);
+                if kr.overlaps_with(dkr) {
+                    out.push(table.clone());
+                    kr.extend(dkr);
+                } else {
+                    break;
+                }
+            }
+            compact_def.top = out;
+        }
+
+        compact_def.this_range = get_key_range(&compact_def.top);
+
+        unimplemented!();
+
         Ok(())
     }
 
     fn fill_tables_l0_to_l0(&self, compact_def: &mut CompactDef) -> Result<()> {
         if compact_def.compactor_id != 0 {
-            return Err(Error::CustomError("only compactor zero can compact L0 to L0".to_string()));
+            return Err(Error::CustomError(
+                "only compactor zero can compact L0 to L0".to_string(),
+            ));
         }
         // TODO: should compact_def be mutable?
         compact_def.next_level = self.levels[0].clone();
@@ -127,9 +167,37 @@ impl Core {
         let next_level = compact_def.next_level.write().unwrap();
         let cpt_status = self.cpt_status.write().unwrap();
 
-        let top = &mut this_level.tables;
         let out = vec![];
         let now = std::time::Instant::now();
+
+        for table in this_level.tables.iter() {
+            if table.size() > 2 * compact_def.targets.file_size[0] {
+                // file already big, don't include it
+                continue;
+            }
+            // TODO: created at logic
+            if cpt_status.tables.get(&table.id()).is_some() {
+                continue;
+            }
+            out.push(table.clone());
+        }
+
+        if out.len() < 4 {
+            return Err(Error::CustomError("not enough table to merge".to_string()));
+        }
+
+        compact_def.this_range = KeyRange::inf();
+        compact_def.top = out;
+
+        cpt_status.levels[this_level.level]
+            .ranges
+            .push(KeyRange::inf());
+
+        for table in out.iter() {
+            assert!(cpt_status.tables.insert(table.id()), false);
+        }
+
+        compact_def.targets.file_size[0] = std::u64::MAX;
 
         Ok(())
     }
@@ -197,7 +265,7 @@ impl Core {
             if i % N == N - 1 {
                 let biggest = table.biggest();
                 let mut buf = BytesMut::with_capacity(biggest.len() + 8);
-                buf.put(&biggest[..]);
+                buf.put(user_key(&biggest));
                 let right = key_with_ts(buf, std::u64::MAX);
                 add_range(&mut compact_def.splits, right);
             }
@@ -219,11 +287,23 @@ impl Core {
 
         if level == 0 {
             let next_level = self.levels[1].clone();
-            compact_def = CompactDef::new(idx, self.levels[level].clone(), next_level);
+            compact_def = CompactDef::new(
+                idx,
+                self.levels[level].clone(),
+                next_level,
+                cpt_prio,
+                cpt_prio.targets.clone(),
+            );
             self.fill_tables_l0(&mut compact_def)?;
         } else {
             let next_level = self.levels[level + 1].clone();
-            compact_def = CompactDef::new(idx, self.levels[level].clone(), next_level);
+            compact_def = CompactDef::new(
+                idx,
+                self.levels[level].clone(),
+                next_level,
+                cpt_prio,
+                cpt_prio.targets.clone(),
+            );
             self.fill_tables(&compact_def)?;
         };
 

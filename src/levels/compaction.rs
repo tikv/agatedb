@@ -1,12 +1,13 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use std::sync::{Arc, RwLock};
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 
 use super::LevelHandler;
+use crate::format::{key_with_ts, user_key};
+use crate::util::{KeyComparator, COMPARATOR};
 use crate::Table;
-use crate::util::{COMPARATOR, KeyComparator};
 
 // TODO: use enum for this struct
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -29,12 +30,16 @@ impl KeyRange {
         Self {
             left: Bytes::new(),
             right: Bytes::new(),
-            inf: true
+            inf: true,
         }
     }
 
     pub fn new(left: Bytes, right: Bytes) -> Self {
-        Self { left, right, inf: false }
+        Self {
+            left,
+            right,
+            inf: false,
+        }
     }
 
     pub fn extend(&mut self, range: Self) {
@@ -42,10 +47,14 @@ impl KeyRange {
             *self = range;
             return;
         }
-        if range.left.len() == 0 || COMPARATOR.compare_key(&range.left, &self.left) == std::cmp::Ordering::Less {
+        if range.left.len() == 0
+            || COMPARATOR.compare_key(&range.left, &self.left) == std::cmp::Ordering::Less
+        {
             self.left = range.left.clone();
         }
-        if range.right.len() == 0 || COMPARATOR.compare_key(&range.left, &self.left) == std::cmp::Ordering::Greater {
+        if range.right.len() == 0
+            || COMPARATOR.compare_key(&range.left, &self.left) == std::cmp::Ordering::Greater
+        {
             self.right = range.right.clone();
         }
         if range.inf {
@@ -59,7 +68,7 @@ impl Default for KeyRange {
         Self {
             left: Bytes::new(),
             right: Bytes::new(),
-            inf: false
+            inf: false,
         }
     }
 }
@@ -82,7 +91,7 @@ impl LevelCompactStatus {
 
 pub struct CompactStatus {
     pub levels: Vec<LevelCompactStatus>,
-    pub tables: HashMap<u64, ()>,
+    pub tables: HashSet<u64>,
 }
 
 #[derive(Clone)]
@@ -90,6 +99,8 @@ pub struct CompactDef {
     pub compactor_id: usize,
     pub this_level: Arc<RwLock<LevelHandler>>,
     pub next_level: Arc<RwLock<LevelHandler>>,
+    pub targets: Arc<Targets>,
+    pub prios: CompactionPriority,
 
     pub this_range: KeyRange,
     pub next_range: KeyRange,
@@ -101,8 +112,6 @@ pub struct CompactDef {
     pub this_size: u64,
 
     pub drop_prefixes: Vec<Bytes>,
-
-    pub targets: Targets,
 }
 
 impl CompactDef {
@@ -110,6 +119,8 @@ impl CompactDef {
         compactor_id: usize,
         this_level: Arc<RwLock<LevelHandler>>,
         next_level: Arc<RwLock<LevelHandler>>,
+        prios: CompactionPriority,
+        targets: Arc<Targets>,
     ) -> Self {
         Self {
             compactor_id,
@@ -122,7 +133,8 @@ impl CompactDef {
             drop_prefixes: vec![],
             top: vec![],
             bot: vec![],
-            targets: Targets::new(),
+            targets,
+            prios,
         }
     }
 }
@@ -184,4 +196,44 @@ impl Targets {
             file_size: vec![],
         }
     }
+}
+
+pub fn get_key_range(tables: &[Table]) -> KeyRange {
+    if tables.is_empty() {
+        return KeyRange::default();
+    }
+
+    let mut smallest = tables[0].smallest().clone();
+    let mut biggest = tables[0].biggest().clone();
+
+    for i in 1..tables.len() {
+        if COMPARATOR.compare_key(tables[i].smallest(), &smallest) == std::cmp::Ordering::Less {
+            smallest = tables[i].smallest().clone();
+        }
+        if COMPARATOR.compare_key(tables[i].biggest(), &biggest) == std::cmp::Ordering::Greater {
+            biggest = tables[i].biggest().clone();
+        }
+    }
+    let mut smallest_buf = BytesMut::with_capacity(smallest.len() + 8);
+    let mut biggest_buf = BytesMut::with_capacity(biggest.len() + 8);
+    smallest_buf.extend_from_slice(user_key(&smallest));
+    biggest_buf.extend_from_slice(user_key(&biggest));
+    return KeyRange::new(
+        key_with_ts(smallest_buf, std::u64::MAX),
+        key_with_ts(biggest_buf, 0),
+    );
+}
+
+pub fn get_key_range_single(table: &Table) -> KeyRange {
+    let mut smallest = table.smallest().clone();
+    let mut biggest = table.biggest().clone();
+
+    let mut smallest_buf = BytesMut::with_capacity(smallest.len() + 8);
+    let mut biggest_buf = BytesMut::with_capacity(biggest.len() + 8);
+    smallest_buf.extend_from_slice(user_key(&smallest));
+    biggest_buf.extend_from_slice(user_key(&biggest));
+    return KeyRange::new(
+        key_with_ts(smallest_buf, std::u64::MAX),
+        key_with_ts(biggest_buf, 0),
+    );
 }
