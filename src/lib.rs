@@ -14,6 +14,7 @@ mod value;
 mod wal;
 
 pub use format::{get_ts, key_with_ts};
+pub use opt::ChecksumVerificationMode;
 pub use opt::Options as TableOptions;
 pub use table::builder::Builder as TableBuilder;
 pub use table::Table;
