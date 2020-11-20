@@ -13,9 +13,9 @@ use crate::table::{MergeIterator, TableIterators};
 use crate::util::{has_any_prefixes, same_key, KeyComparator, COMPARATOR};
 use crate::value::{Value, ValuePointer};
 use crate::AgateIterator;
+use crate::TableBuilder;
 use crate::{AgateOptions, Table};
 use crate::{Error, Result};
-use crate::{TableBuilder, TableOptions};
 
 use std::collections::HashSet;
 use std::sync::atomic::AtomicU64;

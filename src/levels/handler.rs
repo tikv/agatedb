@@ -1,6 +1,6 @@
 use crate::structs::AgateIterator;
 use crate::table::{MergeIterator, TableIterators};
-use crate::util::{search, KeyComparator, COMPARATOR};
+use crate::util::{KeyComparator, COMPARATOR};
 use crate::value::Value;
 use crate::Result;
 use crate::{AgateOptions, Table};
