@@ -59,6 +59,8 @@ impl KeyRange {
         }
         if range.inf {
             self.inf = true;
+            self.left = Bytes::new();
+            self.right = Bytes::new();
         }
     }
 
@@ -124,6 +126,8 @@ pub struct CompactDef {
     pub compactor_id: usize,
     pub this_level: Arc<RwLock<LevelHandler>>,
     pub next_level: Arc<RwLock<LevelHandler>>,
+    pub this_level_id: usize,
+    pub next_level_id: usize,
     pub targets: Targets,
     pub prios: CompactionPriority,
 
@@ -143,7 +147,9 @@ impl CompactDef {
     pub fn new(
         compactor_id: usize,
         this_level: Arc<RwLock<LevelHandler>>,
+        this_level_id: usize,
         next_level: Arc<RwLock<LevelHandler>>,
+        next_level_id: usize,
         prios: CompactionPriority,
         targets: Targets,
     ) -> Self {
@@ -151,6 +157,8 @@ impl CompactDef {
             compactor_id,
             this_level,
             next_level,
+            this_level_id,
+            next_level_id,
             this_range: KeyRange::default(),
             next_range: KeyRange::default(),
             splits: vec![],
@@ -196,19 +204,22 @@ impl CompactStatus {
         }
     }
 
-    pub fn compare_and_add(
-        &mut self,
-        compact_def: &CompactDef,
-        this_level: usize,
-        next_level: usize,
-    ) -> Result<()> {
-        let tl = this_level;
+    pub fn compare_and_add(&mut self, compact_def: &CompactDef) -> Result<()> {
+        let tl = compact_def.this_level_id;
         assert!(tl < self.levels.len() - 1);
+        let this_level = compact_def.this_level_id;
+        let next_level = compact_def.next_level_id;
         if self.levels[this_level].overlaps_with(&compact_def.this_range) {
-            return Err(Error::CustomError("overlap with this level".to_string()));
+            return Err(Error::CustomError(format!(
+                "{:?} overlap with this level {:?}",
+                compact_def.this_range, self.levels[this_level].ranges
+            )));
         }
         if self.levels[next_level].overlaps_with(&compact_def.next_range) {
-            return Err(Error::CustomError("overlap with next level".to_string()));
+            return Err(Error::CustomError(format!(
+                "{:?} overlap with next level {:?}",
+                compact_def.next_range, self.levels[next_level].ranges
+            )));
         }
 
         self.levels[this_level]

@@ -12,7 +12,7 @@ use crate::Error;
 use crate::Result;
 
 use bytes::{Buf, Bytes};
-use iterator::{Iterator as RefTableIterator};
+use iterator::Iterator as RefTableIterator;
 use memmap::{Mmap, MmapOptions};
 use prost::Message;
 use proto::meta::{BlockOffset, Checksum, TableIndex};

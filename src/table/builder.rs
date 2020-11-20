@@ -151,7 +151,7 @@ impl Builder {
     }
 
     /// Check if entries reach its capacity
-    pub fn reach_capacity(&self, capacity: u64) -> bool {
+    pub fn reach_capacity(&self) -> bool {
         let block_size = self.buf.len() as u32 + // length of buffer
                                  self.entry_offsets.len() as u32 * 4 + // all entry offsets size
                                  4 + // count of all entry offsets
@@ -160,7 +160,7 @@ impl Builder {
         let estimated_size = block_size +
                                   4 + // index length
                                   5 * self.table_index.offsets.len() as u32; // TODO: why 5?
-        estimated_size as u64 > capacity
+        estimated_size as u64 > self.options.table_capacity
     }
 
     /// Finalize the table
@@ -221,6 +221,7 @@ mod tests {
     fn test_table_index() {
         // TODO: use cache
         let opts = Options {
+            table_capacity: 0,
             block_size: 4 * 1024,
             bloom_false_positive: 0.01,
             table_size: 30 << 20,
@@ -268,6 +269,7 @@ mod tests {
             block_size: 0,
             bloom_false_positive: if with_blooms { 0.01 } else { 0.0 },
             table_size: 0,
+            table_capacity: 0,
             checksum_mode: crate::opt::ChecksumVerificationMode::OnTableAndBlockRead,
         };
 
@@ -299,6 +301,7 @@ mod tests {
             bloom_false_positive: 0.1,
             block_size: 0,
             table_size: 0,
+            table_capacity: 0,
             checksum_mode: crate::opt::ChecksumVerificationMode::NoVerification,
         };
 

@@ -464,7 +464,7 @@ impl Core {
         if ft.mt.skl.is_empty() {
             return Ok(());
         }
-        let table_opts = opt::build_table_options(&self);
+        let table_opts = opt::build_table_options(&self.opts);
         let mut builder = Self::build_l0_table(ft, table_opts.clone());
 
         if builder.is_empty() {
@@ -539,7 +539,7 @@ impl Core {
             cnt += req.entries.len();
 
             while let Err(err) = self.ensure_room_for_write() {
-                std::thread::sleep(std::time::Duration::from_millis(1000));
+                std::thread::sleep(std::time::Duration::from_millis(10));
                 println!("wait for room... {:?}", err)
             }
 
@@ -594,12 +594,12 @@ mod tests {
         let handle = std::thread::spawn(move || {
             let tmp_dir = TempDir::new("agatedb").unwrap();
             let mut options = AgateOptions::default();
-    
+
             options
                 .create()
                 .in_memory(false)
                 .value_log_file_size(4 << 20);
-    
+
             options.mem_table_size = 1 << 14;
             let agate = options.open(&tmp_dir).unwrap();
             f(agate);
@@ -610,7 +610,7 @@ mod tests {
 
         match rx.recv_timeout(std::time::Duration::from_secs(60)) {
             Ok(_) => handle.join().expect("thread panic"),
-            Err(_) => panic!("test timeout exceed")
+            Err(_) => panic!("test timeout exceed"),
         }
     }
 

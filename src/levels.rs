@@ -10,10 +10,12 @@ use handler::LevelHandler;
 use crate::closer::Closer;
 use crate::format::{get_ts, key_with_ts, user_key};
 use crate::table::{MergeIterator, TableIterators};
-use crate::util::{KeyComparator, COMPARATOR};
-use crate::value::Value;
+use crate::util::{has_any_prefixes, same_key, KeyComparator, COMPARATOR};
+use crate::value::{Value, ValuePointer};
+use crate::AgateIterator;
 use crate::{AgateOptions, Table};
 use crate::{Error, Result};
+use crate::{TableBuilder, TableOptions};
 
 use std::collections::HashSet;
 use std::sync::atomic::AtomicU64;
@@ -74,7 +76,7 @@ impl Core {
         while !self.levels[0].write()?.try_add_l0_table(table.clone()) {
             println!("L0 stalled");
             // TODO: enhance stall logic
-            std::thread::sleep(std::time::Duration::from_millis(1000));
+            std::thread::sleep(std::time::Duration::from_millis(50));
         }
 
         Ok(())
@@ -114,13 +116,13 @@ impl Core {
     }
 
     fn fill_tables_l0_to_lbase(&self, compact_def: &mut CompactDef) -> Result<()> {
+        if compact_def.next_level_id == 0 {
+            panic!("base level can't be zero");
+        }
+
         let this_level = compact_def.this_level.write().unwrap();
         let next_level = compact_def.next_level.write().unwrap();
         let mut cpt_status = self.cpt_status.write().unwrap();
-
-        if next_level.level == 0 {
-            panic!("base level can't be zero");
-        }
 
         if compact_def.prios.adjusted > 0.0 && compact_def.prios.adjusted < 1.0 {
             return Err(Error::CustomError(
@@ -159,7 +161,7 @@ impl Core {
             compact_def.next_range = get_key_range(&compact_def.bot);
         }
 
-        cpt_status.compare_and_add(&compact_def, this_level.level, next_level.level)?;
+        cpt_status.compare_and_add(&compact_def)?;
 
         Ok(())
     }
@@ -172,11 +174,12 @@ impl Core {
         }
         // TODO: should compact_def be mutable?
         compact_def.next_level = self.levels[0].clone();
+        compact_def.next_level_id = 0;
         compact_def.next_range = KeyRange::default();
         compact_def.bot = vec![];
 
         let this_level = compact_def.this_level.write().unwrap();
-        let next_level = compact_def.next_level.write().unwrap();
+        // next_level and this_level is the same L0, do not need to acquire lock of next level
         let mut cpt_status = self.cpt_status.write().unwrap();
 
         let mut out = vec![];
@@ -209,7 +212,7 @@ impl Core {
             assert!(cpt_status.tables.insert(table.id()), false);
         }
 
-        compact_def.targets.file_size[0] = std::u64::MAX;
+        compact_def.targets.file_size[0] = std::u32::MAX as u64;
 
         Ok(())
     }
@@ -224,7 +227,6 @@ impl Core {
 
     fn fill_tables(&self, compact_def: &CompactDef) -> Result<()> {
         unimplemented!()
-        // Ok(())
     }
 
     fn run_compact_def(
@@ -239,8 +241,8 @@ impl Core {
 
         let this_level = compact_def.this_level.clone();
         let next_level = compact_def.next_level.clone();
-        let this_level_id = this_level.read().unwrap().level;
-        let next_level_id = next_level.read().unwrap().level;
+        let this_level_id = compact_def.this_level_id;
+        let next_level_id = compact_def.next_level_id;
 
         assert_eq!(compact_def.splits.len(), 0);
 
@@ -249,19 +251,22 @@ impl Core {
             self.add_splits(compact_def);
         }
 
-        if compact_def.splits.len() == 0 {
+        if compact_def.splits.is_empty() {
             compact_def.splits.push(KeyRange::default());
         }
 
         let new_tables = self.compact_build_tables(level, compact_def)?;
+        println!("get {} new tables", new_tables.len());
 
         // TODO: add change to manifest
 
         let mut this_level = this_level.write().unwrap();
-        let mut next_level = next_level.write().unwrap();
-
-        next_level.replace_tables(&compact_def.bot, &new_tables)?;
         this_level.delete_tables(&compact_def.top)?;
+        drop(this_level);
+
+        let mut next_level = next_level.write().unwrap();
+        next_level.replace_tables(&compact_def.bot, &new_tables)?;
+        drop(next_level);
 
         // TODO: logging
 
@@ -304,9 +309,16 @@ impl Core {
         };
 
         let mut new_tables = vec![];
+
+        // TODO: multi-thread compaction
+
         for kr in &compact_def.splits {
             let iters = make_iterator();
-            new_tables.push(self.sub_compact(
+            if iters.is_empty() {
+                // TODO: iters should not be empty
+                continue;
+            }
+            new_tables.append(&mut self.sub_compact(
                 MergeIterator::from_iterators(iters, false),
                 kr,
                 compact_def,
@@ -321,16 +333,117 @@ impl Core {
 
     fn sub_compact(
         &self,
-        iter: Box<TableIterators>,
+        mut iter: Box<TableIterators>,
         kr: &KeyRange,
         compact_def: &CompactDef,
-    ) -> Result<Table> {
-        unimplemented!()
+    ) -> Result<Vec<Table>> {
+        // TODO: check overlap and process transaction
+        let mut tables = vec![];
+
+        if kr.left.len() > 0 {
+            iter.seek(&kr.left);
+        } else {
+            iter.rewind();
+        }
+
+        let mut skip_key = BytesMut::new();
+        let mut last_key = BytesMut::new();
+        let mut num_builds = 0;
+        let mut num_versions = 0;
+
+        while iter.valid() {
+            if kr.right.len() > 0 {
+                if COMPARATOR.compare_key(iter.key(), &kr.right) != std::cmp::Ordering::Less {
+                    break;
+                }
+            }
+
+            let mut bopts = crate::opt::build_table_options(&self.opts);
+            bopts.table_size = compact_def.targets.file_size[compact_def.next_level_id];
+            let mut builder = TableBuilder::new(bopts.clone());
+            let mut table_kr = KeyRange::default();
+            let mut vp = ValuePointer::default();
+
+            while iter.valid() {
+                if !compact_def.drop_prefixes.is_empty()
+                    && has_any_prefixes(iter.key(), &compact_def.drop_prefixes)
+                {
+                    // TODO: update stats of vlog
+                }
+
+                if !skip_key.is_empty() {
+                    if same_key(iter.key(), &skip_key) {
+                        // update stats of vlog
+                    } else {
+                        skip_key.clear();
+                    }
+                }
+
+                if !same_key(iter.key(), &last_key) {
+                    if !kr.right.is_empty()
+                        && COMPARATOR.compare_key(iter.key(), &kr.right) != std::cmp::Ordering::Less
+                    {
+                        break;
+                    }
+
+                    if builder.reach_capacity() {
+                        break;
+                    }
+
+                    last_key.clear();
+                    last_key.extend_from_slice(iter.key());
+
+                    num_versions = 0;
+
+                    if table_kr.left.is_empty() {
+                        // TODO: use bytes mut and assemble it later
+                        table_kr.left = Bytes::copy_from_slice(iter.key());
+                    }
+                    table_kr.right = Bytes::copy_from_slice(&last_key);
+
+                    // TODO: range check
+                }
+
+                let vs = iter.value();
+                let version = get_ts(iter.key());
+
+                // TODO: check ts-related properties
+
+                if vs.meta & crate::value::VALUE_POINTER != 0 {
+                    vp.decode(&vs.value);
+                }
+
+                builder.add(&Bytes::copy_from_slice(iter.key()), vs, vp.len);
+
+                iter.next();
+            }
+
+            if builder.is_empty() {
+                continue;
+            }
+
+            let table;
+            let file_id = self.reserve_file_id();
+
+            if self.opts.in_memory {
+                table = Table::open_in_memory(builder.finish(), file_id, bopts)?;
+            } else {
+                let filename = crate::table::new_filename(file_id, &self.opts.path);
+                table = Table::create(&filename, builder.finish(), bopts)?;
+            }
+
+            println!("new table: {}", file_id);
+
+            tables.push(table);
+        }
+
+        Ok(tables)
     }
 
     fn add_splits(&self, compact_def: &mut CompactDef) {
         const N: usize = 3;
         // assume this_range is never inf
+
         let mut skr = compact_def.this_range.clone();
         skr.extend(&compact_def.next_range);
 
@@ -365,7 +478,7 @@ impl Core {
             cpt_prio.targets = self.level_targets();
         }
 
-        println!("compact #{} on level {}", idx, level);
+        // println!("compact #{} on level {}", idx, level);
 
         let mut compact_def;
 
@@ -375,7 +488,9 @@ impl Core {
             compact_def = CompactDef::new(
                 idx,
                 self.levels[level].clone(),
+                level,
                 next_level,
+                1,
                 cpt_prio,
                 targets,
             );
@@ -386,10 +501,14 @@ impl Core {
             compact_def = CompactDef::new(
                 idx,
                 self.levels[level].clone(),
+                level,
                 next_level,
+                level + 1,
                 cpt_prio,
                 targets,
             );
+            // TODO: complete fill_tables
+            return Ok(());
             self.fill_tables(&compact_def)?;
         };
 
@@ -538,7 +657,6 @@ impl LevelsController {
                 if idx == 0 {
                     prios = move_l0_to_front(prios);
                 }
-                println!("{:?}", prios);
 
                 for p in prios {
                     if idx == 0 && p.level == 0 {
@@ -556,9 +674,11 @@ impl LevelsController {
 
             let ticker = tick(Duration::from_millis(50));
 
-            select! {
-                recv(ticker) -> _ => run_once(),
-                recv(closer.has_been_closed()) -> _ => return
+            loop {
+                select! {
+                    recv(ticker) -> _ => run_once(),
+                    recv(closer.has_been_closed()) -> _ => return
+                }
             }
         });
     }
