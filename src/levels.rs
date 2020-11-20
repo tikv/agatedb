@@ -76,7 +76,7 @@ impl Core {
         while !self.levels[0].write()?.try_add_l0_table(table.clone()) {
             println!("L0 stalled");
             // TODO: enhance stall logic
-            std::thread::sleep(std::time::Duration::from_millis(50));
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
         Ok(())
@@ -120,9 +120,8 @@ impl Core {
             panic!("base level can't be zero");
         }
 
-        let this_level = compact_def.this_level.write().unwrap();
-        let next_level = compact_def.next_level.write().unwrap();
-        let mut cpt_status = self.cpt_status.write().unwrap();
+        let this_level = compact_def.this_level.read().unwrap();
+        let next_level = compact_def.next_level.read().unwrap();
 
         if compact_def.prios.adjusted > 0.0 && compact_def.prios.adjusted < 1.0 {
             return Err(Error::CustomError(
@@ -161,7 +160,10 @@ impl Core {
             compact_def.next_range = get_key_range(&compact_def.bot);
         }
 
-        cpt_status.compare_and_add(&compact_def)?;
+        self.cpt_status
+            .write()
+            .unwrap()
+            .compare_and_add(&compact_def)?;
 
         Ok(())
     }
@@ -178,7 +180,7 @@ impl Core {
         compact_def.next_range = KeyRange::default();
         compact_def.bot = vec![];
 
-        let this_level = compact_def.this_level.write().unwrap();
+        let this_level = compact_def.this_level.read().unwrap();
         // next_level and this_level is the same L0, do not need to acquire lock of next level
         let mut cpt_status = self.cpt_status.write().unwrap();
 
@@ -256,17 +258,18 @@ impl Core {
         }
 
         let new_tables = self.compact_build_tables(level, compact_def)?;
-        println!("get {} new tables", new_tables.len());
-
         // TODO: add change to manifest
 
-        let mut this_level = this_level.write().unwrap();
-        this_level.delete_tables(&compact_def.top)?;
-        drop(this_level);
-
-        let mut next_level = next_level.write().unwrap();
-        next_level.replace_tables(&compact_def.bot, &new_tables)?;
-        drop(next_level);
+        if this_level_id != next_level_id {
+            let mut this_level = this_level.write().unwrap();
+            let mut next_level = next_level.write().unwrap();
+            this_level.delete_tables(&compact_def.top)?;
+            next_level.replace_tables(&compact_def.bot, &new_tables)?;
+        } else {
+            let mut this_level = this_level.write().unwrap();
+            this_level.delete_tables(&compact_def.top)?;
+            this_level.replace_tables(&compact_def.bot, &new_tables)?;
+        }
 
         // TODO: logging
 
@@ -432,8 +435,6 @@ impl Core {
                 table = Table::create(&filename, builder.finish(), bopts)?;
             }
 
-            println!("new table: {}", file_id);
-
             tables.push(table);
         }
 
@@ -478,7 +479,7 @@ impl Core {
             cpt_prio.targets = self.level_targets();
         }
 
-        // println!("compact #{} on level {}", idx, level);
+        println!("compact #{} on level {}", idx, level);
 
         let mut compact_def;
 
@@ -508,9 +509,12 @@ impl Core {
                 targets,
             );
             // TODO: complete fill_tables
+            println!("not implemented");
             return Ok(());
             self.fill_tables(&compact_def)?;
         };
+
+        println!("ready to compact");
 
         if let Err(err) = self.run_compact_def(idx, level, &mut compact_def) {
             println!("failed on compaction {:?}", err);
@@ -542,7 +546,7 @@ impl Core {
 
         let mut db_size = self.last_level().read().unwrap().total_size;
 
-        for i in self.levels.len() - 1..0 {
+        for i in (0..self.levels.len()).rev() {
             let ltarget = adjust(db_size);
             targets.target_size[i] = ltarget;
             if targets.base_level == 0 && ltarget <= self.opts.base_level_size {
@@ -593,6 +597,8 @@ impl Core {
         );
 
         let cpt_status = self.cpt_status.read().unwrap();
+
+        // println!("{:?}", targets);
 
         for i in 1..self.levels.len() {
             let del_size = cpt_status.levels[i].del_size;
@@ -657,6 +663,8 @@ impl LevelsController {
                 if idx == 0 {
                     prios = move_l0_to_front(prios);
                 }
+
+                // println!("{:?}", prios);
 
                 for p in prios {
                     if idx == 0 && p.level == 0 {

@@ -540,7 +540,7 @@ impl Core {
 
             while let Err(err) = self.ensure_room_for_write() {
                 std::thread::sleep(std::time::Duration::from_millis(10));
-                println!("wait for room... {:?}", err)
+                // println!("wait for room... {:?}", err)
             }
 
             self.write_to_lsm(req)?;
@@ -691,6 +691,7 @@ mod tests {
             for request in requests.chunks(100) {
                 agate.write_requests(request.to_vec()).unwrap();
             }
+            println!("verifying requests...");
             verify_requests(10000, &agate);
         });
     }
