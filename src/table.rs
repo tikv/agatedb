@@ -12,7 +12,7 @@ use crate::Error;
 use crate::Result;
 
 use bytes::{Buf, Bytes};
-use iterator::{Iterator as RefTableIterator, ITERATOR_NOCACHE, ITERATOR_REVERSED};
+use iterator::Iterator as RefTableIterator;
 use memmap::{Mmap, MmapOptions};
 use prost::Message;
 use proto::meta::{BlockOffset, Checksum, TableIndex};
@@ -21,6 +21,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+pub use iterator::{ITERATOR_NOCACHE, ITERATOR_REVERSED};
 #[cfg(test)]
 mod tests;
 
@@ -555,6 +556,19 @@ impl Table {
     /// Get size of SST
     pub fn size(&self) -> u64 {
         self.inner.size()
+    }
+
+    /// Get ID of SST
+    pub fn id(&self) -> u64 {
+        self.inner.id()
+    }
+
+    pub fn biggest(&self) -> &Bytes {
+        self.inner.biggest()
+    }
+
+    pub fn smallest(&self) -> &Bytes {
+        self.inner.smallest()
     }
 }
 

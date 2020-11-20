@@ -26,6 +26,7 @@ fn get_test_table_options() -> Options {
         block_size: 4 * 1024,
         table_size: 0,
         bloom_false_positive: 0.01,
+        table_capacity: 0,
         checksum_mode: ChecksumVerificationMode::OnTableRead,
     }
 }
@@ -350,6 +351,7 @@ fn test_table_big_values() {
         bloom_false_positive: 0.01,
         table_size: (n as u64) * (1 << 20),
         checksum_mode: ChecksumVerificationMode::OnTableRead,
+        table_capacity: 0,
     };
     let mut builder = Builder::new(opts.clone());
 

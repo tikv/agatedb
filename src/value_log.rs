@@ -1,4 +1,4 @@
-use crate::value::{self, Request, Value, ValuePointer};
+use crate::value::{self, Request, ValuePointer};
 use crate::wal::{Header, Wal};
 use crate::AgateOptions;
 use crate::{Error, Result};

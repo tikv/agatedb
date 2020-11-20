@@ -1,7 +1,7 @@
 pub mod binary;
 
 use crate::format::user_key;
-use crate::Result;
+
 use bytes::Bytes;
 pub use skiplist::FixedLengthSuffixComparator as Comparator;
 pub use skiplist::{FixedLengthSuffixComparator, KeyComparator};

@@ -1,5 +1,6 @@
 use super::memtable::{MemTable, MemTables};
 use super::{Error, Result};
+use crate::closer::Closer;
 use crate::entry::Entry;
 use crate::format::get_ts;
 use crate::levels::LevelsController;
@@ -30,6 +31,7 @@ pub struct Core {
 
 pub struct Agate {
     pub(crate) core: Arc<Core>,
+    closer: Closer,
     pool: yatp::ThreadPool<yatp::task::callback::TaskCell>,
 }
 
@@ -63,9 +65,10 @@ impl Agate {
 
     fn new(core: Arc<Core>) -> Self {
         let flush_core = core.clone();
-
+        let closer = Closer::new();
         let agate = Self {
             core,
+            closer: closer.clone(),
             pool: yatp::Builder::new("agatedb").build_callback_pool(),
         };
 
@@ -74,10 +77,18 @@ impl Agate {
             .spawn(move |_: &mut Handle<'_>| flush_core.flush_memtable().unwrap());
 
         agate
+            .core
+            .clone()
+            .lvctl
+            .start_compact(closer.clone(), &agate.pool);
+
+        agate
     }
 
     fn close(&self) {
+        // TODO: use closer for flush channel
         self.core.flush_channel.0.send(None).unwrap();
+        self.closer.close();
     }
 }
 
@@ -117,6 +128,8 @@ pub struct AgateOptions {
     pub value_log_file_size: u64,
     pub value_log_max_entries: u32,
 
+    pub num_compactors: usize,
+
     pub checksum_mode: opt::ChecksumVerificationMode,
 }
 
@@ -134,7 +147,10 @@ impl Default for AgateOptions {
             level_size_multiplier: 10,
             max_levels: 7,
             // agate options
-            num_memtables: 20,
+            // although MEMTABLE_VIEW_MAX is 20, it is possible that
+            // during the compaction process, memtable would exceed num_memtables.
+            // therefore, set it to 5 for now.
+            num_memtables: 5,
             in_memory: false,
             sync_writes: false,
             value_threshold: 1 << 10,
@@ -145,6 +161,7 @@ impl Default for AgateOptions {
             bloom_false_positive: 0.01,
             num_level_zero_tables: 5,
             num_level_zero_tables_stall: 15,
+            num_compactors: 4,
         }
         // TODO: add other options
     }
@@ -222,7 +239,8 @@ impl AgateOptions {
 
     fn arena_size(&self) -> u64 {
         // TODO: take other options into account
-        self.mem_table_size as u64
+        // TODO: don't just multiply 2
+        self.mem_table_size as u64 * 2
     }
 }
 
@@ -449,7 +467,7 @@ impl Core {
         if ft.mt.skl.is_empty() {
             return Ok(());
         }
-        let table_opts = opt::build_table_options(&self);
+        let table_opts = opt::build_table_options(&self.opts);
         let mut builder = Self::build_l0_table(ft, table_opts.clone());
 
         if builder.is_empty() {
@@ -525,11 +543,13 @@ impl Core {
 
             while let Err(err) = self.ensure_room_for_write() {
                 std::thread::sleep(std::time::Duration::from_millis(10));
-                println!("wait for room... {:?}", err)
+                // println!("wait for room... {:?}", err)
             }
 
             self.write_to_lsm(req)?;
         }
+
+        // println!("{} entries written", cnt);
 
         Ok(())
     }
@@ -572,17 +592,29 @@ mod tests {
         }
     }
 
-    fn with_agate_test(f: impl FnOnce(Agate) -> ()) {
-        let tmp_dir = TempDir::new("agatedb").unwrap();
-        let agate = AgateOptions::default()
-            .create()
-            .in_memory(false)
-            .value_log_file_size(4 << 20)
-            .open(&tmp_dir)
-            .unwrap();
-        f(agate);
-        helper_dump_dir(tmp_dir.path());
-        tmp_dir.close().unwrap();
+    fn with_agate_test(f: impl FnOnce(Agate) -> () + Send + 'static) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let tmp_dir = TempDir::new("agatedb").unwrap();
+            let mut options = AgateOptions::default();
+
+            options
+                .create()
+                .in_memory(false)
+                .value_log_file_size(4 << 20);
+
+            options.mem_table_size = 1 << 14;
+            let agate = options.open(&tmp_dir).unwrap();
+            f(agate);
+            helper_dump_dir(tmp_dir.path());
+            tmp_dir.close().unwrap();
+            tx.send(()).expect("failed to complete test");
+        });
+
+        match rx.recv_timeout(std::time::Duration::from_secs(60)) {
+            Ok(_) => handle.join().expect("thread panic"),
+            Err(_) => panic!("test timeout exceed"),
+        }
     }
 
     #[test]
@@ -656,10 +688,21 @@ mod tests {
     }
 
     #[test]
+    fn test_flush_l1() {
+        with_agate_test(|agate| {
+            let requests = generate_requests(10000, 0);
+            for request in requests.chunks(100) {
+                agate.write_requests(request.to_vec()).unwrap();
+            }
+            println!("verifying requests...");
+            verify_requests(10000, &agate);
+        });
+    }
+
+    #[test]
     fn test_flush_memtable_bigvalue() {
         with_agate_test(|agate| {
             let requests = generate_requests(15, 1 << 20);
-            // as
             for request in requests.chunks(4) {
                 agate.write_requests(request.to_vec()).unwrap();
             }
