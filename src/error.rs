@@ -23,6 +23,10 @@ pub enum Error {
     VarDecode(&'static str),
     #[error("{0}")]
     TableRead(String),
+    #[error("Database Closed")]
+    DBClosed,
+    #[error("{0}")]
+    LogRead(String),
 }
 
 impl From<io::Error> for Error {

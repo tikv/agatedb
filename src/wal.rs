@@ -1,25 +1,35 @@
-use super::Result;
+use crate::entry::{Entry, EntryRef};
 use crate::util::binary::{
     decode_varint_u32, decode_varint_u64, encode_varint_u32_to_array, encode_varint_u64_to_array,
     varint_u32_bytes_len, varint_u64_bytes_len,
 };
+use crate::value::EntryReader;
+use crate::value::ValuePointer;
+use crate::AgateOptions;
+
+use crate::Result;
 use bytes::{BufMut, Bytes, BytesMut};
-use std::fs::{File, OpenOptions};
+use memmap::MmapMut;
+use std::fs::File;
+use std::io::BufReader;
+
 use std::path::PathBuf;
+
+pub const MAX_HEADER_SIZE: usize = 21;
 
 /// `Header` stores metadata of an entry in WAL and in value log.
 #[derive(Default, Debug, PartialEq)]
-struct Header {
+pub struct Header {
     /// length of key
-    key_len: u32,
+    pub key_len: u32,
     /// length of value
-    value_len: u32,
+    pub value_len: u32,
     /// entry expire date
-    expires_at: u64,
+    pub expires_at: u64,
     /// metadata
-    meta: u8,
+    pub(crate) meta: u8,
     /// user metadata
-    user_meta: u8,
+    pub user_meta: u8,
 }
 
 impl Header {
@@ -76,15 +86,77 @@ impl Header {
     }
 }
 
+/// WAL of a memtable
+///
+/// TODO: delete WAL file when reference to WAL (or memtable) comes to 0
 pub struct Wal {
-    f: File,
     path: PathBuf,
+    file: File,
+    mmap_file: MmapMut,
+    opts: AgateOptions,
+    write_at: u32,
+    buf: BytesMut,
+    size: u32,
 }
 
 impl Wal {
-    pub fn open(path: PathBuf) -> Result<Wal> {
-        let f = OpenOptions::new().append(true).create(true).open(&path)?;
-        Ok(Wal { f, path })
+    pub fn open(_path: PathBuf, _opts: AgateOptions) -> Result<Wal> {
+        unimplemented!()
+    }
+
+    fn bootstrap(&mut self) -> Result<()> {
+        unimplemented!()
+    }
+
+    pub(crate) fn write_entry(&mut self, _entry: &Entry) -> Result<()> {
+        unimplemented!()
+    }
+
+    pub fn sync(&mut self) -> Result<()> {
+        unimplemented!()
+    }
+
+    pub fn zero_next_entry(&mut self) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn encode_entry(_buf: &mut BytesMut, _entry: &Entry) {
+        unimplemented!()
+    }
+
+    fn decode_entry(_buf: &mut Bytes) -> Result<Entry> {
+        unimplemented!()
+    }
+
+    fn read(&self, _p: ValuePointer) -> Result<Bytes> {
+        unimplemented!()
+    }
+
+    pub fn truncate(&mut self, _end: u64) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn done_writing(&mut self, _offset: u32) -> Result<()> {
+        unimplemented!()
+    }
+
+    pub fn iter(&mut self) -> Result<WalIterator> {
+        unimplemented!()
+    }
+}
+
+pub struct WalIterator<'a> {
+    reader: BufReader<&'a mut File>,
+    entry_reader: EntryReader,
+}
+
+impl<'a> WalIterator<'a> {
+    pub fn new(_reader: BufReader<&'a mut File>) -> Self {
+        unimplemented!()
+    }
+
+    pub fn next(&mut self) -> Option<Result<EntryRef<'_>>> {
+        unimplemented!()
     }
 }
 
