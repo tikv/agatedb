@@ -1,10 +1,15 @@
 use crate::structs::AgateIterator;
 use crate::table::{MergeIterator, TableIterators};
+use crate::util::{search, KeyComparator, COMPARATOR};
 use crate::value::Value;
 use crate::Result;
 use crate::{AgateOptions, Table};
 
+use super::KeyRange;
+
 use bytes::Bytes;
+
+use std::collections::HashSet;
 
 pub struct LevelHandler {
     opts: AgateOptions,
@@ -67,5 +72,78 @@ impl LevelHandler {
         }
 
         Ok(Some(iter.value()))
+    }
+
+    pub fn overlapping_tables(&self, kr: &KeyRange) -> (usize, usize) {
+        use std::cmp::Ordering::*;
+
+        if kr.left.is_empty() || kr.right.is_empty() {
+            return (0, 0);
+        }
+        let left = crate::util::search(self.tables.len(), |i| {
+            match COMPARATOR.compare_key(&kr.left, self.tables[i].biggest()) {
+                Less | Equal => true,
+                _ => false,
+            }
+        });
+        let right = crate::util::search(self.tables.len(), |i| {
+            match COMPARATOR.compare_key(&kr.right, self.tables[i].smallest()) {
+                Less => true,
+                _ => false,
+            }
+        });
+        (left, right)
+    }
+
+    pub fn replace_tables(&mut self, to_del: &[Table], to_add: &[Table]) -> Result<()> {
+        // TODO: handle deletion
+        let mut to_del_map = HashSet::new();
+
+        for table in to_del {
+            to_del_map.insert(table.id());
+        }
+
+        let mut new_tables = vec![];
+
+        for table in &self.tables {
+            if to_del_map.get(&table.id()).is_none() {
+                new_tables.push(table.clone());
+                continue;
+            }
+            self.total_size -= table.size();
+        }
+
+        for table in to_add {
+            self.total_size += table.size();
+            new_tables.push(table.clone());
+        }
+
+        new_tables.sort_by(|x, y| COMPARATOR.compare_key(x.smallest(), y.smallest()));
+
+        self.tables = new_tables;
+
+        Ok(())
+    }
+
+    pub fn delete_tables(&mut self, to_del: &[Table]) -> Result<()> {
+        let mut to_del_map = HashSet::new();
+
+        for table in to_del {
+            to_del_map.insert(table.id());
+        }
+
+        let mut new_tables = vec![];
+
+        for table in &self.tables {
+            if to_del_map.get(&table.id()).is_none() {
+                new_tables.push(table.clone());
+                continue;
+            }
+            self.total_size -= table.size();
+        }
+
+        self.tables = new_tables;
+
+        Ok(())
     }
 }

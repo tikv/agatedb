@@ -7,7 +7,7 @@ use bytes::{Bytes, BytesMut};
 use super::LevelHandler;
 use crate::format::{key_with_ts, user_key};
 use crate::util::{KeyComparator, COMPARATOR};
-use crate::Table;
+use crate::{Error, Result, Table};
 
 // TODO: use enum for this struct
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -42,9 +42,9 @@ impl KeyRange {
         }
     }
 
-    pub fn extend(&mut self, range: Self) {
+    pub fn extend(&mut self, range: &Self) {
         if self.is_empty() {
-            *self = range;
+            *self = range.clone();
             return;
         }
         if range.left.len() == 0
@@ -60,6 +60,22 @@ impl KeyRange {
         if range.inf {
             self.inf = true;
         }
+    }
+
+    pub fn overlaps_with(&self, dst: &Self) -> bool {
+        if self.is_empty() {
+            return true;
+        }
+        if self.inf || dst.inf {
+            return true;
+        }
+        if COMPARATOR.compare_key(&self.left, &dst.right) == std::cmp::Ordering::Greater {
+            return false;
+        }
+        if COMPARATOR.compare_key(&self.right, &dst.left) == std::cmp::Ordering::Less {
+            return false;
+        }
+        true
     }
 }
 
@@ -87,6 +103,15 @@ impl LevelCompactStatus {
 
         prev_ranges_len != self.ranges.len()
     }
+
+    pub fn overlaps_with(&self, dst: &KeyRange) -> bool {
+        for r in self.ranges.iter() {
+            if r.overlaps_with(dst) {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 pub struct CompactStatus {
@@ -99,7 +124,7 @@ pub struct CompactDef {
     pub compactor_id: usize,
     pub this_level: Arc<RwLock<LevelHandler>>,
     pub next_level: Arc<RwLock<LevelHandler>>,
-    pub targets: Arc<Targets>,
+    pub targets: Targets,
     pub prios: CompactionPriority,
 
     pub this_range: KeyRange,
@@ -120,7 +145,7 @@ impl CompactDef {
         this_level: Arc<RwLock<LevelHandler>>,
         next_level: Arc<RwLock<LevelHandler>>,
         prios: CompactionPriority,
-        targets: Arc<Targets>,
+        targets: Targets,
     ) -> Self {
         Self {
             compactor_id,
@@ -170,6 +195,39 @@ impl CompactStatus {
             // TODO: delete table
         }
     }
+
+    pub fn compare_and_add(
+        &mut self,
+        compact_def: &CompactDef,
+        this_level: usize,
+        next_level: usize,
+    ) -> Result<()> {
+        let tl = this_level;
+        assert!(tl < self.levels.len() - 1);
+        if self.levels[this_level].overlaps_with(&compact_def.this_range) {
+            return Err(Error::CustomError("overlap with this level".to_string()));
+        }
+        if self.levels[next_level].overlaps_with(&compact_def.next_range) {
+            return Err(Error::CustomError("overlap with next level".to_string()));
+        }
+
+        self.levels[this_level]
+            .ranges
+            .push(compact_def.this_range.clone());
+        self.levels[next_level]
+            .ranges
+            .push(compact_def.next_range.clone());
+
+        for table in compact_def.top.iter() {
+            assert!(self.tables.insert(table.id()));
+        }
+
+        for table in compact_def.bot.iter() {
+            assert!(self.tables.insert(table.id()));
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -178,7 +236,7 @@ pub struct CompactionPriority {
     pub score: f64,
     pub adjusted: f64,
     pub drop_prefixes: Vec<Bytes>,
-    pub targets: Arc<Targets>,
+    pub targets: Targets,
 }
 
 #[derive(Clone, Debug)]
@@ -225,8 +283,8 @@ pub fn get_key_range(tables: &[Table]) -> KeyRange {
 }
 
 pub fn get_key_range_single(table: &Table) -> KeyRange {
-    let mut smallest = table.smallest().clone();
-    let mut biggest = table.biggest().clone();
+    let smallest = table.smallest().clone();
+    let biggest = table.biggest().clone();
 
     let mut smallest_buf = BytesMut::with_capacity(smallest.len() + 8);
     let mut biggest_buf = BytesMut::with_capacity(biggest.len() + 8);

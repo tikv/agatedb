@@ -13,7 +13,7 @@ use crate::value::Value;
 use crate::{AgateOptions, Table};
 use crate::{Error, Result};
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -50,7 +50,7 @@ impl Core {
             opts: opts.clone(),
             cpt_status: RwLock::new(CompactStatus {
                 levels: cpt_status_levels,
-                tables: HashMap::new(),
+                tables: HashSet::new(),
             }),
         };
 
@@ -111,8 +111,11 @@ impl Core {
         Ok(max_value)
     }
 
-    fn fill_tables_l0_to_lbase(&self, compact_def: &CompactDef) -> Result<()> {
+    fn fill_tables_l0_to_lbase(&self, compact_def: &mut CompactDef) -> Result<()> {
+        let this_level = compact_def.this_level.write().unwrap();
         let next_level = compact_def.next_level.write().unwrap();
+        let mut cpt_status = self.cpt_status.write().unwrap();
+
         if next_level.level == 0 {
             panic!("base level can't be zero");
         }
@@ -123,21 +126,18 @@ impl Core {
             ));
         }
 
-        let this_level = compact_def.this_level.write().unwrap();
-        let next_level = compact_def.next_level.write().unwrap();
-
         if this_level.tables.is_empty() {
             return Err(Error::CustomError("not table in this level".to_string()));
         }
 
         if compact_def.drop_prefixes.is_empty() {
             let mut out = vec![];
-            let kr = KeyRange::default();
+            let mut kr = KeyRange::default();
             for table in this_level.tables.iter() {
                 let dkr = get_key_range_single(table);
-                if kr.overlaps_with(dkr) {
+                if kr.overlaps_with(&dkr) {
                     out.push(table.clone());
-                    kr.extend(dkr);
+                    kr.extend(&dkr);
                 } else {
                     break;
                 }
@@ -147,7 +147,17 @@ impl Core {
 
         compact_def.this_range = get_key_range(&compact_def.top);
 
-        unimplemented!();
+        let (left, right) = next_level.overlapping_tables(&compact_def.this_range);
+
+        compact_def.bot = next_level.tables[left..right].to_vec();
+
+        if compact_def.bot.is_empty() {
+            compact_def.next_range = compact_def.this_range.clone();
+        } else {
+            compact_def.next_range = get_key_range(&compact_def.bot);
+        }
+
+        cpt_status.compare_and_add(&compact_def, this_level.level, next_level.level)?;
 
         Ok(())
     }
@@ -165,10 +175,10 @@ impl Core {
 
         let this_level = compact_def.this_level.write().unwrap();
         let next_level = compact_def.next_level.write().unwrap();
-        let cpt_status = self.cpt_status.write().unwrap();
+        let mut cpt_status = self.cpt_status.write().unwrap();
 
-        let out = vec![];
-        let now = std::time::Instant::now();
+        let mut out = vec![];
+        // let now = std::time::Instant::now();
 
         for table in this_level.tables.iter() {
             if table.size() > 2 * compact_def.targets.file_size[0] {
@@ -193,7 +203,7 @@ impl Core {
             .ranges
             .push(KeyRange::inf());
 
-        for table in out.iter() {
+        for table in compact_def.top.iter() {
             assert!(cpt_status.tables.insert(table.id()), false);
         }
 
@@ -211,8 +221,8 @@ impl Core {
     }
 
     fn fill_tables(&self, compact_def: &CompactDef) -> Result<()> {
-        // TODO: implement this function
-        Ok(())
+        unimplemented!()
+        // Ok(())
     }
 
     fn run_compact_def(
@@ -241,14 +251,30 @@ impl Core {
             compact_def.splits.push(KeyRange::default());
         }
 
+        let new_tables = self.compact_build_tables(level, compact_def)?;
+
+        // TODO: add change to manifest
+
+        let mut this_level = this_level.write().unwrap();
+        let mut next_level = next_level.write().unwrap();
+
+        next_level.replace_tables(&compact_def.bot, &new_tables)?;
+        this_level.delete_tables(&compact_def.top)?;
+
+        // TODO: logging
+
         Ok(())
+    }
+
+    fn compact_build_tables(&self, level: usize, compact_def: &CompactDef) -> Result<Vec<Table>> {
+        unimplemented!()
     }
 
     fn add_splits(&self, compact_def: &mut CompactDef) {
         const N: usize = 3;
         // assume this_range is never inf
         let mut skr = compact_def.this_range.clone();
-        skr.extend(compact_def.next_range.clone());
+        skr.extend(&compact_def.next_range);
 
         let mut add_range = |splits: &mut Vec<KeyRange>, right| {
             skr.right = right;
@@ -278,7 +304,7 @@ impl Core {
         assert!(level + 1 < self.opts.max_levels);
 
         if cpt_prio.targets.base_level == 0 {
-            cpt_prio.targets = Arc::new(self.level_targets());
+            cpt_prio.targets = self.level_targets();
         }
 
         println!("compact #{} on level {}", idx, level);
@@ -287,22 +313,24 @@ impl Core {
 
         if level == 0 {
             let next_level = self.levels[1].clone();
+            let targets = cpt_prio.targets.clone();
             compact_def = CompactDef::new(
                 idx,
                 self.levels[level].clone(),
                 next_level,
                 cpt_prio,
-                cpt_prio.targets.clone(),
+                targets,
             );
             self.fill_tables_l0(&mut compact_def)?;
         } else {
             let next_level = self.levels[level + 1].clone();
+            let targets = cpt_prio.targets.clone();
             compact_def = CompactDef::new(
                 idx,
                 self.levels[level].clone(),
                 next_level,
                 cpt_prio,
-                cpt_prio.targets.clone(),
+                targets,
             );
             self.fill_tables(&compact_def)?;
         };
@@ -367,7 +395,7 @@ impl Core {
     }
 
     fn pick_compact_levels(&self) -> Vec<CompactionPriority> {
-        let targets = Arc::new(self.level_targets());
+        let targets = self.level_targets();
         let mut prios = vec![];
 
         let mut add_priority = |level, score| {
@@ -462,7 +490,9 @@ impl LevelsController {
                     }
 
                     // TODO: handle error
-                    core.do_compact(idx, p).unwrap();
+                    if let Err(err) = core.do_compact(idx, p) {
+                        println!("error while compaction: {:?}", err);
+                    }
                 }
             };
 
