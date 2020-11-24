@@ -573,8 +573,10 @@ impl Agate {
 mod tests {
     use super::*;
     use crate::format::key_with_ts;
+    use crate::levels::tests::helper_dump_levels;
     use crate::value::ValuePointer;
     use bytes::BytesMut;
+    use rand::prelude::*;
     use tempdir::TempDir;
 
     #[test]
@@ -592,7 +594,7 @@ mod tests {
         }
     }
 
-    fn with_agate_test(f: impl FnOnce(Agate) -> () + Send + 'static) {
+    fn with_agate_test(f: impl FnOnce(&mut Agate) -> () + Send + 'static) {
         let (tx, rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || {
             let tmp_dir = TempDir::new("agatedb").unwrap();
@@ -604,9 +606,10 @@ mod tests {
                 .value_log_file_size(4 << 20);
 
             options.mem_table_size = 1 << 14;
-            let agate = options.open(&tmp_dir).unwrap();
-            f(agate);
+            let mut agate = options.open(&tmp_dir).unwrap();
+            f(&mut agate);
             helper_dump_dir(tmp_dir.path());
+            helper_dump_levels(&agate.core.lvctl);
             tmp_dir.close().unwrap();
             tx.send(()).expect("failed to complete test");
         });
@@ -640,7 +643,7 @@ mod tests {
     }
 
     fn generate_requests(n: usize, payload: usize) -> Vec<Request> {
-        (0..n)
+        let mut requests: Vec<Request> = (0..n)
             .map(|i| Request {
                 entries: vec![Entry::new(
                     key_with_ts(BytesMut::from(format!("{:08x}", i).as_str()), 0),
@@ -652,7 +655,10 @@ mod tests {
                 )],
                 ptrs: vec![],
             })
-            .collect()
+            .collect();
+        let mut rng = rand::thread_rng();
+        requests[n / 2..].shuffle(&mut rng);
+        requests
     }
 
     fn verify_requests(n: usize, agate: &Agate) {
