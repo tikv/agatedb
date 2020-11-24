@@ -1,4 +1,4 @@
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 
 pub trait BitSlice {
     fn get_bit(&self, idx: usize) -> bool;
@@ -36,7 +36,9 @@ impl<'a, T: AsMut<[u8]>> BitSliceMut for T {
 /// Bloom implements bloom filter functionalities over
 /// a bit-slice of data.
 pub struct Bloom<'a> {
+    /// data of filter in bits
     filter: &'a [u8],
+    /// number of hash functions
     k: u8,
 }
 
