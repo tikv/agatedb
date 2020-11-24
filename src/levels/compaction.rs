@@ -229,6 +229,8 @@ impl CompactStatus {
             .ranges
             .push(compact_def.next_range.clone());
 
+        self.levels[this_level].del_size += compact_def.this_size;
+        
         for table in compact_def.top.iter() {
             assert!(self.tables.insert(table.id()));
         }
@@ -238,6 +240,11 @@ impl CompactStatus {
         }
 
         Ok(())
+    }
+
+    pub fn overlaps_with(&self, level: usize, this: &KeyRange) -> bool {
+        let this_level = &self.levels[level];
+        this_level.overlaps_with(this)
     }
 }
 
