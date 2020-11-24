@@ -43,8 +43,8 @@ pub struct Bloom<'a> {
 impl<'a> Bloom<'a> {
     /// Create a bloom filter from a byte slice
     pub fn new(buf: &'a [u8]) -> Self {
-        let filter = &buf[..buf.len() - 4];
-        let k = (&buf[buf.len() - 1..]).get_u8();
+        let filter = &buf[..buf.len() - 1];
+        let k = buf[buf.len() - 1];
         Self { filter, k }
     }
 
