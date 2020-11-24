@@ -606,6 +606,7 @@ mod tests {
                 .value_log_file_size(4 << 20);
 
             options.mem_table_size = 1 << 14;
+            // set base level size small enought to make the compactor flush L0 to L5 and L6
             options.base_level_size = 4 << 10;
 
             let mut agate = options.open(&tmp_dir).unwrap();
