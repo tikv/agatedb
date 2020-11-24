@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 #![feature(slice_fill)]
+#![feature(hash_drain_filter)]
 
 mod bloom;
 mod checksum;
@@ -14,6 +15,7 @@ mod ops;
 pub mod opt;
 mod structs;
 mod table;
+mod txn;
 mod util;
 mod value;
 mod value_log;
