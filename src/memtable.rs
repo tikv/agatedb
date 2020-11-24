@@ -1,27 +1,70 @@
+use crate::util::Comparator;
+use crate::value::Value;
+use crate::wal::Wal;
+use crate::AgateOptions;
+use crate::Result;
 use bytes::Bytes;
-use skiplist::{FixedLengthSuffixComparator as Flsc, Skiplist};
+use skiplist::Skiplist;
 use std::collections::VecDeque;
 use std::mem::{self, ManuallyDrop, MaybeUninit};
-use std::ptr;
 
-pub struct MemTableView {
-    tables: ManuallyDrop<[Skiplist<Flsc>; 20]>,
-    len: usize,
+use std::ptr;
+use std::sync::Mutex;
+
+const MEMTABLE_VIEW_MAX: usize = 20;
+
+/// MemTableCore guards WAL and max_version.
+/// These data will only be modified on memtable put.
+/// Therefore, separating wal and max_version enables
+/// concurrent read/write of MemTable.
+struct MemTableCore {
+    wal: Option<Wal>,
+    max_version: u64,
 }
 
-impl MemTableView {
-    pub fn get(&self, key: &[u8]) -> Option<&Bytes> {
-        for i in 0..self.len {
-            let res = self.tables[i].get(key);
-            if res.is_some() {
-                return res;
-            }
+pub struct MemTable {
+    pub(crate) skl: Skiplist<Comparator>,
+    opt: AgateOptions,
+    core: Mutex<MemTableCore>,
+}
+
+impl MemTable {
+    pub fn new(skl: Skiplist<Comparator>, wal: Option<Wal>, opt: AgateOptions) -> Self {
+        Self {
+            skl,
+            opt,
+            core: Mutex::new(MemTableCore {
+                wal,
+                max_version: 0,
+            }),
         }
-        None
+    }
+
+    pub fn update_skip_list(&self) -> Result<()> {
+        unimplemented!()
+    }
+
+    pub fn put(&self, _key: Bytes, _value: Value) -> Result<()> {
+        unimplemented!()
+    }
+
+    pub fn sync_wal(&self) -> Result<()> {
+        unimplemented!()
     }
 }
 
-impl Drop for MemTableView {
+pub struct MemTablesView {
+    tables: ManuallyDrop<[Skiplist<Comparator>; MEMTABLE_VIEW_MAX]>,
+    len: usize,
+}
+
+impl MemTablesView {
+    pub fn tables(&self) -> &[Skiplist<Comparator>] {
+        &self.tables[0..self.len]
+    }
+}
+
+impl Drop for MemTablesView {
     fn drop(&mut self) {
         for i in 0..self.len {
             unsafe {
@@ -31,32 +74,34 @@ impl Drop for MemTableView {
     }
 }
 
-pub struct MemTable {
-    mutable: Skiplist<Flsc>,
-    immutable: VecDeque<Skiplist<Flsc>>,
+pub struct MemTables {
+    mutable: MemTable,
+    immutable: VecDeque<MemTable>,
 }
 
-impl MemTable {
-    pub fn with_capacity(table_size: u32, max_count: usize) -> MemTable {
-        let c = Flsc::new(8);
-        MemTable {
-            mutable: Skiplist::with_capacity(c, table_size),
-            immutable: VecDeque::with_capacity(max_count - 1),
-        }
+impl MemTables {
+    pub(crate) fn new(mutable: MemTable, immutable: VecDeque<MemTable>) -> Self {
+        Self { mutable, immutable }
     }
 
-    pub fn view(&self) -> MemTableView {
+    /// Get view of all current memtables
+    pub fn view(&self) -> MemTablesView {
         // Maybe flush is better.
-        assert!(self.immutable.len() + 1 <= 20);
-        let mut array: [MaybeUninit<Skiplist<Flsc>>; 20] =
+        assert!(self.immutable.len() + 1 <= MEMTABLE_VIEW_MAX);
+        let mut array: [MaybeUninit<Skiplist<Comparator>>; MEMTABLE_VIEW_MAX] =
             unsafe { MaybeUninit::uninit().assume_init() };
-        array[0] = MaybeUninit::new(self.mutable.clone());
+        array[0] = MaybeUninit::new(self.mutable.skl.clone());
         for (i, s) in self.immutable.iter().enumerate() {
-            array[i + 1] = MaybeUninit::new(s.clone());
+            array[i + 1] = MaybeUninit::new(s.skl.clone());
         }
-        MemTableView {
+        MemTablesView {
             tables: unsafe { ManuallyDrop::new(mem::transmute(array)) },
             len: self.immutable.len() + 1,
         }
+    }
+
+    /// Get mutable memtable
+    pub fn table_mut(&self) -> &MemTable {
+        &self.mutable
     }
 }

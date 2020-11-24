@@ -1,6 +1,10 @@
 mod common;
 
 use agatedb::{AgateIterator, Table, TableBuilder, TableOptions, Value};
+use agatedb::ChecksumVerificationMode::NoVerification;
+
+use std::ops::{Deref, DerefMut};
+
 use bytes::Bytes;
 use common::rand_value;
 use criterion::{criterion_group, criterion_main, Criterion};
@@ -24,6 +28,7 @@ fn bench_table_builder(c: &mut Criterion) {
             block_size: 4 * 1024,
             bloom_false_positive: 0.01,
             table_size: 5 << 20,
+            checksum_mode: NoVerification,
         };
 
         b.iter(|| {
@@ -36,7 +41,30 @@ fn bench_table_builder(c: &mut Criterion) {
     });
 }
 
-fn get_table_for_benchmark(count: usize) -> Table {
+/// TableGuard saves Table and TempDir, so as to ensure
+/// temporary directory is removed after table is closed.
+/// According to Rust RFC, the drop order is first `table` then
+/// `tmp_dir`.
+pub struct TableGuard {
+    table: Table,
+    _tmp_dir: TempDir,
+}
+
+impl Deref for TableGuard {
+    type Target = Table;
+
+    fn deref(&self) -> &Table {
+        &self.table
+    }
+}
+
+impl DerefMut for TableGuard {
+    fn deref_mut(&mut self) -> &mut Table {
+        &mut self.table
+    }
+}
+
+fn get_table_for_benchmark(count: usize) -> TableGuard {
     let tmp_dir = TempDir::new("agatedb").unwrap();
 
     let opts = TableOptions {
@@ -44,6 +72,7 @@ fn get_table_for_benchmark(count: usize) -> Table {
         block_size: 4 * 1024,
         bloom_false_positive: 0.01,
         table_size: 0,
+        checksum_mode: NoVerification,
     };
 
     let mut builder = TableBuilder::new(opts.clone());
@@ -55,7 +84,10 @@ fn get_table_for_benchmark(count: usize) -> Table {
         builder.add(&k, Value::new(v), 0);
     }
 
-    Table::create(&filename, builder.finish(), opts).unwrap()
+    TableGuard {
+        table: Table::create(&filename, builder.finish(), opts).unwrap(),
+        _tmp_dir: tmp_dir,
+    }
 }
 
 fn bench_table(c: &mut Criterion) {
@@ -75,6 +107,7 @@ fn bench_table(c: &mut Criterion) {
         block_size: 4 * 1024,
         bloom_false_positive: 0.01,
         table_size: 0,
+        checksum_mode: NoVerification,
     };
 
     c.bench_function("table read and build", |b| {

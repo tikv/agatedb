@@ -6,7 +6,25 @@ const VALUE_POINTER: u8 = 1 << 1;
 pub struct Entry {
     pub key: Bytes,
     pub value: Bytes,
-    pub meta: u8,
+    pub(crate) meta: u8,
+    pub user_meta: u8,
+    pub expires_at: u64,
+    pub(crate) version: u64,
+}
+
+pub struct EntryRef<'a> {
+    pub key: &'a [u8],
+    pub value: &'a [u8],
+    pub(crate) meta: u8,
+    pub user_meta: u8,
+    pub expires_at: u64,
+    pub(crate) version: u64,
+}
+
+impl<'a> EntryRef<'a> {
+    pub fn is_zero(&self) -> bool {
+        self.key.is_empty()
+    }
 }
 
 impl Entry {
@@ -15,6 +33,9 @@ impl Entry {
             key,
             value,
             meta: 0,
+            user_meta: 0,
+            expires_at: 0,
+            version: 0,
         }
     }
 

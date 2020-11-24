@@ -4,7 +4,7 @@ mod merge_iterator;
 
 use crate::checksum;
 use crate::iterator_trait::AgateIterator;
-use crate::opt::Options;
+use crate::opt::{ChecksumVerificationMode, Options};
 use crate::Error;
 use crate::Result;
 
@@ -109,6 +109,8 @@ impl TableInner {
 
     /// Open an existing SST on disk
     fn open(path: &Path, opts: Options) -> Result<TableInner> {
+        use ChecksumVerificationMode::*;
+
         let f = fs::OpenOptions::new()
             .read(true)
             .write(false)
@@ -132,12 +134,18 @@ impl TableInner {
             opts,
         };
         inner.init_biggest_and_smallest()?;
-        // TODO: verify checksum
+
+        if matches!(inner.opts.checksum_mode, OnTableAndBlockRead | OnTableRead) {
+            inner.verify_checksum()?;
+        }
+
         Ok(inner)
     }
 
     /// Open an existing SST from data in memory
     fn open_in_memory(data: Bytes, id: u64, opts: Options) -> Result<TableInner> {
+        use ChecksumVerificationMode::*;
+
         let table_size = data.len();
         let mut inner = TableInner {
             file: MmapFile::Memory { data },
@@ -153,6 +161,11 @@ impl TableInner {
             index_len: 0,
         };
         inner.init_biggest_and_smallest()?;
+
+        if matches!(inner.opts.checksum_mode, OnTableAndBlockRead | OnTableRead) {
+            inner.verify_checksum()?;
+        }
+
         Ok(inner)
     }
 
@@ -223,6 +236,8 @@ impl TableInner {
     }
 
     fn block(&self, idx: usize, _use_cache: bool) -> Result<Arc<Block>> {
+        use ChecksumVerificationMode::*;
+
         // TODO: support cache
         if idx >= self.offsets_length() {
             return Err(Error::TableRead("block out of index".to_string()));
@@ -259,16 +274,24 @@ impl TableInner {
             entry_offsets.push(entry_offsets_ptr.get_u32_le());
         }
 
-        Ok(Arc::new(Block {
+        // Drop checksum and checksum length.
+        // The checksum is calculated for actual data + entry index + index length
+        let data = data.slice(..read_pos + 4);
+
+        let blk = Arc::new(Block {
             offset,
             entries_index_start,
-            // Drop checksum and checksum length.
-            // The checksum is calculated for actual data + entry index + index length
-            data: data.slice(..read_pos + 4),
+            data,
             entry_offsets,
             checksum_len,
             checksum,
-        }))
+        });
+
+        if matches!(self.opts.checksum_mode, OnTableAndBlockRead | OnBlockRead) {
+            blk.verify_checksum()?;
+        }
+
+        Ok(blk)
     }
 
     fn index_key(&self) -> u64 {
@@ -337,11 +360,16 @@ impl TableInner {
     }
 
     fn verify_checksum(&self) -> Result<()> {
+        use ChecksumVerificationMode::*;
+
         let table_index = self.fetch_index();
         for i in 0..table_index.offsets.len() {
+            // When using OnBlockRead or OnTableAndBlockRead, we do not need to verify block
+            // checksum now. But we still need to check if there is an encoding error in block.
             let block = self.block(i, true)?;
-            // TODO: table opts
-            block.verify_checksum()?;
+            if !matches!(self.opts.checksum_mode, OnBlockRead | OnTableAndBlockRead) {
+                block.verify_checksum()?;
+            }
         }
         Ok(())
     }
