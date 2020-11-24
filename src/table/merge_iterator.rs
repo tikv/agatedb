@@ -1,14 +1,10 @@
 use bytes::{Bytes, BytesMut};
 use enum_dispatch::enum_dispatch;
-use std::sync::Arc;
 
-use super::iterator::Iterator;
-use super::TableInner;
+use super::TableIterator;
 use crate::iterator_trait::AgateIterator;
 use crate::util::{KeyComparator, COMPARATOR};
 use crate::Value;
-
-type TableIterator = Iterator<Arc<TableInner>>;
 
 /// `Iterators` includes all iterator types for AgateDB.
 /// By packing them into an enum, we could reduce the
@@ -21,9 +17,10 @@ pub enum Iterators {
     VecIterator(tests::VecIterator),
 }
 
-/// `MergeIterator` merges two `Iterators` into one
-/// by sequentially emitting elements from two child
-/// iterators.
+/// `MergeIterator` merges two `Iterators` into one by sequentially emitting
+/// elements from two child iterators.
+///
+/// TODO: save iterators in a slice instead of as a binary tree
 pub struct MergeIterator {
     left: IteratorNode,
     right: IteratorNode,

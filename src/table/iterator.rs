@@ -223,7 +223,7 @@ pub const ITERATOR_NOCACHE: usize = 1 << 2;
 /// table object, we need to get smallest and biggest
 /// elements by using an iterator over `&TableInner`.
 /// At that time, we could not build an `Arc<TableInner>`.
-pub struct Iterator<T: AsRef<TableInner>> {
+pub struct TableRefIterator<T: AsRef<TableInner>> {
     table: T,
     bpos: usize,
     block_iterator: Option<BlockIterator>,
@@ -231,7 +231,7 @@ pub struct Iterator<T: AsRef<TableInner>> {
     opt: usize,
 }
 
-impl<T: AsRef<TableInner>> Iterator<T> {
+impl<T: AsRef<TableInner>> TableRefIterator<T> {
     /// Create an iterator from `Arc<TableInner>` or `&TableInner`
     pub fn new(table: T, opt: usize) -> Self {
         Self {
@@ -422,7 +422,7 @@ impl<T: AsRef<TableInner>> Iterator<T> {
     }
 }
 
-impl<T: AsRef<TableInner>> AgateIterator for Iterator<T> {
+impl<T: AsRef<TableInner>> AgateIterator for TableRefIterator<T> {
     fn key(&self) -> &[u8] {
         &self.block_iterator.as_ref().unwrap().key
     }

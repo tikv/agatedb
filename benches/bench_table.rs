@@ -1,7 +1,7 @@
 mod common;
 
-use agatedb::{AgateIterator, Table, TableBuilder, TableOptions, Value};
 use agatedb::ChecksumVerificationMode::NoVerification;
+use agatedb::{AgateIterator, Table, TableBuilder, TableOptions, Value};
 
 use std::ops::{Deref, DerefMut};
 
