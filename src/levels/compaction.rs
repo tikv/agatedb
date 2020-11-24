@@ -230,7 +230,7 @@ impl CompactStatus {
             .push(compact_def.next_range.clone());
 
         self.levels[this_level].del_size += compact_def.this_size;
-        
+
         for table in compact_def.top.iter() {
             assert!(self.tables.insert(table.id()));
         }

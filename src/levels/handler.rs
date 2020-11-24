@@ -1,8 +1,8 @@
-use crate::structs::AgateIterator;
 use crate::table::{MergeIterator, TableIterators};
 use crate::util::{KeyComparator, COMPARATOR};
 use crate::value::Value;
 use crate::Result;
+use crate::{format::user_key, get_ts, structs::AgateIterator};
 use crate::{AgateOptions, Table};
 
 use super::KeyRange;
@@ -44,34 +44,58 @@ impl LevelHandler {
         self.tables.len()
     }
 
+    pub fn get_table_for_key(&self, key: &Bytes) -> Vec<Table> {
+        if self.level == 0 {
+            // for level 0, we need to iterate every table.
+
+            let mut out = self.tables.clone();
+            out.reverse();
+
+            out
+        } else {
+            let idx = crate::util::search(self.tables.len(), |idx| {
+                COMPARATOR.compare_key(self.tables[idx].biggest(), key) != std::cmp::Ordering::Less
+            });
+            if idx >= self.tables.len() {
+                vec![]
+            } else {
+                vec![self.tables[idx].clone()]
+            }
+        }
+    }
+
     pub fn get(&self, key: &Bytes) -> Result<Option<Value>> {
-        // TODO: Add binary search logic. For now we just merge iterate all tables.
-        // TODO: fix wrong logic. This function now just checks if we found the correct key,
-        // regardless of their version.
+        let tables = self.get_table_for_key(key);
+        let key_no_ts = user_key(key);
+        let hash = farmhash::fingerprint32(key_no_ts);
+        let mut max_vs: Option<Value> = None;
 
-        if self.tables.is_empty() {
-            return Ok(None);
+        for table in tables {
+            if table.does_not_have(hash) {
+                continue;
+            }
+
+            let mut it = table.new_iterator(0);
+            it.seek(key);
+            if !it.valid() {
+                continue;
+            }
+
+            if crate::util::same_key(key, it.key()) {
+                let version = get_ts(it.key());
+                if let Some(ref max_vs) = max_vs {
+                    if !max_vs.version < version {
+                        continue;
+                    }
+                }
+
+                let mut vs = it.value();
+                vs.version = version;
+                max_vs = Some(vs)
+            }
         }
 
-        let iters: Vec<Box<TableIterators>> = self
-            .tables
-            .iter()
-            .map(|x| x.new_iterator(0))
-            .map(|x| Box::new(TableIterators::from(x)))
-            .collect();
-        let mut iter = MergeIterator::from_iterators(iters, false);
-
-        iter.seek(key);
-
-        if !iter.valid() {
-            return Ok(None);
-        }
-
-        if !crate::util::same_key(&key, iter.key()) {
-            return Ok(None);
-        }
-
-        Ok(Some(iter.value()))
+        Ok(max_vs)
     }
 
     pub fn overlapping_tables(&self, kr: &KeyRange) -> (usize, usize) {

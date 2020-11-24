@@ -244,7 +244,6 @@ impl Core {
         let mut cpt_status = self.cpt_status.write().unwrap();
 
         for table in &tables {
-            
             compact_def.this_size = table.size();
             compact_def.this_range = get_key_range_single(table);
             // if we're already compacting this range, don't do anything
@@ -282,7 +281,7 @@ impl Core {
                 continue;
             }
 
-            return Ok(())
+            return Ok(());
         }
 
         Err(Error::CustomError("no table to fill".to_string()))
@@ -570,9 +569,6 @@ impl Core {
             );
             self.fill_tables(&mut compact_def)?;
         };
-
-        println!("compaction plan: {:?} {:?}", compact_def.targets, compact_def.prios);
-
         if let Err(err) = self.run_compact_def(idx, level, &mut compact_def) {
             println!("failed on compaction {:?}", err);
             self.cpt_status.write().unwrap().delete(&compact_def);

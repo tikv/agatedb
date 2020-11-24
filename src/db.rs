@@ -607,7 +607,7 @@ mod tests {
 
             options.mem_table_size = 1 << 14;
             options.base_level_size = 4 << 10;
-            
+
             let mut agate = options.open(&tmp_dir).unwrap();
             f(&mut agate);
             helper_dump_dir(tmp_dir.path());
