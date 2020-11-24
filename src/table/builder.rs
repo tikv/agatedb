@@ -222,6 +222,7 @@ mod tests {
             block_size: 4 * 1024,
             bloom_false_positive: 0.01,
             table_size: 30 << 20,
+            checksum_mode: crate::opt::ChecksumVerificationMode::OnTableAndBlockRead,
         };
 
         let mut builder = Builder::new(opts.clone());
@@ -295,6 +296,7 @@ mod tests {
             bloom_false_positive: 0.1,
             block_size: 0,
             table_size: 0,
+            checksum_mode: crate::opt::ChecksumVerificationMode::NoVerification,
         };
 
         let mut b = Builder::new(opt);
