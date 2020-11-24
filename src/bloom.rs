@@ -37,14 +37,14 @@ impl<'a, T: AsMut<[u8]>> BitSliceMut for T {
 /// a bit-slice of data.
 pub struct Bloom<'a> {
     filter: &'a [u8],
-    k: u32,
+    k: u8,
 }
 
 impl<'a> Bloom<'a> {
     /// Create a bloom filter from a byte slice
     pub fn new(buf: &'a [u8]) -> Self {
         let filter = &buf[..buf.len() - 4];
-        let k = (&buf[buf.len() - 4..]).get_u32();
+        let k = (&buf[buf.len() - 1..]).get_u8();
         Self { filter, k }
     }
 
@@ -77,7 +77,7 @@ impl<'a> Bloom<'a> {
                 h = h.wrapping_add(delta);
             }
         }
-        filter.put_u32(k);
+        filter.put_u8(k as u8);
         filter.freeze()
     }
 
