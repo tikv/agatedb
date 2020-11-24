@@ -37,6 +37,7 @@ enum MmapFile {
     Memory {
         data: Bytes,
     },
+    None,
 }
 
 impl MmapFile {
@@ -45,6 +46,7 @@ impl MmapFile {
         match self {
             Self::File { .. } => false,
             Self::Memory { .. } => true,
+            Self::None => unreachable!(),
         }
     }
 
@@ -362,6 +364,7 @@ impl TableInner {
         match &self.file {
             MmapFile::Memory { .. } => "<memtable>".to_string(),
             MmapFile::File { name, .. } => name.to_string_lossy().into_owned(),
+            MmapFile::None => unreachable!(),
         }
     }
 
@@ -436,6 +439,7 @@ impl TableInner {
                     Ok(Bytes::copy_from_slice(&mmap[offset..offset + size]))
                 }
             }
+            MmapFile::None => unreachable!(),
         }
     }
 
@@ -449,19 +453,20 @@ impl TableInner {
     }
 }
 
-/*
 impl Drop for TableInner {
     fn drop(&mut self) {
-        let f = match self.file.take() {
-            Some(f) => f,
-            None => return,
-        };
-        f.file.set_len(0).unwrap();
-        drop(f.file);
-        fs::remove_file(&f.path).unwrap();
+        if let MmapFile::File { file, mmap, name } =
+            std::mem::replace(&mut self.file, MmapFile::None)
+        {
+            drop(mmap);
+            // It is possible that table is opened in read-only mode,
+            // so we cannot set_len.
+            // file.set_len(0).unwrap();
+            drop(file);
+            fs::remove_file(&name).unwrap();
+        }
     }
 }
-*/
 
 /// Block contains several entries. It can be obtained from an SST.
 #[derive(Default)]
