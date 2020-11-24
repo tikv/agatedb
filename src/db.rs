@@ -541,7 +541,7 @@ impl Core {
             }
             cnt += req.entries.len();
 
-            while let Err(err) = self.ensure_room_for_write() {
+            while let Err(_) = self.ensure_room_for_write() {
                 std::thread::sleep(std::time::Duration::from_millis(10));
                 // println!("wait for room... {:?}", err)
             }

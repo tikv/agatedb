@@ -232,7 +232,7 @@ impl Core {
         let this_level = compact_def.this_level.read().unwrap();
         let next_level = compact_def.next_level.read().unwrap();
 
-        let mut tables = this_level.tables.clone();
+        let tables = &this_level.tables;
 
         if tables.is_empty() {
             return Err(Error::CustomError("no tables to compact".to_string()));
@@ -243,7 +243,7 @@ impl Core {
         // TODO: don't hold cpt_status write lock for long time
         let mut cpt_status = self.cpt_status.write().unwrap();
 
-        for table in &tables {
+        for table in tables {
             compact_def.this_size = table.size();
             compact_def.this_range = get_key_range_single(table);
             // if we're already compacting this range, don't do anything

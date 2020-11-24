@@ -1,4 +1,3 @@
-use crate::table::{MergeIterator, TableIterators};
 use crate::util::{KeyComparator, COMPARATOR};
 use crate::value::Value;
 use crate::Result;
