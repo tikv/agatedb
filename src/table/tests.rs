@@ -21,7 +21,7 @@ fn test_generate_key() {
     assert_eq!(key(b"key", 233), Bytes::from("key0233"));
 }
 
-fn get_test_table_options() -> Options {
+pub(crate) fn get_test_table_options() -> Options {
     Options {
         block_size: 4 * 1024,
         table_size: 0,
@@ -92,7 +92,7 @@ fn build_table(kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> TableGuard {
     // Table::open_in_memory(data, 233, opts).unwrap()
 }
 
-fn build_table_data(mut kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> Bytes {
+pub(crate) fn build_table_data(mut kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> Bytes {
     let mut builder = Builder::new(opts);
     kv_pairs.sort_by(|x, y| x.0.cmp(&y.0));
 

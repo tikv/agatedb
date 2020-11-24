@@ -1,6 +1,12 @@
 pub(crate) mod builder;
+pub mod concat_iterator;
 mod iterator;
-mod merge_iterator;
+pub mod merge_iterator;
+
+pub use concat_iterator::ConcatIterator;
+pub use merge_iterator::{Iterators as TableIterators, MergeIterator};
+
+pub type TableIterator = RefTableIterator<Arc<TableInner>>;
 
 use crate::bloom::Bloom;
 use crate::checksum;
