@@ -182,6 +182,7 @@ impl Core {
 
         let this_level = compact_def.this_level.read().unwrap();
         // next_level and this_level is the same L0, do not need to acquire lock of next level
+        // TODO: don't hold cpt_status through this function
         let mut cpt_status = self.cpt_status.write().unwrap();
 
         let mut out = vec![];
@@ -227,8 +228,63 @@ impl Core {
         Ok(())
     }
 
-    fn fill_tables(&self, compact_def: &CompactDef) -> Result<()> {
-        unimplemented!()
+    fn fill_tables(&self, compact_def: &mut CompactDef) -> Result<()> {
+        let this_level = compact_def.this_level.read().unwrap();
+        let next_level = compact_def.next_level.read().unwrap();
+
+        let tables = &this_level.tables;
+
+        if tables.is_empty() {
+            return Err(Error::CustomError("no tables to compact".to_string()));
+        }
+
+        // TODO: sort tables by heuristic
+
+        // TODO: don't hold cpt_status write lock for long time
+        let mut cpt_status = self.cpt_status.write().unwrap();
+
+        for table in tables {
+            compact_def.this_size = table.size();
+            compact_def.this_range = get_key_range_single(table);
+            // if we're already compacting this range, don't do anything
+            if cpt_status.overlaps_with(compact_def.this_level_id, &compact_def.this_range) {
+                continue;
+            }
+            compact_def.top = vec![table.clone()];
+            let (left, right) = next_level.overlapping_tables(&compact_def.this_range);
+
+            if right < left {
+                println!("right {} is less than left {} in overlapping_tables for current level {}, next level {}, key_range {:?}",
+                    right, left, compact_def.this_level_id,
+                    compact_def.next_level_id, compact_def.this_range);
+                continue;
+            }
+
+            compact_def.bot = next_level.tables[left..right].to_vec();
+
+            if compact_def.bot.is_empty() {
+                compact_def.bot = vec![];
+                compact_def.next_range = compact_def.this_range.clone();
+                if let Err(_) = cpt_status.compare_and_add(compact_def) {
+                    continue;
+                }
+                return Ok(());
+            }
+
+            compact_def.next_range = get_key_range(&compact_def.bot);
+
+            if cpt_status.overlaps_with(compact_def.next_level_id, &compact_def.next_range) {
+                continue;
+            }
+
+            if let Err(_) = cpt_status.compare_and_add(compact_def) {
+                continue;
+            }
+
+            return Ok(());
+        }
+
+        Err(Error::CustomError("no table to fill".to_string()))
     }
 
     fn run_compact_def(
@@ -237,6 +293,8 @@ impl Core {
         level: usize,
         compact_def: &mut CompactDef,
     ) -> Result<()> {
+        println!("compact def {} running...", idx);
+
         if compact_def.targets.file_size.len() == 0 {
             return Err(Error::CustomError("targets not set".to_string()));
         }
@@ -484,14 +542,15 @@ impl Core {
         let mut compact_def;
 
         if level == 0 {
-            let next_level = self.levels[1].clone();
             let targets = cpt_prio.targets.clone();
+            let base_level = targets.base_level;
+            let next_level = self.levels[base_level].clone();
             compact_def = CompactDef::new(
                 idx,
                 self.levels[level].clone(),
                 level,
                 next_level,
-                1,
+                base_level,
                 cpt_prio,
                 targets,
             );
@@ -508,14 +567,8 @@ impl Core {
                 cpt_prio,
                 targets,
             );
-            // TODO: complete fill_tables
-            println!("not implemented");
-            return Ok(());
-            self.fill_tables(&compact_def)?;
+            self.fill_tables(&mut compact_def)?;
         };
-
-        println!("ready to compact");
-
         if let Err(err) = self.run_compact_def(idx, level, &mut compact_def) {
             println!("failed on compaction {:?}", err);
             self.cpt_status.write().unwrap().delete(&compact_def);
@@ -523,7 +576,7 @@ impl Core {
 
         // TODO: will compact_def be used now?
 
-        println!("compaction success");
+        println!("compaction #{} success", idx);
         self.cpt_status.write().unwrap().delete(&compact_def);
 
         Ok(())
@@ -546,7 +599,7 @@ impl Core {
 
         let mut db_size = self.last_level().read().unwrap().total_size;
 
-        for i in (0..self.levels.len()).rev() {
+        for i in (1..self.levels.len()).rev() {
             let ltarget = adjust(db_size);
             targets.target_size[i] = ltarget;
             if targets.base_level == 0 && ltarget <= self.opts.base_level_size {

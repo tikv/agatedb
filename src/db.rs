@@ -541,7 +541,7 @@ impl Core {
             }
             cnt += req.entries.len();
 
-            while let Err(err) = self.ensure_room_for_write() {
+            while let Err(_) = self.ensure_room_for_write() {
                 std::thread::sleep(std::time::Duration::from_millis(10));
                 // println!("wait for room... {:?}", err)
             }
@@ -606,10 +606,14 @@ mod tests {
                 .value_log_file_size(4 << 20);
 
             options.mem_table_size = 1 << 14;
+            // set base level size small enought to make the compactor flush L0 to L5 and L6
+            options.base_level_size = 4 << 10;
+
             let mut agate = options.open(&tmp_dir).unwrap();
             f(&mut agate);
             helper_dump_dir(tmp_dir.path());
             helper_dump_levels(&agate.core.lvctl);
+            drop(agate);
             tmp_dir.close().unwrap();
             tx.send(()).expect("failed to complete test");
         });
