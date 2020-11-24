@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+mod bloom;
 mod checksum;
 mod db;
 mod entry;

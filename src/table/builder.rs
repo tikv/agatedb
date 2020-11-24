@@ -1,3 +1,5 @@
+use crate::bloom::Bloom;
+use crate::format::user_key;
 use crate::opt::Options;
 use crate::value::Value;
 use crate::{checksum, util};
@@ -36,7 +38,7 @@ pub struct Builder {
     base_offset: u32,
     entry_offsets: Vec<u32>,
     table_index: TableIndex,
-    key_hashes: Vec<u64>,
+    key_hashes: Vec<u32>,
     options: Options,
     max_version: u64,
 }
@@ -67,8 +69,7 @@ impl Builder {
     }
 
     fn add_helper(&mut self, key: &Bytes, v: Value, vlog_len: u32) {
-        self.key_hashes
-            .push(farmhash::fingerprint64(&key[..key.len() - 8]));
+        self.key_hashes.push(farmhash::fingerprint32(user_key(key)));
         // TODO: check ts
         let diff_key = if self.base_key.is_empty() {
             self.base_key = key.clone();
@@ -170,6 +171,12 @@ impl Builder {
         }
         let mut bytes = BytesMut::new();
         // TODO: move boundaries and build index if we need to encrypt or compress
+        if self.options.bloom_false_positive > 0.0 {
+            let bits_per_key =
+                Bloom::bloom_bits_per_key(self.key_hashes.len(), self.options.bloom_false_positive);
+            let bloom = Bloom::build_from_key_hashes(&self.key_hashes, bits_per_key);
+            self.table_index.bloom_filter = bloom.to_vec();
+        }
         // append index to buffer
         self.table_index.encode(&mut bytes).unwrap();
         assert!(bytes.len() < u32::MAX as usize);
@@ -201,8 +208,9 @@ impl Builder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::format::key_with_ts;
+    use crate::table::tests::build_test_table;
     use crate::table::Table;
+    use crate::{format::key_with_ts, ChecksumVerificationMode};
     use tempdir::TempDir;
 
     const TEST_KEYS_COUNT: usize = 100000;
@@ -251,9 +259,36 @@ mod tests {
         // assert_eq!(TEST_KEYS_COUNT, table.max_version());
     }
 
+    fn test_with_bloom_filter(with_blooms: bool) {
+        let key_prefix = b"p";
+        let key_count = 1000;
+        let opts = Options {
+            block_size: 0,
+            bloom_false_positive: if with_blooms { 0.01 } else { 0.0 },
+            table_size: 0,
+            checksum_mode: ChecksumVerificationMode::OnTableRead,
+        };
+
+        let table = build_test_table(key_prefix, key_count, opts);
+
+        assert_eq!(table.has_bloom_filter(), with_blooms);
+
+        let mut it = table.new_iterator(0);
+        let mut count = 0;
+        it.rewind();
+        while it.valid() {
+            count += 1;
+            let hash = farmhash::fingerprint32(user_key(it.key()));
+            assert!(!table.does_not_have(hash));
+            it.next();
+        }
+        assert_eq!(key_count, count);
+    }
+
     #[test]
     fn test_bloom_filter() {
-        // TODO: finish this test after finishing iterator and table API
+        test_with_bloom_filter(false);
+        test_with_bloom_filter(true);
     }
 
     #[test]
