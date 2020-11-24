@@ -208,9 +208,9 @@ impl Builder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::format::key_with_ts;
     use crate::table::tests::build_test_table;
     use crate::table::Table;
+    use crate::{format::key_with_ts, ChecksumVerificationMode};
     use tempdir::TempDir;
 
     const TEST_KEYS_COUNT: usize = 100000;
@@ -266,6 +266,7 @@ mod tests {
             block_size: 0,
             bloom_false_positive: if with_blooms { 0.01 } else { 0.0 },
             table_size: 0,
+            checksum_mode: ChecksumVerificationMode::OnTableRead,
         };
 
         let table = build_test_table(key_prefix, key_count, opts);

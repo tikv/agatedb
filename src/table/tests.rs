@@ -50,7 +50,7 @@ fn generate_table_data(prefix: &[u8], n: usize, mut opts: Options) -> Vec<(Bytes
 /// Build a test table.
 ///
 /// This function will be used in table builder test.
-pub(crate) fn build_test_table(prefix: &[u8], n: usize, mut opts: Options) -> TableGuard {
+pub(crate) fn build_test_table(prefix: &[u8], n: usize, opts: Options) -> TableGuard {
     let kv_pairs = generate_table_data(prefix, n, opts.clone());
     build_table(kv_pairs, opts)
 }
