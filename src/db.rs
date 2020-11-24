@@ -613,6 +613,7 @@ mod tests {
             f(&mut agate);
             helper_dump_dir(tmp_dir.path());
             helper_dump_levels(&agate.core.lvctl);
+            drop(agate);
             tmp_dir.close().unwrap();
             tx.send(()).expect("failed to complete test");
         });
