@@ -585,12 +585,18 @@ mod tests {
     }
 
     fn helper_dump_dir(path: &Path) {
+        let mut result = vec![];
         for entry in fs::read_dir(path).unwrap() {
             let entry = entry.unwrap();
             let path = entry.path();
             if path.is_file() {
-                println!("{:?}", path);
+                result.push(path);
             }
+        }
+        result.sort();
+
+        for path in result {
+            println!("{:?}", path);
         }
     }
 
@@ -611,9 +617,12 @@ mod tests {
 
             let mut agate = options.open(&tmp_dir).unwrap();
             f(&mut agate);
+            println!("---agate directory---");
             helper_dump_dir(tmp_dir.path());
             helper_dump_levels(&agate.core.lvctl);
             drop(agate);
+            println!("---after close---");
+            helper_dump_dir(tmp_dir.path());
             tmp_dir.close().unwrap();
             tx.send(()).expect("failed to complete test");
         });

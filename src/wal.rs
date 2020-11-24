@@ -9,9 +9,10 @@ use crate::Error;
 use crate::Result;
 use bytes::{BufMut, Bytes, BytesMut};
 use memmap::{MmapMut, MmapOptions};
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::BufReader;
 use std::io::{Seek, SeekFrom};
+use std::mem::ManuallyDrop;
 use std::path::PathBuf;
 
 pub const MAX_HEADER_SIZE: usize = 21;
@@ -93,8 +94,8 @@ impl Header {
 /// TODO: delete WAL file when reference to WAL (or memtable) comes to 0
 pub struct Wal {
     path: PathBuf,
-    file: File,
-    mmap_file: MmapMut,
+    file: ManuallyDrop<File>,
+    mmap_file: ManuallyDrop<MmapMut>,
     opts: AgateOptions,
     write_at: u32,
     buf: BytesMut,
@@ -126,9 +127,9 @@ impl Wal {
         let mmap_file = unsafe { MmapOptions::new().map_mut(&file)? };
         let mut wal = Wal {
             path,
-            file,
+            file: ManuallyDrop::new(file),
             size: mmap_file.len() as u32,
-            mmap_file,
+            mmap_file: ManuallyDrop::new(mmap_file),
             opts,
             write_at: 0, // TODO: current implementation doesn't have keyID and baseIV header
             buf: BytesMut::new(),
@@ -309,6 +310,18 @@ impl<'a> WalIterator<'a> {
             }
             Err(err) => Some(Err(err)),
         }
+    }
+}
+
+impl Drop for Wal {
+    fn drop(&mut self) {
+        unsafe {
+            ManuallyDrop::drop(&mut self.mmap_file);
+        }
+        let file = unsafe { ManuallyDrop::take(&mut self.file) };
+        file.set_len(0).unwrap();
+        drop(file);
+        fs::remove_file(&self.path).unwrap();
     }
 }
 
