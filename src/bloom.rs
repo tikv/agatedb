@@ -66,7 +66,7 @@ impl<'a> Bloom<'a> {
         let nbytes = (nbits + 7) / 8;
         // nbits is always multiplication of 8
         let nbits = nbytes * 8;
-        let mut filter = BytesMut::with_capacity(nbytes);
+        let mut filter = BytesMut::with_capacity(nbytes + 1);
         filter.resize(nbytes, 0);
         for h in keys {
             let mut h = *h;
