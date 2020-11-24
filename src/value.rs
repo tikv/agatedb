@@ -169,7 +169,26 @@ impl EntryReader {
     }
 
     /// Entry returns header, key and value.
-    pub fn entry<R: Read + Seek>(&mut self, _reader: &mut BufReader<R>) -> Result<EntryRef> {
-        unimplemented!()
+    pub fn entry<R: Read + Seek>(&mut self, reader: &mut BufReader<R>) -> Result<EntryRef> {
+        // first, read MAX_HEADER_SIZE bytes to buf
+        let size = reader.read(&mut self.buf)?;
+        // then, try decode the header
+        let decoded_size = self.header.decode(&self.buf[0..size as usize])?;
+        // now, we seek back to where the header ends
+        reader.seek(std::io::SeekFrom::Current(
+            decoded_size as i64 - size as i64,
+        ))?;
+        self.key.resize(self.header.key_len as usize, 0);
+        reader.read_exact(&mut self.key)?;
+        self.value.resize(self.header.value_len as usize, 0);
+        reader.read_exact(&mut self.value)?;
+        Ok(EntryRef {
+            key: &self.key,
+            value: &self.value,
+            meta: self.header.meta,
+            user_meta: self.header.user_meta,
+            expires_at: self.header.expires_at,
+            version: 0,
+        })
     }
 }
