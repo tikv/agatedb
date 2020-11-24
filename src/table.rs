@@ -2,6 +2,7 @@ pub(crate) mod builder;
 mod iterator;
 mod merge_iterator;
 
+use crate::bloom::Bloom;
 use crate::checksum;
 use crate::iterator_trait::AgateIterator;
 use crate::opt::{ChecksumVerificationMode, Options};
@@ -79,6 +80,8 @@ pub struct TableInner {
     index_start: usize,
     /// length of index
     index_len: usize,
+    /// true if there's bloom filter in table
+    has_bloom_filter: bool,
     /// table options
     opts: Options,
 }
@@ -134,6 +137,7 @@ impl TableInner {
             index_start: 0,
             index_len: 0,
             opts,
+            has_bloom_filter: false,
         };
         inner.init_biggest_and_smallest()?;
 
@@ -161,6 +165,7 @@ impl TableInner {
             index: TableIndex::default(),
             index_start: 0,
             index_len: 0,
+            has_bloom_filter: false,
         };
         inner.init_biggest_and_smallest()?;
 
@@ -215,7 +220,8 @@ impl TableInner {
         // TODO: compression
         self.estimated_size = self.table_size as u32;
 
-        // TODO: has bloom filter
+        // bloom filter
+        self.has_bloom_filter = !self.index.bloom_filter.is_empty();
 
         Ok(&self.index.offsets[0])
     }
@@ -343,15 +349,18 @@ impl TableInner {
         self.id
     }
 
-    /// Check if the table doesn't contain an entry with bloom filter.
-    /// Always return false if no bloom filter is present in SST.
-    pub fn does_not_have(_hash: u32) -> bool {
-        false
-        // TODO: add bloom filter
+    pub fn does_not_have(&self, hash: u32) -> bool {
+        if self.has_bloom_filter {
+            let index = self.fetch_index();
+            let bloom = Bloom::new(&index.bloom_filter);
+            !bloom.may_contain(hash)
+        } else {
+            false
+        }
     }
 
-    fn read_bloom_filter(&self) {
-        unimplemented!()
+    pub fn has_bloom_filter(&self) -> bool {
+        self.has_bloom_filter
     }
 
     pub(crate) fn read_table_index(&self) -> Result<TableIndex> {
@@ -513,5 +522,13 @@ impl Table {
     /// Get max version of this table
     pub fn max_version(&self) -> u64 {
         self.inner.max_version()
+    }
+
+    pub fn has_bloom_filter(&self) -> bool {
+        self.inner.has_bloom_filter()
+    }
+
+    pub fn does_not_have(&self, hash: u32) -> bool {
+        self.inner.does_not_have(hash)
     }
 }
