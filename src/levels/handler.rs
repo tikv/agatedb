@@ -140,7 +140,7 @@ impl LevelHandler {
         let mut new_tables = vec![];
 
         for table in &self.tables {
-            if to_del_map.get(&table.id()).is_none() {
+            if !to_del_map.contains(&table.id()) {
                 new_tables.push(table.clone());
                 continue;
             }
@@ -169,7 +169,7 @@ impl LevelHandler {
         let mut new_tables = vec![];
 
         for table in &self.tables {
-            if to_del_map.get(&table.id()).is_none() {
+            if !to_del_map.contains(&table.id()) {
                 new_tables.push(table.clone());
                 continue;
             }
@@ -179,5 +179,20 @@ impl LevelHandler {
         self.tables = new_tables;
 
         Ok(())
+    }
+
+    pub fn init_tables(&mut self, tables: Vec<Table>) {
+        self.tables = tables;
+        self.total_size = 0;
+        for table in &self.tables {
+            self.total_size += table.size();
+        }
+
+        if self.level == 0 {
+            self.tables.sort_by(|x, y| x.id().cmp(&y.id()));
+        } else {
+            self.tables
+                .sort_by(|x, y| COMPARATOR.compare_key(x.smallest(), y.smallest()));
+        }
     }
 }

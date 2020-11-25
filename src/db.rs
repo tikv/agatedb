@@ -4,12 +4,14 @@ use crate::closer::Closer;
 use crate::entry::Entry;
 use crate::format::get_ts;
 use crate::levels::LevelsController;
+use crate::manifest::ManifestFile;
 use crate::opt;
 use crate::util::{has_any_prefixes, make_comparator};
 use crate::value::{self, Request, Value};
 use crate::value_log::ValueLog;
 use crate::wal::Wal;
 use crate::{Table, TableBuilder, TableOptions};
+
 use bytes::{Bytes, BytesMut};
 use crossbeam_channel::{Receiver, Sender};
 use skiplist::Skiplist;
@@ -27,6 +29,7 @@ pub struct Core {
     vlog: Option<ValueLog>,
     lvctl: LevelsController,
     flush_channel: (Sender<Option<FlushTask>>, Receiver<Option<FlushTask>>),
+    manifest: Arc<ManifestFile>,
 }
 
 pub struct Agate {
@@ -247,16 +250,23 @@ impl AgateOptions {
 impl Core {
     fn new(opts: AgateOptions) -> Result<Self> {
         // create first mem table
-        let mt = Self::open_mem_table(&opts.path, opts.clone(), 0)?;
+
+        let manifest = Arc::new(ManifestFile::open_or_create_manifest_file(&opts)?);
+        let lvctl = LevelsController::new(opts.clone(), manifest.clone())?;
+
+        let (imm_tables, mut next_mem_fid) = Self::open_mem_tables(&opts)?;
+        let mt = Self::open_mem_table(&opts.path, opts.clone(), next_mem_fid)?;
+        next_mem_fid += 1;
 
         // create agate core
         let mut core = Self {
-            mts: RwLock::new(MemTables::new(Arc::new(mt), VecDeque::new())),
+            mts: RwLock::new(MemTables::new(Arc::new(mt), imm_tables)),
             opts: opts.clone(),
-            next_mem_fid: AtomicUsize::new(1),
+            next_mem_fid: AtomicUsize::new(next_mem_fid),
             vlog: ValueLog::new(opts.clone()),
-            lvctl: LevelsController::new(opts.clone())?,
+            lvctl,
             flush_channel: crossbeam_channel::bounded(opts.num_memtables),
+            manifest,
         };
 
         if let Some(ref mut vlog) = core.vlog {
@@ -296,12 +306,40 @@ impl Core {
         Ok(mem_table)
     }
 
-    fn open_mem_tables(&mut self) -> Result<()> {
-        if self.opts.in_memory {
-            return Ok(());
+    fn open_mem_tables(opts: &AgateOptions) -> Result<(VecDeque<Arc<MemTable>>, usize)> {
+        if opts.in_memory {
+            return Ok((VecDeque::new(), 0));
         }
-        // TODO: process on-disk structures
-        Ok(())
+
+        let mut fids = vec![];
+        let mut mts = VecDeque::new();
+
+        for file in fs::read_dir(&opts.path)? {
+            let file = file?;
+            let filename_ = file.file_name();
+            let filename = filename_.to_string_lossy();
+            if filename.ends_with(MEMTABLE_FILE_EXT) {
+                let end = filename.len() - MEMTABLE_FILE_EXT.len();
+                let fid: usize = filename[end - 5..end].parse().unwrap();
+                fids.push(fid);
+            }
+        }
+        fids.sort();
+
+        for fid in &fids {
+            let memtable = Self::open_mem_table(&opts.path, opts.clone(), *fid)?;
+            mts.push_back(Arc::new(memtable));
+        }
+
+        let mut next_mem_fid = 0;
+
+        if !fids.is_empty() {
+            next_mem_fid = *fids.last().unwrap();
+        }
+
+        next_mem_fid += 1;
+
+        Ok((mts, next_mem_fid))
     }
 
     fn new_mem_table(&self) -> Result<MemTable> {
@@ -570,7 +608,7 @@ impl Agate {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::format::key_with_ts;
     use crate::levels::tests::helper_dump_levels;
@@ -584,7 +622,7 @@ mod tests {
         with_agate_test(|_| {});
     }
 
-    fn helper_dump_dir(path: &Path) {
+    pub fn helper_dump_dir(path: &Path) {
         let mut result = vec![];
         for entry in fs::read_dir(path).unwrap() {
             let entry = entry.unwrap();
@@ -600,7 +638,7 @@ mod tests {
         }
     }
 
-    fn with_agate_test(f: impl FnOnce(&mut Agate) -> () + Send + 'static) {
+    pub fn with_agate_test(f: impl FnOnce(&mut Agate) -> () + Send + 'static) {
         let (tx, rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || {
             let tmp_dir = TempDir::new("agatedb").unwrap();
@@ -629,7 +667,7 @@ mod tests {
 
         match rx.recv_timeout(std::time::Duration::from_secs(60)) {
             Ok(_) => handle.join().expect("thread panic"),
-            Err(_) => panic!("test timeout exceed"),
+            Err(err) => panic!("error: {:?}", err),
         }
     }
 
@@ -655,7 +693,7 @@ mod tests {
         buf.freeze()
     }
 
-    fn generate_requests(n: usize, payload: usize) -> Vec<Request> {
+    pub fn generate_requests(n: usize, payload: usize) -> Vec<Request> {
         let mut requests: Vec<Request> = (0..n)
             .map(|i| Request {
                 entries: vec![Entry::new(
@@ -674,10 +712,12 @@ mod tests {
         requests
     }
 
-    fn verify_requests(n: usize, agate: &Agate) {
+    pub fn verify_requests(n: usize, agate: &Agate) {
         for i in 0..n {
             let key = key_with_ts(BytesMut::from(format!("{:08x}", i).as_str()), 0);
             let value = agate.get(&key).unwrap();
+
+            assert!(!value.value.is_empty());
 
             if value.meta & value::VALUE_POINTER != 0 {
                 let vlog = agate.core.vlog.as_ref().unwrap();

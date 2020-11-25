@@ -4,6 +4,9 @@ version = "0.1.0"
 authors = ["Jay Lee <busyjaylee@gmail.com>"]
 edition = "2018"
 
+[lib]
+doctest = false
+
 [dependencies]
 thiserror = "1.0"
 bytes = "0.5"

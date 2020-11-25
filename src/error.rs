@@ -22,6 +22,8 @@ pub enum Error {
     #[error("Invalid prost data: {0}")]
     Decode(#[source] Box<prost::DecodeError>),
     #[error("Invalid data: {0}")]
+    Encode(#[source] Box<prost::EncodeError>),
+    #[error("Invalid data: {0}")]
     VarDecode(&'static str),
     #[error("{0}")]
     TableRead(String),
@@ -53,6 +55,13 @@ impl From<prost::DecodeError> for Error {
     #[inline]
     fn from(e: prost::DecodeError) -> Error {
         Error::Decode(Box::new(e))
+    }
+}
+
+impl From<prost::EncodeError> for Error {
+    #[inline]
+    fn from(e: prost::EncodeError) -> Error {
+        Error::Encode(Box::new(e))
     }
 }
 
