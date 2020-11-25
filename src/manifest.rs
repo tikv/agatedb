@@ -1,4 +1,4 @@
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, Write};
 use std::sync::Mutex;
 use std::{
@@ -34,38 +34,167 @@ pub struct TableManifest {
     // TODO: compression
 }
 
-struct ManifestFile {
+struct Core {
     file: Option<File>,
+    manifest: Manifest,
+}
+
+impl Core {
+    fn rewrite(&mut self, dir: &Path) -> Result<()> {
+        self.file.take();
+        let (file, net_creations) = ManifestFile::help_rewrite(dir, &self.manifest)?;
+        self.file = Some(file);
+        self.manifest.creations = net_creations;
+        self.manifest.deletions = 0;
+
+        Ok(())
+    }
+}
+
+struct ManifestFile {
     directory: PathBuf,
     deletions_rewrite_threshold: usize,
-    manifest: Mutex<Manifest>,
+    core: Mutex<Core>,
 }
 
 impl ManifestFile {
     fn open_or_create_manifest_file(opt: &AgateOptions) -> Result<Self> {
         if opt.in_memory {
             Ok(Self {
-                file: None,
                 directory: PathBuf::new(),
                 deletions_rewrite_threshold: 0,
-                manifest: Mutex::new(Manifest::new()),
+                core: Mutex::new(Core {
+                    manifest: Manifest::new(),
+                    file: None,
+                }),
             })
         } else {
             // TODO: read-only mode
-            Ok(Self::helper_open_or_create_manifest_file(
+            Ok(Self::help_open_or_create_manifest_file(
                 &opt.path,
                 MANIFEST_DELETION_REWRITE_THRESHOLD,
             )?)
         }
     }
 
-    fn helper_open_or_create_manifest_file(
-        path: impl AsRef<Path>,
+    fn help_open_or_create_manifest_file(
+        dir: impl AsRef<Path>,
         deletions_threshold: usize,
     ) -> Result<Self> {
-        let path = path.as_ref().join(MANIFEST_FILENAME);
+        let path = dir.as_ref().join(MANIFEST_FILENAME);
 
-        todo!();
+        // TODO: read-only
+
+        if path.exists() {
+            let mut file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(false)
+                .open(&path)?;
+            let (manifest, trunc_offset) = Manifest::replay(&mut file)?;
+            file.set_len(trunc_offset as u64)?;
+            file.seek(SeekFrom::End(0))?;
+            Ok(ManifestFile {
+                directory: dir.as_ref().to_path_buf(),
+                core: Mutex::new(Core {
+                    file: Some(file),
+                    manifest: manifest,
+                }),
+                deletions_rewrite_threshold: deletions_threshold,
+            })
+        } else {
+            let manifest = Manifest::new();
+            let (file, net_creations) = Self::help_rewrite(dir.as_ref(), &manifest)?;
+            assert_eq!(net_creations, 0);
+            // TODO: assert net creations = 0
+            Ok(ManifestFile {
+                directory: dir.as_ref().to_path_buf(),
+                core: Mutex::new(Core {
+                    file: Some(file),
+                    manifest: manifest,
+                }),
+                deletions_rewrite_threshold: deletions_threshold,
+            })
+        }
+    }
+
+    fn help_rewrite(dir: impl AsRef<Path>, manifest: &Manifest) -> Result<(File, usize)> {
+        let rewrite_path = dir.as_ref().join(MANIFEST_REWRITE_FILENAME);
+
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .truncate(true)
+            .create(true)
+            .open(&rewrite_path)?;
+
+        let mut buf = vec![0; 8];
+
+        buf[..4].clone_from_slice(MAGIC_TEXT);
+        (&mut buf[4..]).put_u32(MAGIC_VERSION);
+
+        let net_creations = manifest.tables.len();
+        let changes = manifest.as_changes();
+        let set = ManifestChangeSet { changes };
+        let mut change_buf = BytesMut::new();
+        set.encode(&mut change_buf)?;
+
+        let mut len_crc_buf = vec![0; 8];
+        (&mut len_crc_buf[..4]).put_u32(change_buf.len() as u32);
+        (&mut len_crc_buf[4..]).put_u32(crc32::checksum_castagnoli(&change_buf));
+
+        buf.extend_from_slice(&len_crc_buf);
+        buf.extend_from_slice(&change_buf);
+
+        file.write(&buf)?;
+        file.sync_all()?;
+        drop(file);
+
+        let manifest_path = dir.as_ref().join(MANIFEST_FILENAME);
+        fs::rename(&rewrite_path, &manifest_path)?;
+
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(false)
+            .open(&manifest_path)?;
+
+        file.seek(SeekFrom::End(0))?;
+
+        // TODO: sync dir
+
+        Ok((file, net_creations))
+    }
+
+    fn add_changes(&self, changes_param: Vec<ManifestChange>) -> Result<()> {
+        let mut core = self.core.lock().unwrap();
+        if core.file.is_none() {
+            return Ok(());
+        }
+
+        let changes = ManifestChangeSet {
+            changes: changes_param,
+        };
+        let mut buf = BytesMut::new();
+        changes.encode(&mut buf)?;
+
+        apply_change_set(&mut core.manifest, &changes)?;
+
+        if core.manifest.deletions > self.deletions_rewrite_threshold
+            && core.manifest.deletions
+                > MANIFEST_DELETIONS_RATIO * (core.manifest.creations - core.manifest.deletions)
+        {
+            core.rewrite(&self.directory)?;
+        } else {
+            let mut len_crc_buf = vec![0; 8];
+            (&mut len_crc_buf[..4]).put_u32(buf.len() as u32);
+            (&mut len_crc_buf[4..]).put_u32(crc32::checksum_castagnoli(&buf));
+            len_crc_buf.extend_from_slice(&buf);
+            core.file.as_mut().unwrap().write(&len_crc_buf)?;
+        }
+
+        core.file.as_mut().unwrap().sync_all()?;
+        Ok(())
     }
 }
 
