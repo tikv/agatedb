@@ -170,6 +170,18 @@ pub struct MemTables {
     immutable: VecDeque<Arc<MemTable>>,
 }
 
+impl Drop for MemTables {
+    fn drop(&mut self) {
+        for memtable in self.immutable.drain(..) {
+            // TODO: simply forget table instance would cause memory leak. Should find
+            // a better way to handle this. For example, `table.close_and_save()`, which
+            // consumes table instance without deleting the files.
+            std::mem::forget(memtable);
+        }
+        std::mem::forget(self.mutable.clone());
+    }
+}
+
 impl MemTables {
     pub(crate) fn new(mutable: Arc<MemTable>, immutable: VecDeque<Arc<MemTable>>) -> Self {
         Self { mutable, immutable }
