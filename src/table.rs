@@ -1,13 +1,16 @@
 pub(crate) mod builder;
 mod iterator;
+mod merge_iterator;
 
 use crate::bloom::Bloom;
 use crate::checksum;
+use crate::iterator_trait::AgateIterator;
 use crate::opt::{ChecksumVerificationMode, Options};
 use crate::Error;
 use crate::Result;
+
 use bytes::{Buf, Bytes};
-use iterator::{Iterator as TableIterator, ITERATOR_NOCACHE, ITERATOR_REVERSED};
+use iterator::{TableRefIterator, ITERATOR_NOCACHE, ITERATOR_REVERSED};
 use memmap::{Mmap, MmapOptions};
 use prost::Message;
 use proto::meta::{BlockOffset, Checksum, TableIndex};
@@ -15,6 +18,8 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+pub type TableIterator = TableRefIterator<Arc<TableInner>>;
 
 #[cfg(test)]
 mod tests;
@@ -174,7 +179,7 @@ impl TableInner {
     fn init_biggest_and_smallest(&mut self) -> Result<()> {
         let ko = self.init_index()?;
         self.smallest = Bytes::from(ko.key.clone());
-        let mut it = TableIterator::new(&self, ITERATOR_REVERSED | ITERATOR_NOCACHE);
+        let mut it = TableRefIterator::new(&self, ITERATOR_REVERSED | ITERATOR_NOCACHE);
         it.rewind();
         if !it.valid() {
             return Err(Error::TableRead(format!(
@@ -510,8 +515,8 @@ impl Table {
     }
 
     /// Get an iterator to this table
-    pub fn new_iterator(&self, opt: usize) -> TableIterator<Arc<TableInner>> {
-        TableIterator::new(self.inner.clone(), opt)
+    pub fn new_iterator(&self, opt: usize) -> TableIterator {
+        TableRefIterator::new(self.inner.clone(), opt)
     }
 
     /// Get max version of this table
