@@ -194,7 +194,7 @@ impl Core {
                 continue;
             }
             // TODO: created at logic
-            if cpt_status.tables.get(&table.id()).is_some() {
+            if cpt_status.tables.contains(&table.id()) {
                 continue;
             }
             out.push(table.clone());
@@ -531,6 +531,7 @@ impl Core {
     // pick some tables on that level and compact it to next level
     fn do_compact(&self, idx: usize, mut cpt_prio: CompactionPriority) -> Result<()> {
         let level = cpt_prio.level;
+
         assert!(level + 1 < self.opts.max_levels);
 
         if cpt_prio.targets.base_level == 0 {
@@ -664,6 +665,7 @@ impl Core {
 
         // TODO: adjust score
 
+        prios.pop(); // remove last level
         let mut x: Vec<CompactionPriority> = prios.into_iter().filter(|x| x.score > 1.0).collect();
         x.sort_by(|x, y| x.adjusted.partial_cmp(&y.adjusted).unwrap());
         x.reverse();
