@@ -17,6 +17,17 @@ pub struct LevelHandler {
     pub total_size: u64,
 }
 
+impl Drop for LevelHandler {
+    fn drop(&mut self) {
+        for table in self.tables.drain(..) {
+            // TODO: simply forget table instance would cause memory leak. Should find
+            // a better way to handle this. For example, `table.close_and_save()`, which
+            // consumes table instance without deleting the files.
+            std::mem::forget(table);
+        }
+    }
+}
+
 impl LevelHandler {
     pub fn new(opts: AgateOptions, level: usize) -> Self {
         Self {
