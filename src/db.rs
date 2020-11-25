@@ -629,7 +629,7 @@ mod tests {
 
         match rx.recv_timeout(std::time::Duration::from_secs(60)) {
             Ok(_) => handle.join().expect("thread panic"),
-            Err(_) => panic!("test timeout exceed"),
+            Err(err) => panic!("error: {:?}", err),
         }
     }
 

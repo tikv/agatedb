@@ -140,7 +140,7 @@ impl LevelHandler {
         let mut new_tables = vec![];
 
         for table in &self.tables {
-            if to_del_map.get(&table.id()).is_none() {
+            if !to_del_map.contains(&table.id()) {
                 new_tables.push(table.clone());
                 continue;
             }
@@ -169,7 +169,7 @@ impl LevelHandler {
         let mut new_tables = vec![];
 
         for table in &self.tables {
-            if to_del_map.get(&table.id()).is_none() {
+            if !to_del_map.contains(&table.id()) {
                 new_tables.push(table.clone());
                 continue;
             }

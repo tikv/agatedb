@@ -37,7 +37,7 @@ impl Core {
                            indices: &mut BinaryHeap<Reverse<u64>>,
                            index: u64,
                            done: bool| {
-            if pending.get(&index).is_none() {
+            if !pending.contains_key(&index) {
                 indices.push(Reverse(index));
             }
 
