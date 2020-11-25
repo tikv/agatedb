@@ -7,6 +7,7 @@ mod db;
 mod entry;
 mod error;
 mod format;
+mod iterator_trait;
 mod levels;
 mod memtable;
 mod ops;
@@ -25,4 +26,5 @@ pub use value::Value;
 
 pub use db::{Agate, AgateOptions};
 pub use error::{Error, Result};
+pub use iterator_trait::AgateIterator;
 pub use skiplist::Skiplist;

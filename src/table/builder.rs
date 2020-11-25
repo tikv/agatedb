@@ -3,6 +3,7 @@ use crate::format::user_key;
 use crate::opt::Options;
 use crate::value::Value;
 use crate::{checksum, util};
+
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use prost::Message;
 use proto::meta::{checksum::Algorithm as ChecksumAlg, BlockOffset, Checksum, TableIndex};
@@ -210,6 +211,7 @@ mod tests {
     use super::*;
     use crate::table::tests::build_test_table;
     use crate::table::Table;
+    use crate::AgateIterator;
     use crate::{format::key_with_ts, ChecksumVerificationMode};
     use tempdir::TempDir;
 
