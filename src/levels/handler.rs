@@ -180,4 +180,19 @@ impl LevelHandler {
 
         Ok(())
     }
+
+    pub fn init_tables(&mut self, tables: Vec<Table>) {
+        self.tables = tables;
+        self.total_size = 0;
+        for table in &self.tables {
+            self.total_size += table.size();
+        }
+
+        if self.level == 0 {
+            self.tables.sort_by(|x, y| x.id().cmp(&y.id()));
+        } else {
+            self.tables
+                .sort_by(|x, y| COMPARATOR.compare_key(x.smallest(), y.smallest()));
+        }
+    }
 }

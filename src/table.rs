@@ -579,6 +579,10 @@ impl Table {
     pub fn smallest(&self) -> &Bytes {
         self.inner.smallest()
     }
+
+    pub fn is_in_memory(&self) -> bool {
+        self.inner.is_in_memory()
+    }
 }
 
 fn id_to_filename(id: u64) -> String {

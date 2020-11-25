@@ -7,8 +7,12 @@ use compaction::{
 };
 use handler::LevelHandler;
 
+use proto::meta::{ManifestChange, ManifestChangeSet};
+
 use crate::closer::Closer;
 use crate::format::{get_ts, key_with_ts, user_key};
+use crate::manifest::{new_create_change, new_delete_change, Manifest, ManifestFile};
+use crate::opt::build_table_options;
 use crate::table::{MergeIterator, TableIterators};
 use crate::util::{has_any_prefixes, same_key, KeyComparator, COMPARATOR};
 use crate::value::{Value, ValuePointer};
@@ -33,6 +37,7 @@ struct Core {
     opts: AgateOptions,
     // TODO: agate oracle, manifest should be added here
     cpt_status: RwLock<CompactStatus>,
+    manifest: Arc<ManifestFile>,
 }
 
 pub struct LevelsController {
@@ -40,22 +45,54 @@ pub struct LevelsController {
 }
 
 impl Core {
-    fn new(opts: AgateOptions) -> Result<Self> {
+    fn new(opts: AgateOptions, manifest: Arc<ManifestFile>) -> Result<Self> {
         let mut levels = vec![];
         let mut cpt_status_levels = vec![];
-        for i in 0..opts.max_levels {
-            levels.push(Arc::new(RwLock::new(LevelHandler::new(opts.clone(), i))));
+
+        // TODO: revert to manifest
+
+        let manifest_data = manifest.manifest_cloned();
+
+        let mut max_file_id = 0;
+        let mut tables: Vec<Vec<Table>> = vec![];
+        let mut num_opened = 0;
+        tables.resize(opts.max_levels, vec![]);
+
+        println!("{:?}", manifest_data);
+
+        // TODO: parallel open tables
+        for (id, table_manifest) in manifest_data.tables {
+            if id > max_file_id {
+                max_file_id = id;
+            }
+            let table_opts = build_table_options(&opts);
+            // TODO: set compression, data_key, cache
+            let filename = crate::table::new_filename(id, &opts.path);
+            let table = Table::open(&filename, table_opts)?;
+            // TODO: allow checksum mismatch tables
+            tables[table_manifest.level as usize].push(table);
+            num_opened += 1;
+        }
+
+        println!("{} tables opened", num_opened);
+
+        for (i, tables) in tables.into_iter().enumerate() {
+            let mut level = LevelHandler::new(opts.clone(), i);
+            level.init_tables(tables);
+            levels.push(Arc::new(RwLock::new(level)));
+
             cpt_status_levels.push(LevelCompactStatus::default());
         }
 
         let lvctl = Self {
-            next_file_id: AtomicU64::new(0),
+            next_file_id: AtomicU64::new(max_file_id + 1),
             levels,
             opts: opts.clone(),
             cpt_status: RwLock::new(CompactStatus {
                 levels: cpt_status_levels,
                 tables: HashSet::new(),
             }),
+            manifest,
         };
 
         // TODO: load levels from disk
@@ -70,7 +107,8 @@ impl Core {
 
     fn add_l0_table(&self, table: Table) -> Result<()> {
         if !self.opts.in_memory {
-            // TODO: update manifest
+            self.manifest
+                .add_changes(vec![new_create_change(table.id(), 0, 0)])?;
         }
 
         while !self.levels[0].write()?.try_add_l0_table(table.clone()) {
@@ -316,7 +354,9 @@ impl Core {
         }
 
         let new_tables = self.compact_build_tables(level, compact_def)?;
-        // TODO: add change to manifest
+
+        let change_set = build_change_set(&compact_def, &new_tables);
+        self.manifest.add_changes(change_set.changes)?;
 
         if this_level_id != next_level_id {
             let mut this_level = this_level.write().unwrap();
@@ -674,9 +714,9 @@ impl Core {
 }
 
 impl LevelsController {
-    pub fn new(opts: AgateOptions) -> Result<Self> {
+    pub fn new(opts: AgateOptions, manifest: Arc<ManifestFile>) -> Result<Self> {
         Ok(Self {
-            core: Arc::new(Core::new(opts)?),
+            core: Arc::new(Core::new(opts, manifest)?),
         })
     }
 
@@ -755,6 +795,25 @@ impl LevelsController {
             self.run_compactor(i, closer.clone(), pool);
         }
     }
+}
+
+fn build_change_set(compact_def: &CompactDef, new_tables: &[Table]) -> ManifestChangeSet {
+    let mut changes = vec![];
+
+    for table in new_tables {
+        // TODO: data key id
+        changes.push(new_create_change(table.id(), compact_def.next_level_id, 0));
+    }
+    for table in &compact_def.top {
+        if !table.is_in_memory() {
+            changes.push(new_delete_change(table.id()));
+        }
+    }
+    for table in &compact_def.bot {
+        changes.push(new_delete_change(table.id()));
+    }
+
+    ManifestChangeSet { changes }
 }
 
 #[cfg(test)]

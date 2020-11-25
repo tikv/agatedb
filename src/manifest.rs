@@ -14,8 +14,9 @@ use proto::meta::{
 };
 
 use crate::{AgateOptions, Error, Result};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 
+#[derive(Clone, Debug)]
 pub struct Manifest {
     pub levels: Vec<LevelManifest>,
     pub tables: HashMap<u64, TableManifest>,
@@ -23,11 +24,12 @@ pub struct Manifest {
     pub deletions: usize,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone, Debug)]
 pub struct LevelManifest {
     pub tables: HashSet<u64>,
 }
 
+#[derive(Clone, Debug)]
 pub struct TableManifest {
     pub level: u8,
     pub key_id: u64,
@@ -51,14 +53,14 @@ impl Core {
     }
 }
 
-struct ManifestFile {
+pub struct ManifestFile {
     directory: PathBuf,
     deletions_rewrite_threshold: usize,
     core: Mutex<Core>,
 }
 
 impl ManifestFile {
-    fn open_or_create_manifest_file(opt: &AgateOptions) -> Result<Self> {
+    pub fn open_or_create_manifest_file(opt: &AgateOptions) -> Result<Self> {
         if opt.in_memory {
             Ok(Self {
                 directory: PathBuf::new(),
@@ -166,7 +168,7 @@ impl ManifestFile {
         Ok((file, net_creations))
     }
 
-    fn add_changes(&self, changes_param: Vec<ManifestChange>) -> Result<()> {
+    pub fn add_changes(&self, changes_param: Vec<ManifestChange>) -> Result<()> {
         let mut core = self.core.lock().unwrap();
         if core.file.is_none() {
             return Ok(());
@@ -195,6 +197,10 @@ impl ManifestFile {
 
         core.file.as_mut().unwrap().sync_all()?;
         Ok(())
+    }
+
+    pub fn manifest_cloned(&self) -> Manifest {
+        self.core.lock().unwrap().manifest.clone()
     }
 }
 
@@ -271,10 +277,8 @@ impl Manifest {
 
         Ok((build, offset))
     }
-}
 
-impl Clone for Manifest {
-    fn clone(&self) -> Self {
+    pub fn consolidate(&self) -> Self {
         let change_set = ManifestChangeSet {
             changes: self.as_changes(),
         };
@@ -329,7 +333,7 @@ fn apply_manifest_change(build: &mut Manifest, tc: &ManifestChange) -> Result<()
     Ok(())
 }
 
-fn new_create_change(id: u64, level: usize, key_id: u64) -> ManifestChange {
+pub fn new_create_change(id: u64, level: usize, key_id: u64) -> ManifestChange {
     ManifestChange {
         id,
         op: ManifestChangeOp::Create as i32,
@@ -341,7 +345,7 @@ fn new_create_change(id: u64, level: usize, key_id: u64) -> ManifestChange {
     }
 }
 
-fn new_delete_change(id: u64) -> ManifestChange {
+pub fn new_delete_change(id: u64) -> ManifestChange {
     ManifestChange {
         id,
         op: ManifestChangeOp::Delete as i32,
@@ -350,5 +354,40 @@ fn new_delete_change(id: u64) -> ManifestChange {
         key_id: 0,
         encryption_algo: 0,
         compression: 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::db::tests::{generate_requests, helper_dump_dir, verify_requests, with_agate_test};
+    use crate::levels::tests::helper_dump_levels;
+
+    use crate::AgateOptions;
+    use tempdir::TempDir;
+
+    #[test]
+    fn test_manifest_recover() {
+        let tmp_dir = TempDir::new("agatedb").unwrap();
+        let mut options = AgateOptions::default();
+
+        options
+            .create()
+            .in_memory(false)
+            .value_log_file_size(4 << 20);
+
+        options.mem_table_size = 1 << 14;
+        // set base level size small enought to make the compactor flush L0 to L5 and L6
+        options.base_level_size = 4 << 10;
+
+        let agate = options.open(&tmp_dir).unwrap();
+        agate.write_requests(generate_requests(2000, 0)).unwrap();
+        verify_requests(2000, &agate);
+        drop(agate);
+
+        let agate = options.open(&tmp_dir).unwrap();
+        verify_requests(2000, &agate);
+        drop(agate);
+
+        tmp_dir.close().unwrap();
     }
 }
