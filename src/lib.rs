@@ -10,6 +10,7 @@ mod entry;
 mod error;
 mod format;
 mod levels;
+mod manifest;
 mod memtable;
 mod ops;
 pub mod opt;
