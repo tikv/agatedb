@@ -7,11 +7,12 @@ use crate::value::{EntryReader, ValuePointer};
 use crate::AgateOptions;
 use crate::Error;
 use crate::Result;
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use memmap::{MmapMut, MmapOptions};
+use prost::encoding::decode_varint;
 use std::fs::{File, OpenOptions};
 use std::io::BufReader;
-use std::io::{Seek, SeekFrom};
+use std::io::{Cursor, Seek, SeekFrom};
 use std::path::PathBuf;
 
 pub const MAX_HEADER_SIZE: usize = 21;
@@ -67,24 +68,14 @@ impl Header {
         debug_assert_eq!(bytes.len(), encoded_len);
     }
 
-    /// Decode header from bytes
-    pub fn decode(&mut self, bytes: &[u8]) -> Result<usize> {
-        if bytes.len() < 2 {
-            return Err(Error::VarDecode("failed to decode, length < 2"));
-        }
-        self.meta = bytes[0];
-        self.user_meta = bytes[1];
-        let mut read = 2;
-        let (key_len, cnt) = decode_varint_u32(&bytes[read..])?;
-        read += cnt as usize;
-        self.key_len = key_len;
-        let (value_len, cnt) = decode_varint_u32(&bytes[read..])?;
-        read += cnt as usize;
-        self.value_len = value_len;
-        let (expires_at, cnt) = decode_varint_u64(&bytes[read..])?;
-        read += cnt as usize;
-        self.expires_at = expires_at;
-        Ok(read)
+    /// Decode header from byte stream
+    pub fn decode(&mut self, bytes: &mut impl Buf) -> Result<()> {
+        self.meta = bytes.get_u8();
+        self.user_meta = bytes.get_u8();
+        self.key_len = decode_varint(bytes)? as u32;
+        self.value_len = decode_varint(bytes)? as u32;
+        self.expires_at = decode_varint(bytes)? as u64;
+        Ok(())
     }
 }
 
@@ -202,7 +193,7 @@ impl Wal {
     fn decode_entry(buf: &mut Bytes) -> Result<Entry> {
         let mut header = Header::default();
         let header_len = header.decode(buf)?;
-        let kv = buf.slice(header_len..);
+        let kv = buf;
         Ok(Entry {
             meta: header.meta,
             user_meta: header.user_meta,
@@ -257,8 +248,9 @@ impl Wal {
 
     /// Get WAL iterator
     pub fn iter(&mut self) -> Result<WalIterator> {
-        self.file.seek(SeekFrom::Start(0))?;
-        Ok(WalIterator::new(BufReader::new(&mut self.file)))
+        Ok(WalIterator::new(Cursor::new(
+            &self.mmap_file[0..self.size as usize],
+        )))
     }
 
     pub fn should_flush(&self) -> bool {
@@ -291,13 +283,13 @@ impl Wal {
 
 pub struct WalIterator<'a> {
     /// `reader` stores the file to read
-    reader: BufReader<&'a mut File>,
+    reader: Cursor<&'a [u8]>,
     /// `entry_reader` operates on `reader` and buffers entry information
     entry_reader: EntryReader,
 }
 
 impl<'a> WalIterator<'a> {
-    pub fn new(reader: BufReader<&'a mut File>) -> Self {
+    pub fn new(reader: Cursor<&'a [u8]>) -> Self {
         Self {
             reader,
             entry_reader: EntryReader::new(),
@@ -309,6 +301,7 @@ impl<'a> WalIterator<'a> {
         use std::io::ErrorKind;
 
         let entry = self.entry_reader.entry(&mut self.reader);
+
         match entry {
             Ok(entry) => {
                 if entry.is_zero() {
