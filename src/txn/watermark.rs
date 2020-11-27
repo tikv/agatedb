@@ -1,7 +1,7 @@
 use crate::closer::Closer;
 use crossbeam_channel::{bounded, select, Receiver, Sender};
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::{BinaryHeap, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 

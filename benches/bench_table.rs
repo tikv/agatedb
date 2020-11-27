@@ -1,9 +1,10 @@
 mod common;
 
+use agatedb::ChecksumVerificationMode::NoVerification;
+use agatedb::{AgateIterator, Table, TableBuilder, TableOptions, Value};
+
 use std::ops::{Deref, DerefMut};
 
-use agatedb::opt::ChecksumVerificationMode::NoVerification;
-use agatedb::{AgateIterator, Table, TableBuilder, TableOptions, Value};
 use bytes::Bytes;
 use common::rand_value;
 use criterion::{criterion_group, criterion_main, Criterion};

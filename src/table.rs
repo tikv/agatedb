@@ -3,20 +3,15 @@ pub mod concat_iterator;
 mod iterator;
 pub mod merge_iterator;
 
-pub use concat_iterator::ConcatIterator;
-pub use merge_iterator::{Iterators as TableIterators, MergeIterator};
-
-pub type TableIterator = RefTableIterator<Arc<TableInner>>;
-
 use crate::bloom::Bloom;
 use crate::checksum;
+use crate::iterator_trait::AgateIterator;
 use crate::opt::{ChecksumVerificationMode, Options};
-use crate::structs::AgateIterator;
 use crate::Error;
 use crate::Result;
 
 use bytes::{Buf, Bytes};
-use iterator::Iterator as RefTableIterator;
+use iterator::TableRefIterator;
 use memmap::{Mmap, MmapOptions};
 use prost::Message;
 use proto::meta::{BlockOffset, Checksum, TableIndex};
@@ -25,7 +20,11 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+pub use concat_iterator::ConcatIterator;
 pub use iterator::{ITERATOR_NOCACHE, ITERATOR_REVERSED};
+pub use merge_iterator::{Iterators as TableIterators, MergeIterator};
+pub type TableIterator = TableRefIterator<Arc<TableInner>>;
+
 #[cfg(test)]
 mod tests;
 
@@ -189,7 +188,7 @@ impl TableInner {
     fn init_biggest_and_smallest(&mut self) -> Result<()> {
         let ko = self.init_index()?;
         self.smallest = Bytes::from(ko.key.clone());
-        let mut it = RefTableIterator::new(&self, ITERATOR_REVERSED | ITERATOR_NOCACHE);
+        let mut it = TableRefIterator::new(&self, ITERATOR_REVERSED | ITERATOR_NOCACHE);
         it.rewind();
         if !it.valid() {
             return Err(Error::TableRead(format!(
@@ -546,7 +545,7 @@ impl Table {
 
     /// Get an iterator to this table
     pub fn new_iterator(&self, opt: usize) -> TableIterator {
-        RefTableIterator::new(self.inner.clone(), opt)
+        TableRefIterator::new(self.inner.clone(), opt)
     }
 
     /// Get max version of this table

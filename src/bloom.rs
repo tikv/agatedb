@@ -1,4 +1,4 @@
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 
 pub trait BitSlice {
     fn get_bit(&self, idx: usize) -> bool;
@@ -36,15 +36,17 @@ impl<'a, T: AsMut<[u8]>> BitSliceMut for T {
 /// Bloom implements bloom filter functionalities over
 /// a bit-slice of data.
 pub struct Bloom<'a> {
+    /// data of filter in bits
     filter: &'a [u8],
-    k: u32,
+    /// number of hash functions
+    k: u8,
 }
 
 impl<'a> Bloom<'a> {
     /// Create a bloom filter from a byte slice
     pub fn new(buf: &'a [u8]) -> Self {
-        let filter = &buf[..buf.len() - 4];
-        let k = (&buf[buf.len() - 4..]).get_u32();
+        let filter = &buf[..buf.len() - 1];
+        let k = buf[buf.len() - 1];
         Self { filter, k }
     }
 
@@ -66,7 +68,7 @@ impl<'a> Bloom<'a> {
         let nbytes = (nbits + 7) / 8;
         // nbits is always multiplication of 8
         let nbits = nbytes * 8;
-        let mut filter = BytesMut::with_capacity(nbytes);
+        let mut filter = BytesMut::with_capacity(nbytes + 1);
         filter.resize(nbytes, 0);
         for h in keys {
             let mut h = *h;
@@ -77,7 +79,7 @@ impl<'a> Bloom<'a> {
                 h = h.wrapping_add(delta);
             }
         }
-        filter.put_u32(k);
+        filter.put_u8(k as u8);
         filter.freeze()
     }
 
