@@ -1,7 +1,7 @@
 use crate::entry::Entry;
 use crate::entry::EntryRef;
 use crate::wal::Header;
-use crate::Result;
+use crate::{Error, Result};
 use bytes::{BufMut, Bytes, BytesMut};
 use std::io::{Cursor, Read};
 use std::mem::MaybeUninit;
@@ -170,6 +170,11 @@ impl EntryReader {
     /// Entry returns header, key and value.
     pub fn entry(&mut self, reader: &mut Cursor<&[u8]>) -> Result<EntryRef> {
         self.header.decode(reader)?;
+        if self.header.key_len > (1 << 16) {
+            return Err(Error::LogRead(
+                "key length must be lower than 1 << 16".to_string(),
+            ));
+        }
         self.key.resize(self.header.key_len as usize, 0);
         reader.read_exact(&mut self.key)?;
         self.value.resize(self.header.value_len as usize, 0);

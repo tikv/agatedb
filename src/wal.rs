@@ -191,7 +191,7 @@ impl Wal {
     /// Decode entry from buffer
     fn decode_entry(buf: &mut Bytes) -> Result<Entry> {
         let mut header = Header::default();
-        let _header_len = header.decode(buf)?;
+        header.decode(buf)?;
         let kv = buf;
         Ok(Entry {
             meta: header.meta,
