@@ -3,7 +3,7 @@ use std::io::{Read, Seek, Write};
 use std::sync::Mutex;
 use std::{
     collections::{HashMap, HashSet},
-    io::{BufReader, SeekFrom},
+    io::SeekFrom,
     path::{Path, PathBuf},
 };
 
@@ -359,8 +359,7 @@ pub fn new_delete_change(id: u64) -> ManifestChange {
 
 #[cfg(test)]
 mod tests {
-    use crate::db::tests::{generate_requests, helper_dump_dir, verify_requests, with_agate_test};
-    use crate::levels::tests::helper_dump_levels;
+    use crate::db::tests::{generate_requests, verify_requests};
 
     use crate::AgateOptions;
     use tempdir::TempDir;

@@ -386,6 +386,20 @@ fn test_table_big_values() {
 }
 
 #[test]
+fn test_table_checksum() {
+    let mut rng = thread_rng();
+    let mut opts = get_test_table_options();
+    opts.checksum_mode = ChecksumVerificationMode::OnTableAndBlockRead;
+    let kv_pairs = generate_table_data(b"k", 10000, opts.clone());
+    let mut table_data = build_table_data(kv_pairs, opts.clone()).to_vec();
+    let start = rng.gen_range(0, table_data.len() - 100);
+    rng.fill_bytes(&mut table_data[start..start + 100]);
+    assert!(matches!(
+        Table::open_in_memory(Bytes::from(table_data), 233, opts),
+        Err(Error::InvalidChecksum(_))
+    ));
+}
+
 fn test_iterator_error_eof() {
     let opts = get_test_table_options();
     let table = build_test_table(b"key", 10000, opts);
@@ -421,11 +435,11 @@ fn test_iterator_out_of_bound() {
     it.seek_to_last();
     assert!(it.error().is_none());
     it.next();
-    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    assert_eq!(it.error(), Some(&IteratorError::EOF));
     it.next();
-    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    assert_eq!(it.error(), Some(&IteratorError::EOF));
     it.next();
-    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    assert_eq!(it.error(), Some(&IteratorError::EOF));
     it.rewind();
     assert!(it.error().is_none());
     assert_eq!(user_key(it.key()), key(b"key", 0));
@@ -439,25 +453,12 @@ fn test_iterator_out_of_bound_reverse() {
     it.seek_to_first();
     assert!(it.error().is_none());
     it.next();
-    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    assert_eq!(it.error(), Some(&IteratorError::EOF));
     it.next();
-    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    assert_eq!(it.error(), Some(&IteratorError::EOF));
     it.next();
-    assert!(matches!(it.error(), Some(IteratorError::EOF)));
+    assert_eq!(it.error(), Some(&IteratorError::EOF));
     it.rewind();
     assert!(it.error().is_none());
     assert_eq!(user_key(it.key()), key(b"key", 999));
-}
-
-fn test_table_checksum() {
-    let mut rng = thread_rng();
-    let opts = get_test_table_options();
-    let kv_pairs = generate_table_data(b"k", 10000, opts.clone());
-    let mut table_data = build_table_data(kv_pairs, opts.clone()).to_vec();
-    let start = rng.gen_range(0, table_data.len() - 100);
-    rng.fill_bytes(&mut table_data[start..start + 100]);
-    assert!(matches!(
-        Table::open_in_memory(Bytes::from(table_data), 233, opts),
-        Err(Error::InvalidChecksum(_))
-    ));
 }

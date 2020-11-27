@@ -1,7 +1,7 @@
 use crate::util::{KeyComparator, COMPARATOR};
 use crate::value::Value;
 use crate::Result;
-use crate::{format::user_key, get_ts, structs::AgateIterator};
+use crate::{format::user_key, get_ts, iterator_trait::AgateIterator};
 use crate::{AgateOptions, Table};
 
 use super::KeyRange;

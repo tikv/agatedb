@@ -7,11 +7,11 @@ use compaction::{
 };
 use handler::LevelHandler;
 
-use proto::meta::{ManifestChange, ManifestChangeSet};
+use proto::meta::ManifestChangeSet;
 
 use crate::closer::Closer;
 use crate::format::{get_ts, key_with_ts, user_key};
-use crate::manifest::{new_create_change, new_delete_change, Manifest, ManifestFile};
+use crate::manifest::{new_create_change, new_delete_change, ManifestFile};
 use crate::opt::build_table_options;
 use crate::table::{MergeIterator, TableIterators};
 use crate::util::{has_any_prefixes, same_key, KeyComparator, COMPARATOR};
