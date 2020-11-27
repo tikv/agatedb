@@ -14,7 +14,7 @@ use crate::{Table, TableBuilder, TableOptions};
 
 use bytes::{Bytes, BytesMut};
 use crossbeam_channel::{Receiver, Sender};
-use skiplist::Skiplist;
+use skiplist::{Skiplist, MAX_NODE_SIZE};
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -134,6 +134,13 @@ pub struct AgateOptions {
     pub num_compactors: usize,
 
     pub checksum_mode: opt::ChecksumVerificationMode,
+
+    pub detect_conflicts: bool,
+
+    managed_txns: bool,
+
+    pub(crate) max_batch_count: u64,
+    pub(crate) max_batch_size: u64,
 }
 
 impl Default for AgateOptions {
@@ -165,6 +172,10 @@ impl Default for AgateOptions {
             num_level_zero_tables: 5,
             num_level_zero_tables_stall: 15,
             num_compactors: 4,
+            detect_conflicts: true,
+            managed_txns: false,
+            max_batch_count: 0,
+            max_batch_size: 0,
         }
         // TODO: add other options
     }
@@ -212,11 +223,16 @@ impl AgateOptions {
             self.sync_writes = false;
         }
 
+        self.max_batch_size = (15 * self.mem_table_size) / 100;
+        self.max_batch_count = self.max_batch_size / MAX_NODE_SIZE as u64;
+
         Ok(())
     }
 
+    // open is by-default OpenManaged
     pub fn open<P: AsRef<Path>>(&mut self, path: P) -> Result<Agate> {
         self.fix_options()?;
+        self.managed_txns = true;
 
         self.path = path.as_ref().to_path_buf();
         // TODO: allow specify value dir

@@ -44,6 +44,14 @@ impl Entry {
         self.meta |= DELETE;
     }
 
+    pub fn estimate_size(&self, threshold: usize) -> usize {
+        if self.value.len() < threshold {
+            self.key.len() + self.value.len() + 2
+        } else {
+            self.key.len() + 12 + 2
+        }
+    }
+
     // TODO: entry encoding will be done later, as current WAL encodes header and key / value separately
     /*
     pub fn encoded_len(&self) -> usize {

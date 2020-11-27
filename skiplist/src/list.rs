@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::{mem, ptr, u32};
 
 const HEIGHT_INCREASE: u32 = u32::MAX / 3;
+pub const MAX_NODE_SIZE: usize = mem::size_of::<Node>();
 
 // Uses C layout to make sure tower is at the bottom
 #[derive(Debug)]

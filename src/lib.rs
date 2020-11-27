@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 #![feature(slice_fill)]
 #![feature(hash_drain_filter)]
+#![feature(drain_filter)]
 
 mod bloom;
 mod checksum;
