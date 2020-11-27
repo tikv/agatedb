@@ -2,9 +2,8 @@ use bytes::{Bytes, BytesMut};
 use enum_dispatch::enum_dispatch;
 
 use super::concat_iterator::ConcatIterator;
-use super::iterator::Iterator;
-use super::TableInner;
-use crate::structs::AgateIterator;
+use super::TableIterator;
+use crate::iterator_trait::AgateIterator;
 use crate::util::{KeyComparator, COMPARATOR};
 use crate::Value;
 
@@ -232,7 +231,6 @@ impl AgateIterator for MergeIterator {
 mod tests {
     use super::*;
     use crate::format::{key_with_ts, user_key};
-    use rand::prelude::*;
 
     pub struct VecIterator {
         vec: Vec<Bytes>,
