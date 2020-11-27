@@ -3,7 +3,7 @@ use crate::entry::EntryRef;
 use crate::wal::Header;
 use crate::Result;
 use bytes::{BufMut, Bytes, BytesMut};
-use std::io::{Cursor, Read, Seek};
+use std::io::{Cursor, Read};
 use std::mem::MaybeUninit;
 
 pub const VALUE_DELETE: u8 = 1 << 0;

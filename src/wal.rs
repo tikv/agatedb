@@ -1,7 +1,7 @@
 use crate::entry::{Entry, EntryRef};
 use crate::util::binary::{
-    decode_varint_u32, decode_varint_u64, encode_varint_u32_to_array, encode_varint_u64_to_array,
-    varint_u32_bytes_len, varint_u64_bytes_len,
+    encode_varint_u32_to_array, encode_varint_u64_to_array, varint_u32_bytes_len,
+    varint_u64_bytes_len,
 };
 use crate::value::{EntryReader, ValuePointer};
 use crate::AgateOptions;
@@ -11,8 +11,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use memmap::{MmapMut, MmapOptions};
 use prost::encoding::decode_varint;
 use std::fs::{File, OpenOptions};
-use std::io::BufReader;
-use std::io::{Cursor, Seek, SeekFrom};
+use std::io::Cursor;
 use std::path::PathBuf;
 
 pub const MAX_HEADER_SIZE: usize = 21;
@@ -192,7 +191,7 @@ impl Wal {
     /// Decode entry from buffer
     fn decode_entry(buf: &mut Bytes) -> Result<Entry> {
         let mut header = Header::default();
-        let header_len = header.decode(buf)?;
+        let _header_len = header.decode(buf)?;
         let kv = buf;
         Ok(Entry {
             meta: header.meta,
