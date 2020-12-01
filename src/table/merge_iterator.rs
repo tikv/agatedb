@@ -15,6 +15,7 @@ pub enum Iterators {
     MergeIterator(MergeIterator),
     ConcatIterator(ConcatIterator),
     TableIterator(TableIterator),
+    TxnIterator(crate::ops::transaction::PendingWritesIterator),
     #[cfg(test)]
     VecIterator(tests::VecIterator),
 }

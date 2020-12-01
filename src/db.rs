@@ -27,7 +27,7 @@ pub struct Core {
     mts: RwLock<MemTables>,
     pub(crate) opts: AgateOptions,
     next_mem_fid: AtomicUsize,
-    vlog: Option<ValueLog>,
+    pub(crate) vlog: Arc<Option<ValueLog>>,
     lvctl: LevelsController,
     flush_channel: (Sender<Option<FlushTask>>, Receiver<Option<FlushTask>>),
     manifest: Arc<ManifestFile>,
@@ -277,18 +277,18 @@ impl Core {
         next_mem_fid += 1;
 
         // create agate core
-        let mut core = Self {
+        let core = Self {
             mts: RwLock::new(MemTables::new(Arc::new(mt), imm_tables)),
             opts: opts.clone(),
             next_mem_fid: AtomicUsize::new(next_mem_fid),
-            vlog: ValueLog::new(opts.clone()),
+            vlog: Arc::new(ValueLog::new(opts.clone())),
             lvctl,
             flush_channel: crossbeam_channel::bounded(opts.num_memtables),
             manifest,
             orc: Arc::new(Oracle::new(opts.managed_txns, opts.detect_conflicts)),
         };
 
-        if let Some(ref mut vlog) = core.vlog {
+        if let Some(ref vlog) = *core.vlog {
             vlog.open()?
         }
 
@@ -585,7 +585,7 @@ impl Core {
 
         // TODO: process subscriptions
 
-        if let Some(ref vlog) = self.vlog {
+        if let Some(ref vlog) = *self.vlog {
             vlog.write(&mut requests)?;
         }
 
@@ -609,6 +609,17 @@ impl Core {
         // println!("{} entries written", cnt);
 
         Ok(())
+    }
+
+    pub(crate) fn get_mem_tables(&self) -> Vec<Arc<MemTable>> {
+        // TODO: check read-only
+        let mut tables = vec![];
+        let mts = self.mts.read().unwrap();
+        tables.push(mts.table_mut());
+        for idx in 0..mts.nums_of_memtable() - 1 {
+            tables.push(mts.table_imm(idx));
+        }
+        tables
     }
 }
 
@@ -739,7 +750,7 @@ pub(crate) mod tests {
             assert!(!value.value.is_empty());
 
             if value.meta & value::VALUE_POINTER != 0 {
-                let vlog = agate.core.vlog.as_ref().unwrap();
+                let vlog = agate.core.vlog.as_ref().as_ref().unwrap();
                 let mut vptr = ValuePointer::default();
                 vptr.decode(&value.value);
                 let kv = vlog.read(vptr).unwrap();

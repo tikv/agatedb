@@ -10,17 +10,16 @@ use crate::{
 use crate::{entry::Entry, util::default_hash};
 use crate::{Error, Result};
 use bytes::{Bytes, BytesMut};
-use std::sync::Arc;
-use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet},
-};
+use std::sync::{Arc, atomic::AtomicUsize};
+use std::collections::{HashMap, HashSet};
 
 const MAX_KEY_LENGTH: usize = 65000;
 
 const AGATE_PREFIX: &[u8] = b"!agate!";
 const TXN_KEY: &[u8] = b"!agate!txn";
 
+// TODO: a discarded transaction must have been dropped.
+// we don't need to handle related logic inside Transaction.
 pub struct Transaction {
     pub(crate) read_ts: u64,
     pub(crate) commit_ts: u64,
@@ -35,12 +34,12 @@ pub struct Transaction {
     pub(crate) pending_writes: HashMap<Bytes, Entry>,
     pub(crate) duplicate_writes: Vec<Entry>,
 
-    pub(crate) num_iterators: usize,
+    pub(crate) num_iterators: AtomicUsize,
     pub(crate) discarded: bool,
     pub(crate) done_read: bool,
     pub(crate) update: bool,
 
-    agate: Arc<crate::db::Core>,
+    pub(crate) agate: Arc<crate::db::Core>,
 }
 
 impl Agate {
@@ -80,7 +79,7 @@ impl Transaction {
             discarded: false,
             done_read: false,
             update: false,
-            num_iterators: 0,
+            num_iterators: AtomicUsize::new(0),
             agate: core,
         }
     }
@@ -146,7 +145,7 @@ impl Transaction {
         Ok(())
     }
 
-    fn new_pending_write_iterator(&self, reversed: bool) -> Option<PendingWritesIterator> {
+    pub(crate) fn new_pending_write_iterator(&self, reversed: bool) -> Option<PendingWritesIterator> {
         if !self.update || self.pending_writes.is_empty() {
             return None;
         }
@@ -317,7 +316,9 @@ impl Transaction {
             // let e = Entry::new(key_with_ts(BytesMut::from(TXN_KEY), commit_ts), )
         }
 
-        Ok(())
+        drop(write_ch_lock);
+
+        unimplemented!();
     }
 
     fn commit(mut self) -> Result<()> {
@@ -346,7 +347,7 @@ impl Drop for Transaction {
     }
 }
 
-struct PendingWritesIterator {
+pub struct PendingWritesIterator {
     entries: Vec<Entry>,
     next_idx: usize,
     read_ts: u64,
