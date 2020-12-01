@@ -204,7 +204,8 @@ impl Iterator<'_> {
                 self.table_iter.next();
                 return false;
             }
-            self.last_key.clone_from_slice(key);
+            self.last_key.clear();
+            self.last_key.extend_from_slice(key);
         }
 
         let vs = self.table_iter.value();
@@ -258,7 +259,7 @@ impl Iterator<'_> {
 
         // TODO: reverse
         let mut key_ts = BytesMut::new();
-        key_ts.clone_from_slice(key);
+        key_ts.extend_from_slice(key);
         let key = key_with_ts(key_ts, self.txn.read_ts);
 
         self.table_iter.seek(&key);

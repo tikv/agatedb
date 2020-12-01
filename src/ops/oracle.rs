@@ -104,7 +104,7 @@ impl Oracle {
         commit_info.next_txn_ts += 1;
     }
 
-    fn set_discard_ts(&self, discard_ts: u64) {
+    pub(crate) fn set_discard_ts(&self, discard_ts: u64) {
         let mut commit_info = self.commit_info.lock().unwrap();
         commit_info.discard_ts = discard_ts;
         commit_info.cleanup_committed_transactions();

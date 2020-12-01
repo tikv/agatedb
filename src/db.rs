@@ -14,14 +14,20 @@ use crate::wal::Wal;
 use crate::{Table, TableBuilder, TableOptions};
 
 use bytes::{Bytes, BytesMut};
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{bounded, select, Receiver, Sender};
 use skiplist::{Skiplist, MAX_NODE_SIZE};
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, RwLock};
 use yatp::task::callback::Handle;
+
+const KV_WRITE_CH_CAPACITY: usize = 1000;
+
+struct Closers {
+    writes: Closer,
+}
 
 pub struct Core {
     mts: RwLock<MemTables>,
@@ -30,8 +36,12 @@ pub struct Core {
     pub(crate) vlog: Arc<Option<ValueLog>>,
     pub(crate) lvctl: LevelsController,
     flush_channel: (Sender<Option<FlushTask>>, Receiver<Option<FlushTask>>),
+    write_channel: (Sender<Request>, Receiver<Request>),
     manifest: Arc<ManifestFile>,
     pub(crate) orc: Arc<Oracle>,
+
+    block_writes: AtomicBool,
+    closers: Closers,
 }
 
 pub struct Agate {
@@ -70,6 +80,7 @@ impl Agate {
 
     fn new(core: Arc<Core>) -> Self {
         let flush_core = core.clone();
+        let writer_core = core.clone();
         let closer = Closer::new();
         let agate = Self {
             core,
@@ -80,6 +91,12 @@ impl Agate {
         agate
             .pool
             .spawn(move |_: &mut Handle<'_>| flush_core.flush_memtable().unwrap());
+
+        agate.pool.spawn(move |_: &mut Handle<'_>| {
+            writer_core
+                .do_writes(writer_core.closers.writes.clone())
+                .unwrap()
+        });
 
         agate
             .core
@@ -93,6 +110,7 @@ impl Agate {
     fn close(&self) {
         // TODO: use closer for flush channel
         self.core.flush_channel.0.send(None).unwrap();
+        self.core.closers.writes.close();
         self.closer.close();
     }
 }
@@ -286,6 +304,11 @@ impl Core {
             flush_channel: crossbeam_channel::bounded(opts.num_memtables),
             manifest,
             orc: Arc::new(Oracle::new(opts.managed_txns, opts.detect_conflicts)),
+            block_writes: AtomicBool::new(false),
+            write_channel: bounded(KV_WRITE_CH_CAPACITY),
+            closers: Closers {
+                writes: Closer::new(),
+            },
         };
 
         if let Some(ref vlog) = *core.vlog {
@@ -621,6 +644,49 @@ impl Core {
         }
         tables
     }
+
+    fn send_to_write_channel(&self, entries: Vec<Entry>) -> Result<Receiver<Result<()>>> {
+        if self.block_writes.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Error::CustomError("block writes".to_string()));
+        }
+        let mut size = 0;
+        let mut count = 0;
+        for entry in &entries {
+            size += entry.estimate_size(self.opts.value_threshold) as u64;
+            count += 1;
+        }
+        if count >= self.opts.max_batch_count || size >= self.opts.max_batch_size {
+            return Err(Error::CustomError("txn too big".to_string()));
+        }
+        let (tx, rx) = bounded(1);
+        // TODO: get request from pool
+        let req = Request {
+            entries,
+            ptrs: vec![],
+            done: Some(tx),
+        };
+        self.write_channel.0.send(req)?;
+        Ok(rx)
+    }
+
+    fn do_writes(&self, closer: Closer) -> Result<()> {
+        loop {
+            select! {
+                recv(self.write_channel.1) -> req => {
+                    // TODO: blocking writes
+                    // TODO: batch write
+                    let req = req.unwrap();
+                    if let Some(done) = req.done.clone() {
+                        done.send(self.write_requests(vec![req])).unwrap();
+                    }
+                },
+                recv(closer.has_been_closed()) -> _ => {
+                    // TODO: process pending writes
+                    return Ok(());
+                }
+            }
+        }
+    }
 }
 
 impl Agate {
@@ -709,6 +775,7 @@ pub(crate) mod tests {
             let req = Request {
                 entries: vec![Entry::new(key.clone(), value.clone())],
                 ptrs: vec![],
+                done: None,
             };
             agate.write_to_lsm(req).unwrap();
             let value = agate.get(&key).unwrap();
@@ -735,6 +802,7 @@ pub(crate) mod tests {
                     ),
                 )],
                 ptrs: vec![],
+                done: None,
             })
             .collect();
         let mut rng = rand::thread_rng();

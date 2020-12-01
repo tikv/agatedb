@@ -43,7 +43,7 @@ pub struct Transaction {
 }
 
 impl Agate {
-    fn new_transaction(&self, update: bool) -> Transaction {
+    pub fn new_transaction(&self, update: bool) -> Transaction {
         // TODO: read-only database
         let mut txn = Transaction::new(self.core.clone());
         txn.update = update;
@@ -54,13 +54,25 @@ impl Agate {
         txn
     }
 
-    fn update(&self, f: impl FnOnce(&mut Transaction) -> Result<()>) -> Result<()> {
+    pub fn update(&self, f: impl FnOnce(&mut Transaction) -> Result<()>) -> Result<()> {
         if self.core.opts.managed_txns {
             panic!("update can obly be used with managed_db=false");
         }
         let mut txn = self.new_transaction(true);
         f(&mut txn)?;
         txn.commit()?;
+        Ok(())
+    }
+
+    pub fn view(&self, f: impl FnOnce(&mut Transaction) -> Result<()>) -> Result<()> {
+        // TODO: check closed
+        let mut txn;
+        if self.core.opts.managed_txns {
+            txn = self.new_transaction_at(std::u64::MAX, false);
+        } else {
+            txn = self.new_transaction(false);
+        }
+        f(&mut txn)?;
         Ok(())
     }
 }
@@ -217,7 +229,7 @@ impl Transaction {
         }
 
         let mut key_with_ts = BytesMut::new();
-        key_with_ts.clone_from_slice(key);
+        key_with_ts.extend_from_slice(key);
         append_ts(&mut key_with_ts, self.read_ts);
 
         let seek = key_with_ts.freeze();
@@ -298,7 +310,7 @@ impl Transaction {
 
         let process_entry = |entries: &mut Vec<Entry>, mut e: Entry| {
             let mut key = BytesMut::new();
-            key.clone_from_slice(&e.key);
+            key.extend_from_slice(&e.key);
             e.key = key_with_ts(key, e.version);
             if keep_together {
                 e.meta |= crate::value::VALUE_TXN;
@@ -324,7 +336,7 @@ impl Transaction {
         unimplemented!();
     }
 
-    fn commit(mut self) -> Result<()> {
+    pub(crate) fn commit(mut self) -> Result<()> {
         if self.pending_writes.is_empty() {
             return Ok(());
         }
@@ -371,7 +383,8 @@ impl PendingWritesIterator {
     fn update_key(&mut self) {
         if self.valid() {
             let entry = &self.entries[self.next_idx];
-            self.key.clone_from_slice(&entry.key);
+            self.key.clear();
+            self.key.extend_from_slice(&entry.key);
             append_ts(&mut self.key, self.read_ts);
         }
     }
@@ -423,5 +436,28 @@ impl AgateIterator for PendingWritesIterator {
 
     fn valid(&self) -> bool {
         self.next_idx < self.entries.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::db::tests::with_agate_test;
+    use bytes::Bytes;
+
+    #[test]
+    fn test_basic_transaction() {
+        with_agate_test(|agate| {
+            let key = Bytes::from("233333".to_string());
+            let val = Bytes::from("23333333333".to_string());
+            let mut txn = agate.new_transaction_at(2333333, true);
+            txn.set(key.clone(), val.clone()).unwrap();
+            txn.commit_at(2333334).unwrap();
+            let txn = agate.new_transaction_at(2333334, false);
+            assert_eq!(txn.get(&key).unwrap().value, val);
+            txn.commit_at(2333335).unwrap();
+            let txn = agate.new_transaction_at(2333332, false);
+            assert!(txn.get(&key).is_err());
+            txn.commit_at(2333337).unwrap();
+        });
     }
 }
