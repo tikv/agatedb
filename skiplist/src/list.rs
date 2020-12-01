@@ -281,12 +281,20 @@ impl<C: KeyComparator> Skiplist<C> {
     }
 
     pub fn get(&self, key: &[u8]) -> Option<&Bytes> {
+        if let Some((_, value)) = self.get_with_key(key) {
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_with_key(&self, key: &[u8]) -> Option<(&Bytes, &Bytes)> {
         let node = unsafe { self.find_near(key, false, true) };
         if node.is_null() {
             return None;
         }
         if self.c.same_key(&unsafe { &*node }.key, key) {
-            return unsafe { Some(&(*node).value) };
+            return Some(unsafe { (&(*node).key, &(*node).value) });
         }
         None
     }
