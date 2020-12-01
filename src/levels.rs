@@ -9,7 +9,6 @@ use handler::LevelHandler;
 
 use proto::meta::ManifestChangeSet;
 
-use crate::closer::Closer;
 use crate::format::{get_ts, key_with_ts, user_key};
 use crate::manifest::{new_create_change, new_delete_change, ManifestFile};
 use crate::opt::build_table_options;
@@ -18,6 +17,7 @@ use crate::util::{has_any_prefixes, same_key, KeyComparator, COMPARATOR};
 use crate::value::{Value, ValuePointer};
 use crate::AgateIterator;
 use crate::TableBuilder;
+use crate::{closer::Closer, iterator::IteratorOptions};
 use crate::{AgateOptions, Table};
 use crate::{Error, Result};
 
@@ -793,6 +793,13 @@ impl LevelsController {
     ) {
         for i in 0..self.core.opts.num_compactors {
             self.run_compactor(i, closer.clone(), pool);
+        }
+    }
+
+    // TODO: add iterator options
+    pub(crate) fn append_iterators(&self, iters: &mut Vec<TableIterators>, opts: &IteratorOptions) {
+        for level in &self.core.levels {
+            level.read().unwrap().append_iterators(iters, opts);
         }
     }
 }

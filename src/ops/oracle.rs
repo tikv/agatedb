@@ -50,7 +50,8 @@ impl CommitInfo {
     }
 
     fn has_conflict(&self, txn: &Transaction) -> bool {
-        if txn.reads.is_empty() {
+        let reads = txn.reads.lock().unwrap();
+        if reads.is_empty() {
             false
         } else {
             for committed_txn in &self.committed_txns {
@@ -58,7 +59,7 @@ impl CommitInfo {
                     continue;
                 }
 
-                for read in &txn.reads {
+                for read in reads.iter() {
                     if committed_txn.conflict_keys.contains(read) {
                         return true;
                     }

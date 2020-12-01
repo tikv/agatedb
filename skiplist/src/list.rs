@@ -296,7 +296,7 @@ impl<C: KeyComparator> Skiplist<C> {
         IterRef {
             list: self,
             cursor: ptr::null(),
-            _key_cmp: std::marker::PhantomData
+            _key_cmp: std::marker::PhantomData,
         }
     }
 
@@ -304,7 +304,7 @@ impl<C: KeyComparator> Skiplist<C> {
         IterRef {
             list: self.clone(),
             cursor: ptr::null(),
-            _key_cmp: std::marker::PhantomData
+            _key_cmp: std::marker::PhantomData,
         }
     }
 
@@ -347,7 +347,7 @@ where
 {
     list: T,
     cursor: *const Node,
-    _key_cmp: std::marker::PhantomData<C>
+    _key_cmp: std::marker::PhantomData<C>,
 }
 
 impl<T: AsRef<Skiplist<C>>, C: KeyComparator> IterRef<T, C> {

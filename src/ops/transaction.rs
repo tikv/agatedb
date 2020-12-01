@@ -10,13 +10,13 @@ use crate::{
 use crate::{entry::Entry, util::default_hash};
 use crate::{Error, Result};
 use bytes::{Bytes, BytesMut};
-use std::sync::{Arc, atomic::AtomicUsize};
 use std::collections::{HashMap, HashSet};
+use std::sync::{atomic::AtomicUsize, Arc, Mutex};
 
 const MAX_KEY_LENGTH: usize = 65000;
 
-const AGATE_PREFIX: &[u8] = b"!agate!";
-const TXN_KEY: &[u8] = b"!agate!txn";
+pub const AGATE_PREFIX: &[u8] = b"!agate!";
+pub const TXN_KEY: &[u8] = b"!agate!txn";
 
 // TODO: a discarded transaction must have been dropped.
 // we don't need to handle related logic inside Transaction.
@@ -25,7 +25,7 @@ pub struct Transaction {
     pub(crate) commit_ts: u64,
     pub(crate) size: usize,
     pub(crate) count: usize,
-    pub(crate) reads: Vec<u64>,
+    pub(crate) reads: Mutex<Vec<u64>>,
 
     // Chances are that keys may collide in HashSet. We should come
     // up with a better design.
@@ -72,7 +72,7 @@ impl Transaction {
             commit_ts: 0,
             size: 0,
             count: 0,
-            reads: vec![],
+            reads: Mutex::new(vec![]),
             conflict_keys: HashSet::new(),
             pending_writes: HashMap::new(),
             duplicate_writes: vec![],
@@ -145,7 +145,10 @@ impl Transaction {
         Ok(())
     }
 
-    pub(crate) fn new_pending_write_iterator(&self, reversed: bool) -> Option<PendingWritesIterator> {
+    pub(crate) fn new_pending_write_iterator(
+        &self,
+        reversed: bool,
+    ) -> Option<PendingWritesIterator> {
         if !self.update || self.pending_writes.is_empty() {
             return None;
         }
@@ -184,7 +187,7 @@ impl Transaction {
         Ok(())
     }
 
-    pub fn get(&mut self, key: &Bytes) -> Result<Item> {
+    pub fn get(&self, key: &Bytes) -> Result<Item> {
         if key.is_empty() {
             return Err(Error::EmptyKey);
         } else if self.discarded {
@@ -241,9 +244,9 @@ impl Transaction {
         })
     }
 
-    fn add_read_key(&mut self, key: &Bytes) {
+    pub(crate) fn add_read_key(&self, key: &Bytes) {
         if self.update {
-            self.reads.push(default_hash(key));
+            self.reads.lock().unwrap().push(default_hash(key));
         }
     }
 

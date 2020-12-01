@@ -28,7 +28,7 @@ pub struct Core {
     pub(crate) opts: AgateOptions,
     next_mem_fid: AtomicUsize,
     pub(crate) vlog: Arc<Option<ValueLog>>,
-    lvctl: LevelsController,
+    pub(crate) lvctl: LevelsController,
     flush_channel: (Sender<Option<FlushTask>>, Receiver<Option<FlushTask>>),
     manifest: Arc<ManifestFile>,
     pub(crate) orc: Arc<Oracle>,
