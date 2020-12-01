@@ -12,7 +12,6 @@ use skiplist::{KeyComparator, Skiplist};
 use std::sync::Arc;
 
 use crate::ops::transaction::AGATE_PREFIX;
-use crate::value::VALUE_DELETE;
 
 pub enum PrefetchStatus {
     No,
@@ -61,12 +60,12 @@ pub struct IteratorOptions {
 }
 
 impl IteratorOptions {
-    pub fn pick_table(&self, table: &Table) -> bool {
+    pub fn pick_table(&self, _table: &Table) -> bool {
         true
         // TODO: implement table selection logic
     }
 
-    pub fn pick_tables(&self, tables: &mut Vec<Table>) {
+    pub fn pick_tables(&self, _tables: &mut Vec<Table>) {
         return;
         // TODO: implement table selection logic
     }

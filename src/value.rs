@@ -3,7 +3,7 @@ use crate::entry::EntryRef;
 use crate::wal::Header;
 use crate::Result;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use crossbeam_channel::{bounded, Receiver, Sender};
+use crossbeam_channel::Sender;
 use std::io::BufReader;
 use std::io::{Read, Seek};
 use std::mem::MaybeUninit;

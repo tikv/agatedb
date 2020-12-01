@@ -1,9 +1,6 @@
 use super::transaction::Transaction;
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-
-use bytes::Bytes;
 
 struct CommittedTxn {
     ts: u64,
