@@ -1,6 +1,8 @@
 use crate::{
     db::Agate,
     format::{append_ts, user_key},
+    iterator::Item,
+    iterator::{is_deleted_or_expired, PrefetchStatus},
     key_with_ts,
     util::{KeyComparator, COMPARATOR},
     AgateIterator, Value,
@@ -17,6 +19,7 @@ use std::{
 const MAX_KEY_LENGTH: usize = 65000;
 
 const AGATE_PREFIX: &[u8] = b"!agate!";
+const TXN_KEY: &[u8] = b"!agate!txn";
 
 pub struct Transaction {
     pub(crate) read_ts: u64,
@@ -25,6 +28,8 @@ pub struct Transaction {
     pub(crate) count: usize,
     pub(crate) reads: Vec<u64>,
 
+    // Chances are that keys may collide in HashSet. We should come
+    // up with a better design.
     pub(crate) conflict_keys: HashSet<u64>,
 
     pub(crate) pending_writes: HashMap<Bytes, Entry>,
@@ -39,7 +44,30 @@ pub struct Transaction {
 }
 
 impl Agate {
-    pub fn new_transaction(&self, update: bool) -> Transaction {
+    fn new_transaction(&self, update: bool) -> Transaction {
+        // TODO: read-only database
+        let mut txn = Transaction::new(self.core.clone());
+        txn.update = update;
+        txn.count = 1;
+        txn.size = TXN_KEY.len() + 10;
+        // TODO: allocate transaction conflict_keys and pending_writes on demand
+        // TODO: not is_managed
+        txn
+    }
+
+    fn update(&self, f: impl FnOnce(&mut Transaction) -> Result<()>) -> Result<()> {
+        if self.core.opts.managed_txns {
+            panic!("update can obly be used with managed_db=false");
+        }
+        let mut txn = self.new_transaction(true);
+        f(&mut txn)?;
+        txn.commit()?;
+        Ok(())
+    }
+}
+
+impl Transaction {
+    fn new(core: Arc<crate::db::Core>) -> Transaction {
         Transaction {
             read_ts: 0,
             commit_ts: 0,
@@ -51,14 +79,12 @@ impl Agate {
             duplicate_writes: vec![],
             discarded: false,
             done_read: false,
-            update,
+            update: false,
             num_iterators: 0,
-            agate: self.core.clone(),
+            agate: core,
         }
     }
-}
 
-impl Transaction {
     pub fn set(&mut self, key: Bytes, value: Bytes) -> Result<()> {
         self.set_entry(Entry::new(key, value))?;
         Ok(())
@@ -159,8 +185,164 @@ impl Transaction {
         Ok(())
     }
 
-    pub fn get(&self, key: &Bytes) -> Result<Item> {
-        Ok(Item {})
+    pub fn get(&mut self, key: &Bytes) -> Result<Item> {
+        if key.is_empty() {
+            return Err(Error::EmptyKey);
+        } else if self.discarded {
+            return Err(Error::CustomError("txn discarded".to_string()));
+        }
+
+        if self.update {
+            if let Some(entry) = self.pending_writes.get(key) {
+                if key == &entry.key {
+                    if is_deleted_or_expired(entry.meta, entry.expires_at) {
+                        return Err(Error::CustomError("key not found".to_string()));
+                    }
+                    return Ok(Item {
+                        meta: entry.meta,
+                        value: entry.value.clone(),
+                        user_meta: entry.user_meta,
+                        key: entry.key.clone(),
+                        status: PrefetchStatus::Prefetched,
+                        version: self.read_ts,
+                        expires_at: entry.expires_at,
+                        vptr: Bytes::new(),
+                    });
+                }
+            }
+
+            self.add_read_key(key);
+        }
+
+        let mut key_with_ts = BytesMut::new();
+        key_with_ts.clone_from_slice(key);
+        append_ts(&mut key_with_ts, self.read_ts);
+
+        let seek = key_with_ts.freeze();
+
+        let vs = self.agate.get(&seek)?;
+
+        if vs.value.is_empty() || vs.meta == 0 {
+            return Err(Error::CustomError("key not found".to_string()));
+        }
+
+        if is_deleted_or_expired(vs.meta, vs.expires_at) {
+            return Err(Error::CustomError("key not found".to_string()));
+        }
+
+        Ok(Item {
+            key: key.clone(),
+            version: vs.version,
+            meta: vs.meta,
+            user_meta: vs.user_meta,
+            vptr: vs.value,
+            expires_at: vs.expires_at,
+            value: Bytes::new(),
+            status: PrefetchStatus::No,
+        })
+    }
+
+    fn add_read_key(&mut self, key: &Bytes) {
+        if self.update {
+            self.reads.push(default_hash(key));
+        }
+    }
+
+    fn commit_precheck(&self) -> Result<()> {
+        if self.discarded {
+            return Err(Error::CustomError("commit a discarded txn".to_string()));
+        }
+        let mut keep_together = true;
+        for (_, entry) in &self.pending_writes {
+            if entry.version != 0 {
+                keep_together = false;
+            }
+        }
+
+        if keep_together && self.agate.opts.managed_txns && self.commit_ts == 0 {
+            return Err(Error::CustomError("commit ts cannot be zero".to_string()));
+        }
+
+        Ok(())
+    }
+
+    fn commit_and_send(&mut self) -> Result<()> {
+        let orc = self.agate.orc.clone();
+        let write_ch_lock = orc.write_ch_lock.lock().unwrap();
+        let commit_ts = orc.new_commit_ts(&self);
+        if commit_ts == 0 && !self.agate.opts.managed_txns {
+            return Err(Error::CustomError("conflict".to_string()));
+        }
+
+        let mut keep_together = true;
+        let set_version = |keep_together: &mut bool, e: &mut Entry| {
+            if e.version == 0 {
+                e.version = commit_ts;
+            } else {
+                *keep_together = false;
+            }
+        };
+
+        for (_, e) in &mut self.pending_writes {
+            set_version(&mut keep_together, e);
+        }
+
+        for e in &mut self.duplicate_writes {
+            set_version(&mut keep_together, e);
+        }
+
+        let mut entries =
+            Vec::with_capacity(self.pending_writes.len() + self.duplicate_writes.len() + 1);
+
+        let process_entry = |entries: &mut Vec<Entry>, mut e: Entry| {
+            let mut key = BytesMut::new();
+            key.clone_from_slice(&e.key);
+            e.key = key_with_ts(key, e.version);
+            if keep_together {
+                e.meta |= crate::value::VALUE_TXN;
+            }
+            entries.push(e);
+        };
+
+        for (_, e) in self.pending_writes.drain() {
+            process_entry(&mut entries, e);
+        }
+
+        for e in self.duplicate_writes.drain(..) {
+            process_entry(&mut entries, e);
+        }
+
+        if keep_together {
+            assert!(commit_ts != 0);
+            // let e = Entry::new(key_with_ts(BytesMut::from(TXN_KEY), commit_ts), )
+        }
+
+        Ok(())
+    }
+
+    fn commit(mut self) -> Result<()> {
+        if self.pending_writes.is_empty() {
+            return Ok(());
+        }
+
+        self.commit_precheck()?;
+
+        self.commit_and_send()?;
+        // TODO: callback
+
+        Ok(())
+    }
+
+    fn discard_inner(&mut self) {}
+
+    pub fn discard(mut self) {
+        self.discard_inner()
+    }
+}
+
+impl Drop for Transaction {
+    fn drop(&mut self) {
+        self.discard_inner();
     }
 }
 
@@ -239,5 +421,3 @@ impl AgateIterator for PendingWritesIterator {
         self.next_idx < self.entries.len()
     }
 }
-
-pub struct Item {}

@@ -19,6 +19,16 @@ struct CommitInfo {
 }
 
 impl CommitInfo {
+    pub fn new(is_managed: bool) -> Self {
+        Self {
+            next_txn_ts: 0,
+            discard_ts: 0,
+            committed_txns: vec![],
+            last_cleanup_ts: 0,
+            is_managed,
+        }
+    }
+
     fn cleanup_committed_transactions(&mut self) {
         let max_read_ts;
         if self.is_managed {
@@ -63,9 +73,18 @@ pub struct Oracle {
     commit_info: Mutex<CommitInfo>,
     is_managed: bool,
     detect_conflicts: bool,
+    pub(crate) write_ch_lock: Mutex<()>,
 }
 
 impl Oracle {
+    pub fn new(is_managed: bool, detect_conflicts: bool) -> Self {
+        Self {
+            commit_info: Mutex::new(CommitInfo::new(is_managed)),
+            is_managed,
+            detect_conflicts,
+            write_ch_lock: Mutex::new(()),
+        }
+    }
     fn read_ts(&self) -> u64 {
         if self.is_managed {
             panic!("read_ts should not be used in managed mode");
@@ -99,7 +118,7 @@ impl Oracle {
         }
     }
 
-    fn new_commit_ts(&self, txn: &Transaction) -> u64 {
+    pub(crate) fn new_commit_ts(&self, txn: &Transaction) -> u64 {
         let mut commit_info = self.commit_info.lock().unwrap();
         if commit_info.has_conflict(txn) {
             return 0;

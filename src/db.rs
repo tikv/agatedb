@@ -5,6 +5,7 @@ use crate::entry::Entry;
 use crate::format::get_ts;
 use crate::levels::LevelsController;
 use crate::manifest::ManifestFile;
+use crate::ops::oracle::Oracle;
 use crate::opt;
 use crate::util::{has_any_prefixes, make_comparator};
 use crate::value::{self, Request, Value};
@@ -30,6 +31,7 @@ pub struct Core {
     lvctl: LevelsController,
     flush_channel: (Sender<Option<FlushTask>>, Receiver<Option<FlushTask>>),
     manifest: Arc<ManifestFile>,
+    pub(crate) orc: Arc<Oracle>,
 }
 
 pub struct Agate {
@@ -137,7 +139,7 @@ pub struct AgateOptions {
 
     pub detect_conflicts: bool,
 
-    managed_txns: bool,
+    pub(crate) managed_txns: bool,
 
     pub(crate) max_batch_count: u64,
     pub(crate) max_batch_size: u64,
@@ -283,6 +285,7 @@ impl Core {
             lvctl,
             flush_channel: crossbeam_channel::bounded(opts.num_memtables),
             manifest,
+            orc: Arc::new(Oracle::new(opts.managed_txns, opts.detect_conflicts)),
         };
 
         if let Some(ref mut vlog) = core.vlog {
