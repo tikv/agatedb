@@ -161,7 +161,7 @@ impl Oracle {
         }
     }
 
-    fn done_commit(&self, _commit_ts: u64) {
+    pub(crate) fn done_commit(&self, _commit_ts: u64) {
         if self.is_managed {
             return;
         } else {

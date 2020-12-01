@@ -410,8 +410,10 @@ impl Core {
         for table in view.tables() {
             let mut value = Value::default();
 
-            if let Some(value_data) = table.get(key) {
+            if let Some((key, value_data)) = table.get_with_key(key) {
                 value.decode(value_data);
+                value.version = get_ts(key);
+
                 if value.meta == 0 && value.value.is_empty() {
                     continue;
                 }
@@ -629,7 +631,7 @@ impl Core {
             self.write_to_lsm(req)?;
         }
 
-        // println!("{} entries written", cnt);
+        println!("{} entries written", cnt);
 
         Ok(())
     }
@@ -645,7 +647,10 @@ impl Core {
         tables
     }
 
-    fn send_to_write_channel(&self, entries: Vec<Entry>) -> Result<Receiver<Result<()>>> {
+    pub(crate) fn send_to_write_channel(
+        &self,
+        entries: Vec<Entry>,
+    ) -> Result<Receiver<Result<()>>> {
         if self.block_writes.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(Error::CustomError("block writes".to_string()));
         }

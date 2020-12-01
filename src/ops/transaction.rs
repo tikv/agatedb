@@ -328,12 +328,26 @@ impl Transaction {
 
         if keep_together {
             assert!(commit_ts != 0);
-            // let e = Entry::new(key_with_ts(BytesMut::from(TXN_KEY), commit_ts), )
+            let mut e = Entry::new(
+                key_with_ts(BytesMut::from(TXN_KEY), commit_ts),
+                Bytes::from(commit_ts.to_string()),
+            );
+            e.meta = crate::value::VALUE_FIN_TXN;
+            entries.push(e);
+        }
+
+        let done = self.agate.send_to_write_channel(entries);
+
+        if let Err(err) = done {
+            orc.done_commit(commit_ts);
+            return Err(err);
         }
 
         drop(write_ch_lock);
 
-        unimplemented!();
+        let done = done.unwrap();
+
+        done.recv().unwrap()
     }
 
     pub(crate) fn commit(mut self) -> Result<()> {
@@ -452,9 +466,9 @@ mod tests {
             let mut txn = agate.new_transaction_at(2333333, true);
             txn.set(key.clone(), val.clone()).unwrap();
             txn.commit_at(2333334).unwrap();
-            let txn = agate.new_transaction_at(2333334, false);
-            assert_eq!(txn.get(&key).unwrap().value, val);
-            txn.commit_at(2333335).unwrap();
+            let txn = agate.new_transaction_at(2333335, false);
+            assert_eq!(txn.get(&key).unwrap().vptr, val);
+            txn.commit_at(2333336).unwrap();
             let txn = agate.new_transaction_at(2333332, false);
             assert!(txn.get(&key).is_err());
             txn.commit_at(2333337).unwrap();
