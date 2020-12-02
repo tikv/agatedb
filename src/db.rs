@@ -85,16 +85,22 @@ impl Agate {
         let agate = Self {
             core,
             closer: closer.clone(),
-            pool: yatp::Builder::new("agatedb").build_callback_pool(),
+            pool: yatp::Builder::new("compaction").build_callback_pool(),
         };
 
-        std::thread::spawn(move || flush_core.flush_memtable().unwrap());
+        std::thread::Builder::new()
+            .name("memtable_flush".to_string())
+            .spawn(move || flush_core.flush_memtable().unwrap())
+            .unwrap();
 
-        std::thread::spawn(move || {
-            writer_core
-                .do_writes(writer_core.closers.writes.clone())
-                .unwrap()
-        });
+        std::thread::Builder::new()
+            .name("write_request".to_string())
+            .spawn(move || {
+                writer_core
+                    .do_writes(writer_core.closers.writes.clone())
+                    .unwrap()
+            })
+            .unwrap();
 
         agate
             .core
