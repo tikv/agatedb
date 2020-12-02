@@ -577,6 +577,7 @@ impl Core {
     }
 
     fn flush_memtable(&self) -> Result<()> {
+        println!("start flushing memtables");
         for ft in &self.flush_channel.1 {
             if let Some(ft) = ft {
                 let flush_id = ft.mt.id();
@@ -624,6 +625,7 @@ impl Core {
             cnt += req.entries.len();
 
             while let Err(_) = self.ensure_room_for_write() {
+                std::thread::yield_now();
                 std::thread::sleep(std::time::Duration::from_millis(10));
                 // println!("wait for room... {:?}", err)
             }
@@ -675,6 +677,7 @@ impl Core {
     }
 
     fn do_writes(&self, closer: Closer) -> Result<()> {
+        println!("start doing writes");
         loop {
             select! {
                 recv(self.write_channel.1) -> req => {

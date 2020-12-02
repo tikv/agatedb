@@ -48,7 +48,7 @@ jobs:
         name: Running Tests 🚀
         with:
           command: test
-          args: ops::transaction --all-features --workspace
+          args: ops::transaction -- --nocapture
       - uses: actions-rs/cargo@v1
         name: Running Tests 🚀
         with:
