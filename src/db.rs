@@ -88,11 +88,9 @@ impl Agate {
             pool: yatp::Builder::new("agatedb").build_callback_pool(),
         };
 
-        agate
-            .pool
-            .spawn(move |_: &mut Handle<'_>| flush_core.flush_memtable().unwrap());
+        std::thread::spawn(move || flush_core.flush_memtable().unwrap());
 
-        agate.pool.spawn(move |_: &mut Handle<'_>| {
+        std::thread::spawn(move || {
             writer_core
                 .do_writes(writer_core.closers.writes.clone())
                 .unwrap()
