@@ -85,7 +85,9 @@ impl Agate {
         let agate = Self {
             core,
             closer: closer.clone(),
-            pool: yatp::Builder::new("agatedb").build_callback_pool(),
+            pool: yatp::Builder::new("agatedb")
+                .max_thread_count(10)
+                .build_callback_pool(),
         };
 
         std::thread::spawn(move || flush_core.flush_memtable().unwrap());
