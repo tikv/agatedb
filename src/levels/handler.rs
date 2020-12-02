@@ -27,7 +27,7 @@ impl Drop for LevelHandler {
             // TODO: simply forget table instance would cause memory leak. Should find
             // a better way to handle this. For example, `table.close_and_save()`, which
             // consumes table instance without deleting the files.
-            std::mem::forget(table);
+            table.mark_save();
         }
     }
 }

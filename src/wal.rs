@@ -100,6 +100,7 @@ pub struct Wal {
     write_at: u32,
     buf: BytesMut,
     size: u32,
+    save_after_close: bool,
 }
 
 impl Wal {
@@ -133,6 +134,7 @@ impl Wal {
             opts,
             write_at: 0, // TODO: current implementation doesn't have keyID and baseIV header
             buf: BytesMut::new(),
+            save_after_close: false,
         };
 
         if bootstrap {
@@ -274,6 +276,10 @@ impl Wal {
     pub(crate) fn data(&mut self) -> &mut MmapMut {
         &mut self.mmap_file
     }
+
+    pub fn close_and_save(mut self) {
+        self.save_after_close = true;
+    }
 }
 
 pub struct WalIterator<'a> {
@@ -319,9 +325,11 @@ impl Drop for Wal {
             ManuallyDrop::drop(&mut self.mmap_file);
         }
         let file = unsafe { ManuallyDrop::take(&mut self.file) };
-        file.set_len(0).unwrap();
-        drop(file);
-        fs::remove_file(&self.path).unwrap();
+        if !self.save_after_close {
+            file.set_len(0).unwrap();
+            drop(file);
+            fs::remove_file(&self.path).unwrap();
+        }
     }
 }
 

@@ -15,10 +15,10 @@ use iterator::TableRefIterator;
 use memmap::{Mmap, MmapOptions};
 use prost::Message;
 use proto::meta::{BlockOffset, Checksum, TableIndex};
-use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::{fs, sync::atomic::AtomicBool};
 
 pub use concat_iterator::ConcatIterator;
 pub use iterator::{ITERATOR_NOCACHE, ITERATOR_REVERSED};
@@ -90,6 +90,7 @@ pub struct TableInner {
     has_bloom_filter: bool,
     /// table options
     opts: Options,
+    save_after_close: AtomicBool,
 }
 
 /// Table is simply an Arc to its internal TableInner structure.
@@ -147,6 +148,7 @@ impl TableInner {
             index_len: 0,
             opts: opts.clone(),
             has_bloom_filter: false,
+            save_after_close: AtomicBool::new(false),
         };
         inner.init_biggest_and_smallest()?;
 
@@ -175,6 +177,7 @@ impl TableInner {
             index_start: 0,
             index_len: 0,
             has_bloom_filter: false,
+            save_after_close: AtomicBool::new(false),
         };
         inner.init_biggest_and_smallest()?;
 
@@ -465,8 +468,13 @@ impl Drop for TableInner {
             // It is possible that table is opened in read-only mode,
             // so we cannot set_len.
             // file.set_len(0).unwrap();
-            drop(file);
-            fs::remove_file(&name).unwrap();
+            if !self
+                .save_after_close
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                drop(file);
+                fs::remove_file(&name).unwrap();
+            }
         }
     }
 }
@@ -581,6 +589,12 @@ impl Table {
 
     pub fn is_in_memory(&self) -> bool {
         self.inner.is_in_memory()
+    }
+
+    pub fn mark_save(&self) {
+        self.inner
+            .save_after_close
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 

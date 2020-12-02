@@ -10,6 +10,7 @@ use skiplist::Skiplist;
 use std::collections::VecDeque;
 use std::mem::{self, ManuallyDrop, MaybeUninit};
 use std::ptr;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
 
 const MEMTABLE_VIEW_MAX: usize = 20;
@@ -28,34 +29,25 @@ pub struct MemTable {
     opt: AgateOptions,
     core: RwLock<MemTableCore>,
     id: usize,
+    save_after_close: AtomicBool,
+}
+
+impl Drop for MemTable {
+    fn drop(&mut self) {
+        if self
+            .save_after_close
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            let mut core = self.core.write().unwrap();
+            let wal = core.wal.take();
+            if let Some(wal) = wal {
+                wal.close_and_save();
+            }
+        }
+    }
 }
 
 impl MemTable {
-    /*
-    pub fn with_capacity(table_size: u32, max_count: usize) -> MemTable {
-        let c = make_comparator();
-        MemTable {
-            mutable: Skiplist::with_capacity(c, table_size),
-            immutable: VecDeque::with_capacity(max_count - 1),
-        }
-    }
-
-    pub fn view(&self) -> MemTableView {
-        // Maybe flush is better.
-        assert!(self.immutable.len() + 1 <= 20);
-        let mut array: [MaybeUninit<Skiplist<Flsc>>; 20] =
-            unsafe { MaybeUninit::uninit().assume_init() };
-        array[0] = MaybeUninit::new(self.mutable.clone());
-        for (i, s) in self.immutable.iter().enumerate() {
-            array[i + 1] = MaybeUninit::new(s.clone());
-        }
-        MemTableView {
-            tables: unsafe { ManuallyDrop::new(mem::transmute(array)) },
-            len: self.immutable.len() + 1,
-        }
-    }
-    */
-
     pub fn new(id: usize, skl: Skiplist<Comparator>, wal: Option<Wal>, opt: AgateOptions) -> Self {
         Self {
             skl,
@@ -65,6 +57,7 @@ impl MemTable {
                 max_version: 0,
             }),
             id,
+            save_after_close: AtomicBool::new(false),
         }
     }
 
@@ -142,6 +135,11 @@ impl MemTable {
     pub fn id(&self) -> usize {
         self.id
     }
+
+    pub fn mark_save(&self) {
+        self.save_after_close
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 pub struct MemTablesView {
@@ -173,12 +171,9 @@ pub struct MemTables {
 impl Drop for MemTables {
     fn drop(&mut self) {
         for memtable in self.immutable.drain(..) {
-            // TODO: simply forget table instance would cause memory leak. Should find
-            // a better way to handle this. For example, `table.close_and_save()`, which
-            // consumes table instance without deleting the files.
-            std::mem::forget(memtable);
+            memtable.mark_save();
         }
-        std::mem::forget(self.mutable.clone());
+        self.mutable.mark_save();
     }
 }
 
