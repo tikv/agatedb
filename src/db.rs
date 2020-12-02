@@ -629,7 +629,6 @@ impl Core {
             cnt += req.entries.len();
 
             while let Err(_) = self.ensure_room_for_write() {
-                std::thread::yield_now();
                 std::thread::sleep(std::time::Duration::from_millis(10));
                 // println!("wait for room... {:?}", err)
             }
@@ -774,7 +773,7 @@ pub(crate) mod tests {
             tx.send(()).expect("failed to complete test");
         });
 
-        match rx.recv_timeout(std::time::Duration::from_secs(300)) {
+        match rx.recv_timeout(std::time::Duration::from_secs(60)) {
             Ok(_) => handle.join().expect("thread panic"),
             Err(err) => panic!("error: {:?}", err),
         }

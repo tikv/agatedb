@@ -122,7 +122,6 @@ impl Core {
                     last_log = current;
                 }
             }
-            std::thread::yield_now();
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
