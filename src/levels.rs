@@ -695,12 +695,12 @@ impl Core {
                 / self.opts.num_level_zero_tables as f64,
         );
 
-        let cpt_status = self.cpt_status.read().unwrap();
-
-        // println!("{:?}", targets);
-
         for i in 1..self.levels.len() {
-            let del_size = cpt_status.levels[i].del_size;
+            // We must ensure lock order, by only obtain one lock at a time.
+            let del_size = {
+                let cpt_status = self.cpt_status.read().unwrap();
+                cpt_status.levels[i].del_size
+            };
             let level = self.levels[i].read().unwrap();
             let size = level.total_size - del_size;
             add_priority(i, size as f64 / targets.target_size[i] as f64);
