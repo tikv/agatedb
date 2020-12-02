@@ -14,6 +14,8 @@ pub struct ConcatIterator {
 }
 
 impl ConcatIterator {
+    /// Create `ConcatIterator` from a list of tables. Tables must have been sorted
+    /// and have no overlap keys.
     pub fn from_tables(tables: Vec<Table>, opt: usize) -> Self {
         let iters = tables.iter().map(|_| None).collect();
 
@@ -58,7 +60,11 @@ impl AgateIterator for ConcatIterator {
             if self.opt & ITERATOR_REVERSED == 0 {
                 self.set_idx(cur + 1);
             } else {
-                self.set_idx(cur - 1);
+                if cur == 0 {
+                    self.cur = None;
+                } else {
+                    self.set_idx(cur - 1);
+                }
             }
             if let Some(idx) = self.cur {
                 self.iter_mut(idx).rewind();
