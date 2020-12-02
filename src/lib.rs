@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 #![feature(slice_fill)]
 #![feature(hash_drain_filter)]
+#![feature(drain_filter)]
 
 mod bloom;
 mod checksum;
@@ -9,8 +10,10 @@ mod db;
 mod entry;
 mod error;
 mod format;
+mod iterator;
 mod iterator_trait;
 mod levels;
+mod managed_db;
 mod manifest;
 mod memtable;
 mod ops;

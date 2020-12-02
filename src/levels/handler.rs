@@ -1,7 +1,11 @@
-use crate::util::{KeyComparator, COMPARATOR};
 use crate::value::Value;
 use crate::Result;
 use crate::{format::user_key, get_ts, iterator_trait::AgateIterator};
+use crate::{iterator::IteratorOptions, table::TableIterators};
+use crate::{
+    table::ConcatIterator,
+    util::{KeyComparator, COMPARATOR},
+};
 use crate::{AgateOptions, Table};
 
 use super::KeyRange;
@@ -23,7 +27,7 @@ impl Drop for LevelHandler {
             // TODO: simply forget table instance would cause memory leak. Should find
             // a better way to handle this. For example, `table.close_and_save()`, which
             // consumes table instance without deleting the files.
-            std::mem::forget(table);
+            table.mark_save();
         }
     }
 }
@@ -194,5 +198,22 @@ impl LevelHandler {
             self.tables
                 .sort_by(|x, y| COMPARATOR.compare_key(x.smallest(), y.smallest()));
         }
+    }
+
+    pub(crate) fn append_iterators(&self, iters: &mut Vec<TableIterators>, opts: &IteratorOptions) {
+        if self.level == 0 {
+            for table in self.tables.iter().rev() {
+                if opts.pick_table(table) {
+                    iters.push(TableIterators::from(table.new_iterator(0)));
+                }
+            }
+            return;
+        }
+
+        let mut tables = self.tables.clone();
+        opts.pick_tables(&mut tables);
+        let iter = ConcatIterator::from_tables(tables, 0);
+        iters.push(TableIterators::from(iter));
+        return;
     }
 }

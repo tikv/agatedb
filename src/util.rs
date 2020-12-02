@@ -5,6 +5,10 @@ use crate::format::user_key;
 use bytes::Bytes;
 pub use skiplist::FixedLengthSuffixComparator as Comparator;
 pub use skiplist::{FixedLengthSuffixComparator, KeyComparator};
+
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{cmp, ptr};
 
 pub static COMPARATOR: FixedLengthSuffixComparator = make_comparator();
@@ -74,4 +78,18 @@ pub fn same_key(a: &[u8], b: &[u8]) -> bool {
         return false;
     }
     return user_key(a) == user_key(b);
+}
+
+pub fn default_hash(h: &impl Hash) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    h.hash(&mut hasher);
+    hasher.finish()
+}
+
+pub fn unix_time() -> u64 {
+    let start = SystemTime::now();
+    let since_the_epoch = start
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards");
+    since_the_epoch.as_millis() as u64
 }

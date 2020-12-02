@@ -3,6 +3,7 @@ use crate::entry::EntryRef;
 use crate::wal::Header;
 use crate::Result;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use crossbeam_channel::Sender;
 use std::io::BufReader;
 use std::io::{Read, Seek};
 use std::mem::MaybeUninit;
@@ -139,6 +140,7 @@ impl Value {
 pub struct Request {
     pub entries: Vec<Entry>,
     pub ptrs: Vec<ValuePointer>,
+    pub done: Option<Sender<Result<()>>>,
 }
 
 #[derive(Clone, Default, Debug)]

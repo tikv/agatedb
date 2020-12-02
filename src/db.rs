@@ -5,6 +5,7 @@ use crate::entry::Entry;
 use crate::format::get_ts;
 use crate::levels::LevelsController;
 use crate::manifest::ManifestFile;
+use crate::ops::oracle::Oracle;
 use crate::opt;
 use crate::util::{has_any_prefixes, make_comparator};
 use crate::value::{self, Request, Value};
@@ -13,23 +14,34 @@ use crate::wal::Wal;
 use crate::{Table, TableBuilder, TableOptions};
 
 use bytes::{Bytes, BytesMut};
-use crossbeam_channel::{Receiver, Sender};
-use skiplist::Skiplist;
+use crossbeam_channel::{bounded, select, Receiver, Sender};
+use skiplist::{Skiplist, MAX_NODE_SIZE};
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, RwLock};
 use yatp::task::callback::Handle;
+
+const KV_WRITE_CH_CAPACITY: usize = 1000;
+
+struct Closers {
+    writes: Closer,
+}
 
 pub struct Core {
     mts: RwLock<MemTables>,
     pub(crate) opts: AgateOptions,
     next_mem_fid: AtomicUsize,
-    vlog: Option<ValueLog>,
-    lvctl: LevelsController,
+    pub(crate) vlog: Arc<Option<ValueLog>>,
+    pub(crate) lvctl: LevelsController,
     flush_channel: (Sender<Option<FlushTask>>, Receiver<Option<FlushTask>>),
+    write_channel: (Sender<Request>, Receiver<Request>),
     manifest: Arc<ManifestFile>,
+    pub(crate) orc: Arc<Oracle>,
+
+    block_writes: AtomicBool,
+    closers: Closers,
 }
 
 pub struct Agate {
@@ -68,6 +80,7 @@ impl Agate {
 
     fn new(core: Arc<Core>) -> Self {
         let flush_core = core.clone();
+        let writer_core = core.clone();
         let closer = Closer::new();
         let agate = Self {
             core,
@@ -75,9 +88,13 @@ impl Agate {
             pool: yatp::Builder::new("agatedb").build_callback_pool(),
         };
 
-        agate
-            .pool
-            .spawn(move |_: &mut Handle<'_>| flush_core.flush_memtable().unwrap());
+        std::thread::spawn(move || flush_core.flush_memtable().unwrap());
+
+        std::thread::spawn(move || {
+            writer_core
+                .do_writes(writer_core.closers.writes.clone())
+                .unwrap()
+        });
 
         agate
             .core
@@ -91,6 +108,7 @@ impl Agate {
     fn close(&self) {
         // TODO: use closer for flush channel
         self.core.flush_channel.0.send(None).unwrap();
+        self.core.closers.writes.close();
         self.closer.close();
     }
 }
@@ -134,6 +152,13 @@ pub struct AgateOptions {
     pub num_compactors: usize,
 
     pub checksum_mode: opt::ChecksumVerificationMode,
+
+    pub detect_conflicts: bool,
+
+    pub(crate) managed_txns: bool,
+
+    pub(crate) max_batch_count: u64,
+    pub(crate) max_batch_size: u64,
 }
 
 impl Default for AgateOptions {
@@ -165,6 +190,10 @@ impl Default for AgateOptions {
             num_level_zero_tables: 5,
             num_level_zero_tables_stall: 15,
             num_compactors: 4,
+            detect_conflicts: true,
+            managed_txns: false,
+            max_batch_count: 0,
+            max_batch_size: 0,
         }
         // TODO: add other options
     }
@@ -212,11 +241,16 @@ impl AgateOptions {
             self.sync_writes = false;
         }
 
+        self.max_batch_size = (15 * self.mem_table_size) / 100;
+        self.max_batch_count = self.max_batch_size / MAX_NODE_SIZE as u64;
+
         Ok(())
     }
 
+    // open is by-default OpenManaged
     pub fn open<P: AsRef<Path>>(&mut self, path: P) -> Result<Agate> {
         self.fix_options()?;
+        self.managed_txns = true;
 
         self.path = path.as_ref().to_path_buf();
         // TODO: allow specify value dir
@@ -259,17 +293,23 @@ impl Core {
         next_mem_fid += 1;
 
         // create agate core
-        let mut core = Self {
+        let core = Self {
             mts: RwLock::new(MemTables::new(Arc::new(mt), imm_tables)),
             opts: opts.clone(),
             next_mem_fid: AtomicUsize::new(next_mem_fid),
-            vlog: ValueLog::new(opts.clone()),
+            vlog: Arc::new(ValueLog::new(opts.clone())),
             lvctl,
             flush_channel: crossbeam_channel::bounded(opts.num_memtables),
             manifest,
+            orc: Arc::new(Oracle::new(opts.managed_txns, opts.detect_conflicts)),
+            block_writes: AtomicBool::new(false),
+            write_channel: bounded(KV_WRITE_CH_CAPACITY),
+            closers: Closers {
+                writes: Closer::new(),
+            },
         };
 
-        if let Some(ref mut vlog) = core.vlog {
+        if let Some(ref vlog) = *core.vlog {
             vlog.open()?
         }
 
@@ -368,8 +408,10 @@ impl Core {
         for table in view.tables() {
             let mut value = Value::default();
 
-            if let Some(value_data) = table.get(key) {
+            if let Some((key, value_data)) = table.get_with_key(key) {
                 value.decode(value_data);
+                value.version = get_ts(key);
+
                 if value.meta == 0 && value.value.is_empty() {
                     continue;
                 }
@@ -533,7 +575,8 @@ impl Core {
     }
 
     fn flush_memtable(&self) -> Result<()> {
-        for ft in self.flush_channel.1.clone() {
+        println!("start flushing memtables");
+        for ft in &self.flush_channel.1 {
             if let Some(ft) = ft {
                 let flush_id = ft.mt.id();
                 match self.handle_flush_task(ft) {
@@ -566,7 +609,7 @@ impl Core {
 
         // TODO: process subscriptions
 
-        if let Some(ref vlog) = self.vlog {
+        if let Some(ref vlog) = *self.vlog {
             vlog.write(&mut requests)?;
         }
 
@@ -580,6 +623,7 @@ impl Core {
             cnt += req.entries.len();
 
             while let Err(_) = self.ensure_room_for_write() {
+                std::thread::yield_now();
                 std::thread::sleep(std::time::Duration::from_millis(10));
                 // println!("wait for room... {:?}", err)
             }
@@ -587,9 +631,68 @@ impl Core {
             self.write_to_lsm(req)?;
         }
 
-        // println!("{} entries written", cnt);
+        println!("{} entries written", cnt);
 
         Ok(())
+    }
+
+    pub(crate) fn get_mem_tables(&self) -> Vec<Arc<MemTable>> {
+        // TODO: check read-only
+        let mut tables = vec![];
+        let mts = self.mts.read().unwrap();
+        tables.push(mts.table_mut());
+        for idx in 0..mts.nums_of_memtable() - 1 {
+            tables.push(mts.table_imm(idx));
+        }
+        tables
+    }
+
+    pub(crate) fn send_to_write_channel(
+        &self,
+        entries: Vec<Entry>,
+    ) -> Result<Receiver<Result<()>>> {
+        if self.block_writes.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Error::CustomError("block writes".to_string()));
+        }
+        let mut size = 0;
+        let mut count = 0;
+        for entry in &entries {
+            size += entry.estimate_size(self.opts.value_threshold) as u64;
+            count += 1;
+        }
+        if count >= self.opts.max_batch_count || size >= self.opts.max_batch_size {
+            return Err(Error::CustomError("txn too big".to_string()));
+        }
+        let (tx, rx) = bounded(1);
+        // TODO: get request from pool
+        let req = Request {
+            entries,
+            ptrs: vec![],
+            done: Some(tx),
+        };
+        self.write_channel.0.send(req)?;
+        Ok(rx)
+    }
+
+    fn do_writes(&self, closer: Closer) -> Result<()> {
+        println!("start doing writes");
+        loop {
+            select! {
+                recv(self.write_channel.1) -> req => {
+                    // TODO: blocking writes
+                    // TODO: batch write
+                    let req = req.unwrap();
+                    println!("request received!");
+                    if let Some(done) = req.done.clone() {
+                        done.send(self.write_requests(vec![req])).unwrap();
+                    }
+                },
+                recv(closer.has_been_closed()) -> _ => {
+                    // TODO: process pending writes
+                    return Ok(());
+                }
+            }
+        }
     }
 }
 
@@ -679,6 +782,7 @@ pub(crate) mod tests {
             let req = Request {
                 entries: vec![Entry::new(key.clone(), value.clone())],
                 ptrs: vec![],
+                done: None,
             };
             agate.write_to_lsm(req).unwrap();
             let value = agate.get(&key).unwrap();
@@ -705,6 +809,7 @@ pub(crate) mod tests {
                     ),
                 )],
                 ptrs: vec![],
+                done: None,
             })
             .collect();
         let mut rng = rand::thread_rng();
@@ -720,7 +825,7 @@ pub(crate) mod tests {
             assert!(!value.value.is_empty());
 
             if value.meta & value::VALUE_POINTER != 0 {
-                let vlog = agate.core.vlog.as_ref().unwrap();
+                let vlog = agate.core.vlog.as_ref().as_ref().unwrap();
                 let mut vptr = ValuePointer::default();
                 vptr.decode(&value.value);
                 let kv = vlog.read(vptr).unwrap();
