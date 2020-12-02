@@ -856,6 +856,7 @@ pub(crate) mod tests {
         });
     }
 
+    #[cfg(not(feature = "sanitizer-test"))]
     #[test]
     fn test_flush_l1() {
         with_agate_test(|agate| {

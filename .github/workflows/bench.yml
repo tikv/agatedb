@@ -30,7 +30,7 @@ jobs:
         name: Benchmark 🚀
         with:
           command: bench
-          args: --all-features --workspace  
+          args: --workspace  
   sanitizer_bench:
     name: Bench with Sanitizer
     runs-on: ubuntu-latest

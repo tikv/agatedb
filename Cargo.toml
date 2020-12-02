@@ -7,6 +7,9 @@ edition = "2018"
 [lib]
 doctest = false
 
+[features]
+sanitizer-test = []
+
 [dependencies]
 thiserror = "1.0"
 bytes = "0.5"
