@@ -773,7 +773,7 @@ pub(crate) mod tests {
             tx.send(()).expect("failed to complete test");
         });
 
-        match rx.recv_timeout(std::time::Duration::from_secs(60)) {
+        match rx.recv_timeout(std::time::Duration::from_secs(300)) {
             Ok(_) => handle.join().expect("thread panic"),
             Err(err) => panic!("error: {:?}", err),
         }
