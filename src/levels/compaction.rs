@@ -175,12 +175,11 @@ impl CompactDef {
 impl CompactStatus {
     pub fn delete(&mut self, compact_def: &CompactDef) {
         // TODO: level is immutable, we could access it without read
-        let tl = compact_def.this_level.read().unwrap().level;
-        assert!(tl < self.levels.len() - 1);
+        let this_level_id = compact_def.this_level_id;
+        assert!(this_level_id < self.levels.len() - 1);
 
-        let this_level_id = compact_def.this_level.read().unwrap().level;
         let this_level = &mut self.levels[this_level_id];
-        let next_level_id = compact_def.next_level.read().unwrap().level;
+        let next_level_id = compact_def.next_level_id;
 
         this_level.del_size -= compact_def.this_size;
         let mut found = this_level.remove(&compact_def.this_range);

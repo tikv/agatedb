@@ -21,7 +21,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, RwLock};
-use yatp::task::callback::Handle;
 
 const KV_WRITE_CH_CAPACITY: usize = 1000;
 
