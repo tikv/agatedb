@@ -21,6 +21,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, RwLock};
+use yatp::task::callback::Handle;
 
 const KV_WRITE_CH_CAPACITY: usize = 1000;
 
@@ -81,25 +82,25 @@ impl Agate {
         let flush_core = core.clone();
         let writer_core = core.clone();
         let closer = Closer::new();
+        let pool = yatp::Builder::new("agatedb")
+            .max_thread_count(core.opts.num_compactors * 3 + 2)
+            .min_thread_count(core.opts.num_compactors + 2)
+            .build_callback_pool();
         let agate = Self {
             core,
             closer: closer.clone(),
-            pool: yatp::Builder::new("compaction").build_callback_pool(),
+            pool,
         };
 
-        std::thread::Builder::new()
-            .name("memtable_flush".to_string())
-            .spawn(move || flush_core.flush_memtable().unwrap())
-            .unwrap();
+        agate
+            .pool
+            .spawn(move |_: &mut Handle<'_>| flush_core.flush_memtable().unwrap());
 
-        std::thread::Builder::new()
-            .name("write_request".to_string())
-            .spawn(move || {
-                writer_core
-                    .do_writes(writer_core.closers.writes.clone())
-                    .unwrap()
-            })
-            .unwrap();
+        agate.pool.spawn(move |_: &mut Handle<'_>| {
+            writer_core
+                .do_writes(writer_core.closers.writes.clone())
+                .unwrap()
+        });
 
         agate
             .core
@@ -628,7 +629,6 @@ impl Core {
             cnt += req.entries.len();
 
             while let Err(_) = self.ensure_room_for_write() {
-                std::thread::yield_now();
                 std::thread::sleep(std::time::Duration::from_millis(10));
                 // println!("wait for room... {:?}", err)
             }
@@ -851,11 +851,12 @@ pub(crate) mod tests {
     #[test]
     fn test_flush_memtable() {
         with_agate_test(|agate| {
-            agate.write_requests(generate_requests(2000, 0)).unwrap();
-            verify_requests(2000, &agate);
+            agate.write_requests(generate_requests(1000, 0)).unwrap();
+            verify_requests(1000, &agate);
         });
     }
 
+    #[cfg(not(feature = "sanitizer-test"))]
     #[test]
     fn test_flush_l1() {
         with_agate_test(|agate| {

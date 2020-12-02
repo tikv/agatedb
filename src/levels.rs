@@ -112,13 +112,16 @@ impl Core {
         }
 
         let start = std::time::Instant::now();
+        let mut last_log = std::time::Instant::now();
         while !self.levels[0].write()?.try_add_l0_table(table.clone()) {
             let current = std::time::Instant::now();
             let duration = current.duration_since(start);
             if duration.as_millis() > 1000 {
-                println!("L0 stalled for {} ms", duration.as_millis());
+                if current.duration_since(last_log).as_millis() > 1000 {
+                    println!("L0 stalled for {} ms", duration.as_millis());
+                    last_log = current;
+                }
             }
-            std::thread::yield_now();
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
@@ -264,8 +267,7 @@ impl Core {
     }
 
     fn fill_tables_l0(&self, compact_def: &mut CompactDef) -> Result<()> {
-        if let Err(err) = self.fill_tables_l0_to_lbase(compact_def) {
-            println!("error when fill L0 to Lbase {:?}", err);
+        if let Err(_) = self.fill_tables_l0_to_lbase(compact_def) {
             return self.fill_tables_l0_to_l0(compact_def);
         }
         Ok(())
@@ -336,8 +338,6 @@ impl Core {
         level: usize,
         compact_def: &mut CompactDef,
     ) -> Result<()> {
-        println!("compact def {} running...", idx);
-
         if compact_def.targets.file_size.len() == 0 {
             return Err(Error::CustomError("targets not set".to_string()));
         }
@@ -446,6 +446,8 @@ impl Core {
         // TODO: check overlap and process transaction
         let mut tables = vec![];
 
+        let start_time = std::time::Instant::now();
+
         if kr.left.len() > 0 {
             iter.seek(&kr.left);
         } else {
@@ -541,6 +543,15 @@ impl Core {
             tables.push(table);
         }
 
+        println!(
+            "compactor {}, sub_compact took {} mills, produce {} tables",
+            compact_def.compactor_id,
+            std::time::Instant::now()
+                .duration_since(start_time)
+                .as_millis(),
+            tables.len()
+        );
+
         Ok(tables)
     }
 
@@ -583,8 +594,6 @@ impl Core {
             cpt_prio.targets = self.level_targets();
         }
 
-        println!("compact #{} on level {}", idx, level);
-
         let mut compact_def;
 
         if level == 0 {
@@ -622,7 +631,10 @@ impl Core {
 
         // TODO: will compact_def be used now?
 
-        println!("compaction #{} success", idx);
+        println!(
+            "compactor #{} on level {} success",
+            idx, compact_def.this_level_id
+        );
         self.cpt_status.write().unwrap().delete(&compact_def);
 
         Ok(())
@@ -702,7 +714,15 @@ impl Core {
                 cpt_status.levels[i].del_size
             };
             let level = self.levels[i].read().unwrap();
-            let size = level.total_size - del_size;
+            // There could be inconsistency data which causes `size < 0`.
+            // We may safely ignore this situation.
+            // TODO: check if we could make it more stable
+            let size;
+            if del_size <= level.total_size {
+                size = level.total_size - del_size;
+            } else {
+                size = 0;
+            }
             add_priority(i, size as f64 / targets.target_size[i] as f64);
         }
 
@@ -775,7 +795,7 @@ impl LevelsController {
 
                     // TODO: handle error
                     if let Err(err) = core.do_compact(idx, p) {
-                        println!("error while compaction: {:?}", err);
+                        // println!("error while compaction: {:?}", err);
                     }
                 }
             };
