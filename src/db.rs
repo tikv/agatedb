@@ -851,8 +851,8 @@ pub(crate) mod tests {
     #[test]
     fn test_flush_memtable() {
         with_agate_test(|agate| {
-            agate.write_requests(generate_requests(2000, 0)).unwrap();
-            verify_requests(2000, &agate);
+            agate.write_requests(generate_requests(1000, 0)).unwrap();
+            verify_requests(1000, &agate);
         });
     }
 
