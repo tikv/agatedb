@@ -83,7 +83,8 @@ impl Agate {
         let writer_core = core.clone();
         let closer = Closer::new();
         let pool = yatp::Builder::new("agatedb")
-            .min_thread_count(core.opts.num_compactors * 3 + 2)
+            .max_thread_count(core.opts.num_compactors * 3 + 2)
+            .min_thread_count(core.opts.num_compactors + 2)
             .build_callback_pool();
         let agate = Self {
             core,
