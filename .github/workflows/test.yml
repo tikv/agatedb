@@ -48,6 +48,11 @@ jobs:
         name: Running Tests 🚀
         with:
           command: test
+          args: ops::transaction --all-features --workspace
+      - uses: actions-rs/cargo@v1
+        name: Running Tests 🚀
+        with:
+          command: test
           args: --all-features --workspace
   sanitizer_test:
     name: Test with Sanitizer

@@ -111,9 +111,13 @@ impl Core {
                 .add_changes(vec![new_create_change(table.id(), 0, 0)])?;
         }
 
+        let start = std::time::Instant::now();
         while !self.levels[0].write()?.try_add_l0_table(table.clone()) {
-            println!("L0 stalled");
-            // TODO: enhance stall logic
+            let current = std::time::Instant::now();
+            let duration = current.duration_since(start);
+            if duration.as_millis() > 1000 {
+                println!("L0 stalled for {} ms", duration.as_millis());
+            }
             std::thread::yield_now();
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
