@@ -577,7 +577,7 @@ impl Core {
     }
 
     fn flush_memtable(&self) -> Result<()> {
-        for ft in self.flush_channel.1.clone() {
+        for ft in &self.flush_channel.1 {
             if let Some(ft) = ft {
                 let flush_id = ft.mt.id();
                 match self.handle_flush_task(ft) {

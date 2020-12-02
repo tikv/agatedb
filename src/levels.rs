@@ -114,6 +114,7 @@ impl Core {
         while !self.levels[0].write()?.try_add_l0_table(table.clone()) {
             println!("L0 stalled");
             // TODO: enhance stall logic
+            std::thread::yield_now();
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
