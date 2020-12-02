@@ -21,6 +21,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, RwLock};
+use yatp::task::callback::Handle;
 
 const KV_WRITE_CH_CAPACITY: usize = 1000;
 
@@ -81,8 +82,8 @@ impl Agate {
         let flush_core = core.clone();
         let writer_core = core.clone();
         let closer = Closer::new();
-        let pool = yatp::Builder::new("compaction")
-            .max_thread_count(core.opts.num_compactors * 3)
+        let pool = yatp::Builder::new("agatedb")
+            .max_thread_count(core.opts.num_compactors * 3 + 2)
             .build_callback_pool();
         let agate = Self {
             core,
@@ -90,19 +91,15 @@ impl Agate {
             pool,
         };
 
-        std::thread::Builder::new()
-            .name("memtable_flush".to_string())
-            .spawn(move || flush_core.flush_memtable().unwrap())
-            .unwrap();
+        agate
+            .pool
+            .spawn(move |_: &mut Handle<'_>| flush_core.flush_memtable().unwrap());
 
-        std::thread::Builder::new()
-            .name("write_request".to_string())
-            .spawn(move || {
-                writer_core
-                    .do_writes(writer_core.closers.writes.clone())
-                    .unwrap()
-            })
-            .unwrap();
+        agate.pool.spawn(move |_: &mut Handle<'_>| {
+            writer_core
+                .do_writes(writer_core.closers.writes.clone())
+                .unwrap()
+        });
 
         agate
             .core
