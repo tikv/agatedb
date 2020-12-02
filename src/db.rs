@@ -681,6 +681,7 @@ impl Core {
                     // TODO: blocking writes
                     // TODO: batch write
                     let req = req.unwrap();
+                    println!("request received!");
                     if let Some(done) = req.done.clone() {
                         done.send(self.write_requests(vec![req])).unwrap();
                     }
