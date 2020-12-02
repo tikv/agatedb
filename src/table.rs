@@ -4,9 +4,7 @@ mod iterator;
 pub mod merge_iterator;
 
 pub use concat_iterator::ConcatIterator;
-use iterator::{TableRefIterator, ITERATOR_NOCACHE, ITERATOR_REVERSED};
 pub use merge_iterator::{Iterators as TableIterators, MergeIterator};
-
 pub type TableIterator = TableRefIterator<Arc<TableInner>>;
 
 use crate::bloom::Bloom;
@@ -15,6 +13,8 @@ use crate::iterator_trait::AgateIterator;
 use crate::opt::{ChecksumVerificationMode, Options};
 use crate::Error;
 use crate::Result;
+
+use iterator::{TableRefIterator, ITERATOR_NOCACHE, ITERATOR_REVERSED};
 
 use bytes::{Buf, Bytes};
 use memmap::{Mmap, MmapOptions};
