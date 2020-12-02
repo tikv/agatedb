@@ -702,7 +702,15 @@ impl Core {
                 cpt_status.levels[i].del_size
             };
             let level = self.levels[i].read().unwrap();
-            let size = level.total_size - del_size;
+            // There could be inconsistency data which causes `size < 0`.
+            // We may safely ignore this situation.
+            // TODO: check if we could make it more stable
+            let size;
+            if del_size <= level.total_size {
+                size = level.total_size - del_size;
+            } else {
+                size = 0;
+            }
             add_priority(i, size as f64 / targets.target_size[i] as f64);
         }
 
