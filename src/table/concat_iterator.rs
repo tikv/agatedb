@@ -4,6 +4,7 @@ use crate::util::{KeyComparator, COMPARATOR};
 use crate::value::Value;
 
 use bytes::Bytes;
+
 /// ConcatIterator iterates on SSTs with no overlap keys.
 pub struct ConcatIterator {
     cur: Option<usize>,
@@ -14,11 +15,7 @@ pub struct ConcatIterator {
 
 impl ConcatIterator {
     pub fn from_tables(tables: Vec<Table>, opt: usize) -> Self {
-        let mut iters = vec![];
-
-        for _ in &tables {
-            iters.push(None);
-        }
+        let iters = tables.iter().map(|_| None).collect();
 
         ConcatIterator {
             cur: None,
