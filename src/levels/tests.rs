@@ -1,5 +1,5 @@
 use super::*;
-use crate::{Agate, TableOptions, table::new_filename, db::tests::with_agate_test};
+use crate::{db::tests::with_agate_test, table::new_filename, Agate, TableOptions};
 
 pub fn helper_dump_levels(lvctl: &LevelsController) {
     for level in &lvctl.core.levels {
@@ -64,6 +64,90 @@ fn overlap_same_keys() {
         create_and_open(agate, vec![l0], 0);
         create_and_open(agate, vec![l1], 1);
 
-        assert!(agate.core.lvctl.core.check_overlap)
+        let l0_tables = agate.core.lvctl.core.levels[0]
+            .read()
+            .unwrap()
+            .tables
+            .clone();
+        let l1_tables = agate.core.lvctl.core.levels[1]
+            .read()
+            .unwrap()
+            .tables
+            .clone();
+
+        // lv0 should overlap with lv0 tables
+        assert!(agate.core.lvctl.core.check_overlap(&l0_tables, 0));
+        // lv1 should overlap with lv0 tables
+        assert!(agate.core.lvctl.core.check_overlap(&l0_tables, 1));
+        // lv2 and lv3 should not overlap with lv0 tables
+        assert!(!agate.core.lvctl.core.check_overlap(&l0_tables, 2));
+        assert!(!agate.core.lvctl.core.check_overlap(&l1_tables, 2));
+        assert!(!agate.core.lvctl.core.check_overlap(&l0_tables, 3));
+        assert!(!agate.core.lvctl.core.check_overlap(&l1_tables, 3));
+    });
+}
+
+#[test]
+fn overlap_overlapping_keys() {
+    with_agate_test(|agate| {
+        let l0 = vec![
+            KeyValVersion::new("a", "x", 1, 0),
+            KeyValVersion::new("b", "x", 1, 0),
+            KeyValVersion::new("foo", "bar", 3, 0),
+        ];
+        let l1 = vec![KeyValVersion::new("foo", "bar", 2, 0)];
+        create_and_open(agate, l0, 0);
+        create_and_open(agate, l1, 1);
+
+        let l0_tables = agate.core.lvctl.core.levels[0]
+            .read()
+            .unwrap()
+            .tables
+            .clone();
+        let l1_tables = agate.core.lvctl.core.levels[1]
+            .read()
+            .unwrap()
+            .tables
+            .clone();
+
+        // lv0 should overlap with lv0 tables
+        assert!(agate.core.lvctl.core.check_overlap(&l0_tables, 0));
+        assert!(agate.core.lvctl.core.check_overlap(&l1_tables, 1));
+        // lv1 should overlap with lv0 tables
+        assert!(agate.core.lvctl.core.check_overlap(&l0_tables, 1));
+        // lv2 and lv3 should not overlap with lv0 tables
+        assert!(!agate.core.lvctl.core.check_overlap(&l0_tables, 2));
+        assert!(!agate.core.lvctl.core.check_overlap(&l0_tables, 3));
+    });
+}
+
+#[test]
+fn overlap_non_overlapping_keys() {
+    with_agate_test(|agate| {
+        let l0 = vec![
+            KeyValVersion::new("a", "x", 1, 0),
+            KeyValVersion::new("b", "x", 1, 0),
+            KeyValVersion::new("c", "bar", 3, 0),
+        ];
+        let l1 = vec![KeyValVersion::new("foo", "bar", 2, 0)];
+        create_and_open(agate, l0, 0);
+        create_and_open(agate, l1, 1);
+
+        let l0_tables = agate.core.lvctl.core.levels[0]
+            .read()
+            .unwrap()
+            .tables
+            .clone();
+        let l1_tables = agate.core.lvctl.core.levels[1]
+            .read()
+            .unwrap()
+            .tables
+            .clone();
+
+        // lv1 should not overlap with lv0 tables
+        assert!(!agate.core.lvctl.core.check_overlap(&l0_tables, 1));
+        // lv2 and lv3 should not overlap with lv0 tables
+        assert!(!agate.core.lvctl.core.check_overlap(&l0_tables, 2));
+        assert!(!agate.core.lvctl.core.check_overlap(&l0_tables, 3));
     });
 }

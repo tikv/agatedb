@@ -8,6 +8,7 @@ use memmap::{MmapMut, MmapOptions};
 use prost::{decode_length_delimiter, encode_length_delimiter, length_delimiter_len};
 use std::fs::{File, OpenOptions};
 
+use std::fs;
 use std::io::Cursor;
 use std::mem::ManuallyDrop;
 use std::path::PathBuf;

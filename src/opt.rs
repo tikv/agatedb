@@ -27,7 +27,7 @@ pub enum ChecksumVerificationMode {
 
 impl Default for ChecksumVerificationMode {
     fn default() -> Self {
-        return Self::NoVerification
+        return Self::NoVerification;
     }
 }
 

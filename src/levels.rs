@@ -739,6 +739,22 @@ impl Core {
         x.reverse();
         x
     }
+
+    fn check_overlap(&self, tables: &[Table], level: usize) -> bool {
+        let kr = get_key_range(tables);
+        for (idx, lh) in self.levels.iter().enumerate() {
+            if idx < level {
+                continue;
+            }
+            let lvl = lh.write().unwrap();
+            let (left, right) = lvl.overlapping_tables(&kr);
+            drop(lvl);
+            if right - left > 0 {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 impl LevelsController {
