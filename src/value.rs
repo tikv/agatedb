@@ -172,7 +172,7 @@ impl EntryReader {
         self.header.decode(reader)?;
         if self.header.key_len > (1 << 16) {
             return Err(Error::LogRead(
-                "key length must be lower than 1 << 16".to_string(),
+                "key length must not be larger than 1 << 16".to_string(),
             ));
         }
         self.key.resize(self.header.key_len as usize, 0);
