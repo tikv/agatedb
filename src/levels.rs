@@ -1,6 +1,9 @@
 mod compaction;
 mod handler;
 
+#[cfg(test)]
+pub(crate) mod tests;
+
 use compaction::{
     get_key_range, get_key_range_single, CompactDef, CompactStatus, CompactionPriority, KeyRange,
     LevelCompactStatus, Targets,
@@ -846,25 +849,4 @@ fn build_change_set(compact_def: &CompactDef, new_tables: &[Table]) -> ManifestC
     }
 
     ManifestChangeSet { changes }
-}
-
-#[cfg(test)]
-pub(crate) mod tests {
-    use super::LevelsController;
-
-    pub fn helper_dump_levels(lvctl: &LevelsController) {
-        for level in &lvctl.core.levels {
-            let level = level.read().unwrap();
-            println!("--- Level {} ---", level.level);
-            for table in &level.tables {
-                println!(
-                    "#{} ({:?} - {:?}, {})",
-                    table.id(),
-                    table.smallest(),
-                    table.biggest(),
-                    table.size()
-                );
-            }
-        }
-    }
 }
