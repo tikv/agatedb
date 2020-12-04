@@ -334,7 +334,7 @@ impl Core {
 
     fn run_compact_def(
         &self,
-        idx: usize,
+        _idx: usize,
         level: usize,
         compact_def: &mut CompactDef,
     ) -> Result<()> {
@@ -456,7 +456,7 @@ impl Core {
 
         let mut skip_key = BytesMut::new();
         let mut last_key = BytesMut::new();
-        let mut num_builds = 0;
+        let _num_builds = 0;
         let mut num_versions = 0;
 
         while iter.valid() {
@@ -513,7 +513,7 @@ impl Core {
                 }
 
                 let vs = iter.value();
-                let version = get_ts(iter.key());
+                let _version = get_ts(iter.key());
 
                 // TODO: check ts-related properties
 
@@ -763,7 +763,7 @@ impl LevelsController {
         closer: Closer,
         pool: &yatp::ThreadPool<yatp::task::callback::TaskCell>,
     ) {
-        let max_levels = self.core.opts.max_levels;
+        let _max_levels = self.core.opts.max_levels;
         let core = self.core.clone();
         pool.spawn(move |_: &mut Handle<'_>| {
             let move_l0_to_front =
@@ -794,7 +794,7 @@ impl LevelsController {
                     }
 
                     // TODO: handle error
-                    if let Err(err) = core.do_compact(idx, p) {
+                    if let Err(_err) = core.do_compact(idx, p) {
                         // println!("error while compaction: {:?}", err);
                     }
                 }

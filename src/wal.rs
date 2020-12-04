@@ -6,9 +6,9 @@ use crate::Result;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use memmap::{MmapMut, MmapOptions};
 use prost::{decode_length_delimiter, encode_length_delimiter, length_delimiter_len};
-use std::fs::{self, File, OpenOptions};
-use std::io::BufReader;
-use std::io::{Cursor, Seek, SeekFrom};
+use std::fs::{File, OpenOptions};
+
+use std::io::{Cursor};
 use std::mem::ManuallyDrop;
 use std::path::PathBuf;
 
@@ -172,7 +172,7 @@ impl Wal {
 
     fn decode_entry(mut buf: &mut Bytes) -> Result<Entry> {
         let mut header = Header::default();
-        let header_len = header.decode(&mut buf)?;
+        let _header_len = header.decode(&mut buf)?;
         let kv = buf;
         Ok(Entry {
             meta: header.meta,
