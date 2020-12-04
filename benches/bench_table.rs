@@ -1,7 +1,7 @@
 mod common;
 
-use agatedb::ChecksumVerificationMode::NoVerification;
-use agatedb::{AgateIterator, Table, TableBuilder, TableOptions, Value};
+use agatedb::{opt::build_table_options, AgateOptions, ChecksumVerificationMode::NoVerification};
+use agatedb::{AgateIterator, Table, TableBuilder, Value};
 
 use std::ops::{Deref, DerefMut};
 
@@ -24,15 +24,15 @@ fn bench_table_builder(c: &mut Criterion) {
 
         let vs = Value::new(Bytes::from(rand_value()));
 
-        let opt = TableOptions {
-            block_size: 4 * 1024,
-            bloom_false_positive: 0.01,
-            table_size: 5 << 20,
-            checksum_mode: NoVerification,
-        };
+        let mut agate_opts = AgateOptions::default();
+        agate_opts.block_size = 4 * 1024;
+        agate_opts.base_table_size = 5 << 20;
+        agate_opts.bloom_false_positive = 0.01;
+        agate_opts.checksum_mode = NoVerification;
+        let opts = build_table_options(&agate_opts);
 
         b.iter(|| {
-            let mut builder = TableBuilder::new(opt.clone());
+            let mut builder = TableBuilder::new(opts.clone());
             for j in 0..KEY_COUNT {
                 builder.add(&key_list[j], vs.clone(), 0);
             }
@@ -67,13 +67,11 @@ impl DerefMut for TableGuard {
 fn get_table_for_benchmark(count: usize) -> TableGuard {
     let tmp_dir = TempDir::new("agatedb").unwrap();
 
-    let opts = TableOptions {
-        // TODO: add compression parameter
-        block_size: 4 * 1024,
-        bloom_false_positive: 0.01,
-        table_size: 0,
-        checksum_mode: NoVerification,
-    };
+    let mut agate_opts = AgateOptions::default();
+    agate_opts.block_size = 4 * 1024;
+    agate_opts.bloom_false_positive = 0.01;
+    agate_opts.checksum_mode = NoVerification;
+    let opts = build_table_options(&agate_opts);
 
     let mut builder = TableBuilder::new(opts.clone());
     let filename = tmp_dir.path().join("1.sst".to_string());
@@ -103,12 +101,11 @@ fn bench_table(c: &mut Criterion) {
         });
     });
 
-    let builder_opts = TableOptions {
-        block_size: 4 * 1024,
-        bloom_false_positive: 0.01,
-        table_size: 0,
-        checksum_mode: NoVerification,
-    };
+    let mut agate_opts = AgateOptions::default();
+    agate_opts.block_size = 4 * 1024;
+    agate_opts.bloom_false_positive = 0.01;
+    agate_opts.checksum_mode = NoVerification;
+    let builder_opts = build_table_options(&agate_opts);
 
     c.bench_function("table read and build", |b| {
         let table = get_table_for_benchmark(n);
