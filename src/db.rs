@@ -37,7 +37,7 @@ pub struct Core {
     pub(crate) lvctl: LevelsController,
     flush_channel: (Sender<Option<FlushTask>>, Receiver<Option<FlushTask>>),
     write_channel: (Sender<Request>, Receiver<Request>),
-    manifest: Arc<ManifestFile>,
+    pub(crate) manifest: Arc<ManifestFile>,
     pub(crate) orc: Arc<Oracle>,
 
     block_writes: AtomicBool,
@@ -128,7 +128,7 @@ impl Drop for Agate {
 
 #[derive(Clone)]
 pub struct AgateOptions {
-    pub path: PathBuf,
+    pub dir: PathBuf,
     pub value_dir: PathBuf,
     // TODO: docs
     pub in_memory: bool,
@@ -171,7 +171,7 @@ impl Default for AgateOptions {
     fn default() -> Self {
         Self {
             create_if_not_exists: false,
-            path: PathBuf::new(),
+            dir: PathBuf::new(),
             value_dir: PathBuf::new(),
             // memtable options
             mem_table_size: 64 << 20,
@@ -211,36 +211,6 @@ impl AgateOptions {
         self
     }
 
-    pub fn path<P: Into<PathBuf>>(&mut self, p: P) -> &mut AgateOptions {
-        self.path = p.into();
-        self
-    }
-
-    pub fn num_memtables(&mut self, num_memtables: usize) -> &mut AgateOptions {
-        self.num_memtables = num_memtables;
-        self
-    }
-
-    pub fn in_memory(&mut self, in_memory: bool) -> &mut AgateOptions {
-        self.in_memory = in_memory;
-        self
-    }
-
-    pub fn sync_writes(&mut self, sync_writes: bool) -> &mut AgateOptions {
-        self.sync_writes = sync_writes;
-        self
-    }
-
-    pub fn value_log_file_size(&mut self, value_log_file_size: u64) -> &mut AgateOptions {
-        self.value_log_file_size = value_log_file_size;
-        self
-    }
-
-    pub fn value_log_max_entries(&mut self, value_log_max_entries: u32) -> &mut AgateOptions {
-        self.value_log_max_entries = value_log_max_entries;
-        self
-    }
-
     fn fix_options(&mut self) -> Result<()> {
         if self.in_memory {
             // TODO: find a way to check if path is set, if set, then panic with ConfigError
@@ -258,16 +228,16 @@ impl AgateOptions {
         self.fix_options()?;
         self.managed_txns = true;
 
-        self.path = path.as_ref().to_path_buf();
+        self.dir = path.as_ref().to_path_buf();
         // TODO: allow specify value dir
         self.value_dir = path.as_ref().to_path_buf();
 
         if !self.in_memory {
-            if !self.path.exists() {
+            if !self.dir.exists() {
                 if !self.create_if_not_exists {
-                    return Err(Error::Config(format!("{:?} doesn't exist", self.path)));
+                    return Err(Error::Config(format!("{:?} doesn't exist", self.dir)));
                 }
-                fs::create_dir_all(&self.path)?;
+                fs::create_dir_all(&self.dir)?;
             }
             // TODO: create wal path, acquire database path lock
         }
@@ -295,7 +265,7 @@ impl Core {
         let lvctl = LevelsController::new(opts.clone(), manifest.clone())?;
 
         let (imm_tables, mut next_mem_fid) = Self::open_mem_tables(&opts)?;
-        let mt = Self::open_mem_table(&opts.path, opts.clone(), next_mem_fid)?;
+        let mt = Self::open_mem_table(&opts.dir, opts.clone(), next_mem_fid)?;
         next_mem_fid += 1;
 
         // create agate core
@@ -360,7 +330,7 @@ impl Core {
         let mut fids = vec![];
         let mut mts = VecDeque::new();
 
-        for file in fs::read_dir(&opts.path)? {
+        for file in fs::read_dir(&opts.dir)? {
             let file = file?;
             let filename_ = file.file_name();
             let filename = filename_.to_string_lossy();
@@ -373,7 +343,7 @@ impl Core {
         fids.sort();
 
         for fid in &fids {
-            let memtable = Self::open_mem_table(&opts.path, opts.clone(), *fid)?;
+            let memtable = Self::open_mem_table(&opts.dir, opts.clone(), *fid)?;
             mts.push_back(Arc::new(memtable));
         }
 
@@ -392,7 +362,7 @@ impl Core {
         let fid = self
             .next_mem_fid
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let mt = Self::open_mem_table(&self.opts.path, self.opts.clone(), fid)?;
+        let mt = Self::open_mem_table(&self.opts.dir, self.opts.clone(), fid)?;
         Ok(mt)
     }
 
@@ -569,7 +539,7 @@ impl Core {
             table = Table::open_in_memory(data, file_id, table_opts)?;
         } else {
             table = Table::create(
-                &crate::table::new_filename(file_id, &self.opts.path),
+                &crate::table::new_filename(file_id, &self.opts.dir),
                 builder.finish(),
                 table_opts,
             )?;
@@ -752,10 +722,10 @@ pub(crate) mod tests {
             let tmp_dir = TempDir::new("agatedb").unwrap();
             let mut options = AgateOptions::default();
 
-            options
-                .create()
-                .in_memory(false)
-                .value_log_file_size(4 << 20);
+            options.create();
+
+            options.in_memory = false;
+            options.value_log_file_size = 4 << 20;
 
             options.mem_table_size = 1 << 14;
             // set base level size small enought to make the compactor flush L0 to L5 and L6

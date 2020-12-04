@@ -33,10 +33,10 @@ use bytes::{BufMut, Bytes, BytesMut};
 use crossbeam_channel::{select, tick};
 use yatp::task::callback::Handle;
 
-struct Core {
+pub(crate) struct Core {
     next_file_id: AtomicU64,
     // `levels[i].level == i` should be ensured
-    levels: Vec<Arc<RwLock<LevelHandler>>>,
+    pub(crate) levels: Vec<Arc<RwLock<LevelHandler>>>,
     opts: AgateOptions,
     // TODO: agate oracle, manifest should be added here
     cpt_status: RwLock<CompactStatus>,
@@ -44,7 +44,7 @@ struct Core {
 }
 
 pub struct LevelsController {
-    core: Arc<Core>,
+    pub(crate) core: Arc<Core>,
 }
 
 impl Core {
@@ -70,7 +70,7 @@ impl Core {
             }
             let table_opts = build_table_options(&opts);
             // TODO: set compression, data_key, cache
-            let filename = crate::table::new_filename(id, &opts.path);
+            let filename = crate::table::new_filename(id, &opts.dir);
             let table = Table::open(&filename, table_opts)?;
             // TODO: allow checksum mismatch tables
             tables[table_manifest.level as usize].push(table);
@@ -539,7 +539,7 @@ impl Core {
             if self.opts.in_memory {
                 table = Table::open_in_memory(builder.finish(), file_id, bopts)?;
             } else {
-                let filename = crate::table::new_filename(file_id, &self.opts.path);
+                let filename = crate::table::new_filename(file_id, &self.opts.dir);
                 table = Table::create(&filename, builder.finish(), bopts)?;
             }
 
