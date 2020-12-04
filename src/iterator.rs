@@ -48,7 +48,7 @@ pub fn is_deleted_or_expired(meta: u8, expires_at: u64) -> bool {
     expires_at <= crate::util::unix_time()
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct IteratorOptions {
     pub prefetch_size: usize,
     pub prefetch_values: bool,
@@ -111,7 +111,7 @@ impl<C: KeyComparator> AgateIterator for SkiplistIterator<C> {
 }
 
 pub struct Iterator<'a> {
-    table_iter: Box<TableIterators>,
+    pub(crate) table_iter: Box<TableIterators>,
     read_ts: u64,
     opt: IteratorOptions,
     _vlog: Arc<Option<ValueLog>>,
@@ -123,7 +123,7 @@ pub struct Iterator<'a> {
 impl Transaction {
     // TODO: add IteratorOptions support. Currently, we could only create
     // an iterator that iterates all items.
-    fn new_iterator(&self) -> Iterator<'_> {
+    pub fn new_iterator(&self, opt: &IteratorOptions) -> Iterator<'_> {
         if self.discarded {
             panic!("transaction has been discarded")
         }
@@ -142,7 +142,7 @@ impl Transaction {
                 table.skl.iter(),
             )));
         }
-        let opt = IteratorOptions::default();
+
         self.agate.lvctl.append_iterators(&mut iters, &opt);
 
         Iterator {
@@ -150,7 +150,7 @@ impl Transaction {
                 iters.into_iter().map(Box::new).collect(),
                 false,
             ),
-            opt,
+            opt: opt.clone(),
             read_ts: self.read_ts,
             _vlog: vlog,
             item: None,
@@ -174,9 +174,10 @@ impl Iterator<'_> {
     pub fn next(&mut self) {
         while self.table_iter.valid() {
             if self.parse_item() {
-                break;
+                return;
             }
         }
+        self.item = None;
     }
 
     fn parse_item(&mut self) -> bool {
@@ -193,9 +194,12 @@ impl Iterator<'_> {
             return false;
         }
 
-        // TODO: all versions
         if self.opt.all_versions {
-            unimplemented!()
+            let mut item = Item::default();
+            Self::fill_item(&mut item, key, &self.table_iter.value(), &self.opt);
+            self.item = Some(item);
+            self.table_iter.next();
+            return true;
         }
 
         if !self.opt.reverse {
@@ -254,14 +258,15 @@ impl Iterator<'_> {
 
         if key.len() == 0 {
             self.table_iter.rewind();
+            self.parse_item();
+            return;
         }
 
         // TODO: reverse
-        let mut key_ts = BytesMut::new();
-        key_ts.extend_from_slice(key);
-        let key = key_with_ts(key_ts, self.txn.read_ts);
+        let key = key_with_ts(BytesMut::from(&key[..]), self.txn.read_ts);
 
         self.table_iter.seek(&key);
+        self.parse_item();
     }
 
     pub fn rewind(&mut self) {

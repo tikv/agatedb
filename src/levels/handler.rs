@@ -212,8 +212,10 @@ impl LevelHandler {
 
         let mut tables = self.tables.clone();
         opts.pick_tables(&mut tables);
-        let iter = ConcatIterator::from_tables(tables, 0);
-        iters.push(TableIterators::from(iter));
+        if !tables.is_empty() {
+            let iter = ConcatIterator::from_tables(tables, 0);
+            iters.push(TableIterators::from(iter));
+        }
         return;
     }
 }
