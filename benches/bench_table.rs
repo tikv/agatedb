@@ -1,7 +1,7 @@
 mod common;
 
-use agatedb::{AgateOptions, ChecksumVerificationMode::NoVerification, opt::build_table_options};
-use agatedb::{AgateIterator, Table, TableBuilder, TableOptions, Value};
+use agatedb::{opt::build_table_options, AgateOptions, ChecksumVerificationMode::NoVerification};
+use agatedb::{AgateIterator, Table, TableBuilder, Value};
 
 use std::ops::{Deref, DerefMut};
 
@@ -72,7 +72,6 @@ fn get_table_for_benchmark(count: usize) -> TableGuard {
     agate_opts.bloom_false_positive = 0.01;
     agate_opts.checksum_mode = NoVerification;
     let opts = build_table_options(&agate_opts);
-
 
     let mut builder = TableBuilder::new(opts.clone());
     let filename = tmp_dir.path().join("1.sst".to_string());
