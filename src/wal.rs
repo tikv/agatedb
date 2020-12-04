@@ -160,8 +160,10 @@ impl Wal {
     pub fn zero_next_entry(&mut self) -> Result<()> {
         let range =
             &mut self.mmap_file[self.write_at as usize..self.write_at as usize + MAX_HEADER_SIZE];
-        // TODO: optimize zero fill
-        range.fill(0);
+        // this code could be optimized by compiler to write 8 bytes a time
+        for x in range {
+            *x = 0;
+        }
         Ok(())
     }
 

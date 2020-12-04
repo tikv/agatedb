@@ -175,6 +175,7 @@ impl EntryReader {
                 "key length must not be larger than 1 << 16".to_string(),
             ));
         }
+        // TODO: resize key and value without initialization
         self.key.resize(self.header.key_len as usize, 0);
         reader.read_exact(&mut self.key)?;
         self.value.resize(self.header.value_len as usize, 0);
