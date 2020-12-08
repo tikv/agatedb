@@ -719,20 +719,32 @@ pub(crate) mod tests {
         }
     }
 
+    pub fn generate_test_agate_options() -> AgateOptions {
+        let mut options = AgateOptions::default();
+
+        options.create();
+
+        options.in_memory = false;
+        options.value_log_file_size = 4 << 20;
+
+        options.mem_table_size = 1 << 14;
+        // set base level size small enought to make the compactor flush L0 to L5 and L6
+        options.base_level_size = 4 << 10;
+
+        options
+    }
+
     pub fn with_agate_test(f: impl FnOnce(&mut Agate) -> () + Send + 'static) {
+        with_agate_test_options(generate_test_agate_options(), f);
+    }
+
+    pub fn with_agate_test_options(
+        mut options: AgateOptions,
+        f: impl FnOnce(&mut Agate) -> () + Send + 'static,
+    ) {
         let (tx, rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || {
             let tmp_dir = TempDir::new("agatedb").unwrap();
-            let mut options = AgateOptions::default();
-
-            options.create();
-
-            options.in_memory = false;
-            options.value_log_file_size = 4 << 20;
-
-            options.mem_table_size = 1 << 14;
-            // set base level size small enought to make the compactor flush L0 to L5 and L6
-            options.base_level_size = 4 << 10;
 
             let mut agate = options.open(&tmp_dir).unwrap();
             f(&mut agate);

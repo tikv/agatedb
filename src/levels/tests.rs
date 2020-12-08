@@ -17,6 +17,23 @@ pub fn helper_dump_levels(lvctl: &LevelsController) {
     }
 }
 
+macro_rules! kv {
+    ($key: expr, $val: expr, $meta: expr, $user_meta: expr) => {
+        KeyValVersion::new($key, $val, $meta, $user_meta)
+    };
+}
+
+macro_rules! run_compact {
+    ($agate: expr, $level: expr, $compact_def: expr) => {
+        $agate
+            .core
+            .lvctl
+            .core
+            .run_compact_def(std::usize::MAX, $level, &mut $compact_def)
+            .unwrap();
+    };
+}
+
 struct KeyValVersion {
     key: Bytes,
     value: Bytes,
@@ -62,8 +79,8 @@ mod overlap {
     #[test]
     fn test_same_keys() {
         with_agate_test(|agate| {
-            let l0 = KeyValVersion::new("foo", "bar", 3, 0);
-            let l1 = KeyValVersion::new("foo", "bar", 2, 0);
+            let l0 = kv!("foo", "bar", 3, 0);
+            let l1 = kv!("foo", "bar", 2, 0);
             create_and_open(agate, vec![l0], 0);
             create_and_open(agate, vec![l1], 1);
 
@@ -94,11 +111,11 @@ mod overlap {
     fn test_overlapping_keys() {
         with_agate_test(|agate| {
             let l0 = vec![
-                KeyValVersion::new("a", "x", 1, 0),
-                KeyValVersion::new("b", "x", 1, 0),
-                KeyValVersion::new("foo", "bar", 3, 0),
+                kv!("a", "x", 1, 0),
+                kv!("b", "x", 1, 0),
+                kv!("foo", "bar", 3, 0),
             ];
-            let l1 = vec![KeyValVersion::new("foo", "bar", 2, 0)];
+            let l1 = vec![kv!("foo", "bar", 2, 0)];
             create_and_open(agate, l0, 0);
             create_and_open(agate, l1, 1);
 
@@ -128,11 +145,11 @@ mod overlap {
     fn test_non_overlapping_keys() {
         with_agate_test(|agate| {
             let l0 = vec![
-                KeyValVersion::new("a", "x", 1, 0),
-                KeyValVersion::new("b", "x", 1, 0),
-                KeyValVersion::new("c", "bar", 3, 0),
+                kv!("a", "x", 1, 0),
+                kv!("b", "x", 1, 0),
+                kv!("c", "bar", 3, 0),
             ];
-            let l1 = vec![KeyValVersion::new("foo", "bar", 2, 0)];
+            let l1 = vec![kv!("foo", "bar", 2, 0)];
             create_and_open(agate, l0, 0);
             create_and_open(agate, l1, 1);
 
@@ -167,6 +184,12 @@ fn get_all_and_check(agate: &mut Agate, expected: Vec<KeyValVersion>) {
             iter_opts.all_versions = true;
             let mut iter = txn.new_iterator(&iter_opts);
             iter.rewind();
+            while iter.valid() {
+                let it = iter.item();
+                println!("key={:?} val={:?}", it.key, it.vptr);
+                iter.next();
+            }
+            iter.rewind();
             let mut cnt = 0;
             while iter.valid() {
                 let it = iter.item();
@@ -184,55 +207,64 @@ fn get_all_and_check(agate: &mut Agate, expected: Vec<KeyValVersion>) {
         .unwrap();
 }
 
+fn generate_test_compect_def(
+    agate: &Agate,
+    this_level_id: usize,
+    next_level_id: usize,
+) -> CompactDef {
+    let targets = agate.core.lvctl.core.level_targets();
+    let cpt_prio = CompactionPriority {
+        targets: targets.clone(),
+        level: 0,
+        score: 0.0,
+        adjusted: 0.0,
+        drop_prefixes: vec![],
+    };
+    let mut compact_def = CompactDef::new(
+        0,
+        agate.core.lvctl.core.levels[this_level_id].clone(),
+        this_level_id,
+        agate.core.lvctl.core.levels[next_level_id].clone(),
+        next_level_id,
+        cpt_prio,
+        targets,
+    );
+    compact_def.top = agate.core.lvctl.core.levels[this_level_id]
+        .read()
+        .unwrap()
+        .tables
+        .clone();
+    compact_def.bot = agate.core.lvctl.core.levels[next_level_id]
+        .read()
+        .unwrap()
+        .tables
+        .clone();
+    compact_def.targets.base_level = next_level_id;
+    compact_def
+}
+
 mod compaction {
     use super::*;
-    use crate::value::*;
+    use crate::{
+        db::tests::{generate_test_agate_options, with_agate_test_options},
+        value::*,
+    };
 
-    fn generate_test_compect_def(
-        agate: &Agate,
-        this_level_id: usize,
-        next_level_id: usize,
-    ) -> CompactDef {
-        let targets = agate.core.lvctl.core.level_targets();
-        let cpt_prio = CompactionPriority {
-            targets: targets.clone(),
-            level: 0,
-            score: 0.0,
-            adjusted: 0.0,
-            drop_prefixes: vec![],
-        };
-        let mut compact_def = CompactDef::new(
-            0,
-            agate.core.lvctl.core.levels[this_level_id].clone(),
-            this_level_id,
-            agate.core.lvctl.core.levels[next_level_id].clone(),
-            next_level_id,
-            cpt_prio,
-            targets,
-        );
-        compact_def.top = agate.core.lvctl.core.levels[this_level_id]
-            .read()
-            .unwrap()
-            .tables
-            .clone();
-        compact_def.bot = agate.core.lvctl.core.levels[next_level_id]
-            .read()
-            .unwrap()
-            .tables
-            .clone();
-        compact_def.targets.base_level = next_level_id;
-        compact_def
+    fn test_options() -> AgateOptions {
+        let mut options = generate_test_agate_options();
+        // disable compaction
+        options.num_compactors = 0;
+        options.num_versions_to_keep = 1;
+
+        options
     }
 
     #[test]
     fn test_l0_to_l1() {
-        with_agate_test(|agate| {
-            let l0 = vec![
-                KeyValVersion::new("foo", "bar", 3, 0),
-                KeyValVersion::new("fooz", "barz", 1, 0),
-            ];
-            let l01 = vec![KeyValVersion::new("foo", "bar", 2, 0)];
-            let l1 = vec![KeyValVersion::new("foo", "bar", 1, 0)];
+        with_agate_test_options(test_options(), |agate| {
+            let l0 = vec![kv!("foo", "bar", 3, 0), kv!("fooz", "barz", 1, 0)];
+            let l01 = vec![kv!("foo", "bar", 2, 0)];
+            let l1 = vec![kv!("foo", "bar", 1, 0)];
             create_and_open(agate, l0, 0);
             create_and_open(agate, l01, 0);
             create_and_open(agate, l1, 1);
@@ -242,10 +274,10 @@ mod compaction {
             get_all_and_check(
                 agate,
                 vec![
-                    KeyValVersion::new("foo", "bar", 3, 0),
-                    KeyValVersion::new("foo", "bar", 2, 0),
-                    KeyValVersion::new("foo", "bar", 1, 0),
-                    KeyValVersion::new("fooz", "barz", 1, 0),
+                    kv!("foo", "bar", 3, 0),
+                    kv!("foo", "bar", 2, 0),
+                    kv!("foo", "bar", 1, 0),
+                    kv!("fooz", "barz", 1, 0),
                 ],
             );
             let mut compact_def = generate_test_compect_def(agate, 0, 1);
@@ -257,23 +289,17 @@ mod compaction {
                 .unwrap();
             get_all_and_check(
                 agate,
-                vec![
-                    KeyValVersion::new("foo", "bar", 3, 0),
-                    KeyValVersion::new("fooz", "barz", 1, 0),
-                ],
+                vec![kv!("foo", "bar", 3, 0), kv!("fooz", "barz", 1, 0)],
             );
         })
     }
 
     #[test]
     fn test_l0_to_l1_with_dup() {
-        with_agate_test(|agate| {
-            let l0 = vec![
-                KeyValVersion::new("foo", "barNew", 3, 0),
-                KeyValVersion::new("fooz", "baz", 1, 0),
-            ];
-            let l01 = vec![KeyValVersion::new("foo", "bar", 4, 0)];
-            let l1 = vec![KeyValVersion::new("foo", "bar", 3, 0)];
+        with_agate_test_options(test_options(), |agate| {
+            let l0 = vec![kv!("foo", "barNew", 3, 0), kv!("fooz", "baz", 1, 0)];
+            let l01 = vec![kv!("foo", "bar", 4, 0)];
+            let l1 = vec![kv!("foo", "bar", 3, 0)];
             create_and_open(agate, l0, 0);
             create_and_open(agate, l01, 0);
             create_and_open(agate, l1, 1);
@@ -283,9 +309,9 @@ mod compaction {
             get_all_and_check(
                 agate,
                 vec![
-                    KeyValVersion::new("foo", "bar", 4, 0),
-                    KeyValVersion::new("foo", "barNew", 3, 0),
-                    KeyValVersion::new("fooz", "baz", 1, 0),
+                    kv!("foo", "bar", 4, 0),
+                    kv!("foo", "barNew", 3, 0),
+                    kv!("fooz", "baz", 1, 0),
                 ],
             );
             let mut compact_def = generate_test_compect_def(agate, 0, 1);
@@ -297,24 +323,18 @@ mod compaction {
                 .unwrap();
             get_all_and_check(
                 agate,
-                vec![
-                    KeyValVersion::new("foo", "bar", 4, 0),
-                    KeyValVersion::new("fooz", "baz", 1, 0),
-                ],
+                vec![kv!("foo", "bar", 4, 0), kv!("fooz", "baz", 1, 0)],
             );
         })
     }
 
     #[test]
     fn test_l0_to_l1_with_lower_overlap() {
-        with_agate_test(|agate| {
-            let l0 = vec![
-                KeyValVersion::new("foo", "bar", 3, 0),
-                KeyValVersion::new("fooz", "baz", 1, 0),
-            ];
-            let l01 = vec![KeyValVersion::new("foo", "bar", 2, 0)];
-            let l1 = vec![KeyValVersion::new("foo", "bar", 1, 0)];
-            let l2 = vec![KeyValVersion::new("foo", "bar", 0, 0)];
+        with_agate_test_options(test_options(), |agate| {
+            let l0 = vec![kv!("foo", "bar", 3, 0), kv!("fooz", "baz", 1, 0)];
+            let l01 = vec![kv!("foo", "bar", 2, 0)];
+            let l1 = vec![kv!("foo", "bar", 1, 0)];
+            let l2 = vec![kv!("foo", "bar", 0, 0)];
 
             create_and_open(agate, l0, 0);
             create_and_open(agate, l01, 0);
@@ -326,11 +346,11 @@ mod compaction {
             get_all_and_check(
                 agate,
                 vec![
-                    KeyValVersion::new("foo", "bar", 3, 0),
-                    KeyValVersion::new("foo", "bar", 2, 0),
-                    KeyValVersion::new("foo", "bar", 1, 0),
-                    KeyValVersion::new("foo", "bar", 0, 0),
-                    KeyValVersion::new("fooz", "baz", 1, 0),
+                    kv!("foo", "bar", 3, 0),
+                    kv!("foo", "bar", 2, 0),
+                    kv!("foo", "bar", 1, 0),
+                    kv!("foo", "bar", 0, 0),
+                    kv!("fooz", "baz", 1, 0),
                 ],
             );
             let mut compact_def = generate_test_compect_def(agate, 0, 1);
@@ -344,9 +364,9 @@ mod compaction {
             get_all_and_check(
                 agate,
                 vec![
-                    KeyValVersion::new("foo", "bar", 3, 0),
-                    KeyValVersion::new("foo", "bar", 0, 0),
-                    KeyValVersion::new("fooz", "baz", 1, 0),
+                    kv!("foo", "bar", 3, 0),
+                    kv!("foo", "bar", 0, 0),
+                    kv!("fooz", "baz", 1, 0),
                 ],
             );
         })
@@ -354,12 +374,9 @@ mod compaction {
 
     #[test]
     fn test_l1_to_l2() {
-        with_agate_test(|agate| {
-            let l1 = vec![
-                KeyValVersion::new("foo", "bar", 3, 0),
-                KeyValVersion::new("fooz", "baz", 1, 0),
-            ];
-            let l2 = vec![KeyValVersion::new("foo", "bar", 2, 0)];
+        with_agate_test_options(test_options(), |agate| {
+            let l1 = vec![kv!("foo", "bar", 3, 0), kv!("fooz", "baz", 1, 0)];
+            let l2 = vec![kv!("foo", "bar", 2, 0)];
 
             create_and_open(agate, l1, 1);
             create_and_open(agate, l2, 2);
@@ -369,9 +386,9 @@ mod compaction {
             get_all_and_check(
                 agate,
                 vec![
-                    KeyValVersion::new("foo", "bar", 3, 0),
-                    KeyValVersion::new("foo", "bar", 2, 0),
-                    KeyValVersion::new("fooz", "baz", 1, 0),
+                    kv!("foo", "bar", 3, 0),
+                    kv!("foo", "bar", 2, 0),
+                    kv!("fooz", "baz", 1, 0),
                 ],
             );
             let mut compact_def = generate_test_compect_def(agate, 1, 2);
@@ -384,10 +401,7 @@ mod compaction {
 
             get_all_and_check(
                 agate,
-                vec![
-                    KeyValVersion::new("foo", "bar", 3, 0),
-                    KeyValVersion::new("fooz", "baz", 1, 0),
-                ],
+                vec![kv!("foo", "bar", 3, 0), kv!("fooz", "baz", 1, 0)],
             );
         })
     }
@@ -395,13 +409,13 @@ mod compaction {
     #[test]
     fn test_l1_to_l2_with_delete() {
         // TODO: this test should also be done when version_to_retain > 1
-        with_agate_test(|agate| {
+        with_agate_test_options(test_options(), |agate| {
             let l1 = vec![
-                KeyValVersion::new("foo", "bar", 3, VALUE_DELETE),
-                KeyValVersion::new("fooz", "baz", 1, VALUE_DELETE),
+                kv!("foo", "bar", 3, VALUE_DELETE),
+                kv!("fooz", "baz", 1, VALUE_DELETE),
             ];
-            let l2 = vec![KeyValVersion::new("foo", "bar", 2, 0)];
-            let l3 = vec![KeyValVersion::new("foo", "bar", 1, 0)];
+            let l2 = vec![kv!("foo", "bar", 2, 0)];
+            let l3 = vec![kv!("foo", "bar", 1, 0)];
 
             create_and_open(agate, l1, 1);
             create_and_open(agate, l2, 2);
@@ -412,10 +426,10 @@ mod compaction {
             get_all_and_check(
                 agate,
                 vec![
-                    KeyValVersion::new("foo", "bar", 3, VALUE_DELETE),
-                    KeyValVersion::new("foo", "bar", 2, 0),
-                    KeyValVersion::new("foo", "bar", 1, 0),
-                    KeyValVersion::new("fooz", "baz", 1, VALUE_DELETE),
+                    kv!("foo", "bar", 3, VALUE_DELETE),
+                    kv!("foo", "bar", 2, 0),
+                    kv!("foo", "bar", 1, 0),
+                    kv!("fooz", "baz", 1, VALUE_DELETE),
                 ],
             );
             let mut compact_def = generate_test_compect_def(agate, 1, 2);
@@ -429,9 +443,9 @@ mod compaction {
             get_all_and_check(
                 agate,
                 vec![
-                    KeyValVersion::new("foo", "bar", 3, VALUE_DELETE),
-                    KeyValVersion::new("foo", "bar", 1, 0),
-                    KeyValVersion::new("fooz", "baz", 1, VALUE_DELETE),
+                    kv!("foo", "bar", 3, VALUE_DELETE),
+                    kv!("foo", "bar", 1, 0),
+                    kv!("fooz", "baz", 1, VALUE_DELETE),
                 ],
             );
         })
@@ -439,13 +453,10 @@ mod compaction {
 
     #[test]
     fn test_l1_to_l2_with_bottom_overlap() {
-        with_agate_test(|agate| {
-            let l1 = vec![KeyValVersion::new("foo", "bar", 3, VALUE_DELETE)];
-            let l2 = vec![
-                KeyValVersion::new("foo", "bar", 2, 0),
-                KeyValVersion::new("fooz", "baz", 2, VALUE_DELETE),
-            ];
-            let l3 = vec![KeyValVersion::new("fooz", "baz", 1, 0)];
+        with_agate_test_options(test_options(), |agate| {
+            let l1 = vec![kv!("foo", "bar", 3, VALUE_DELETE)];
+            let l2 = vec![kv!("foo", "bar", 2, 0), kv!("fooz", "baz", 2, VALUE_DELETE)];
+            let l3 = vec![kv!("fooz", "baz", 1, 0)];
 
             create_and_open(agate, l1, 1);
             create_and_open(agate, l2, 2);
@@ -456,10 +467,10 @@ mod compaction {
             get_all_and_check(
                 agate,
                 vec![
-                    KeyValVersion::new("foo", "bar", 3, VALUE_DELETE),
-                    KeyValVersion::new("foo", "bar", 2, 0),
-                    KeyValVersion::new("fooz", "baz", 2, VALUE_DELETE),
-                    KeyValVersion::new("fooz", "baz", 1, 0),
+                    kv!("foo", "bar", 3, VALUE_DELETE),
+                    kv!("foo", "bar", 2, 0),
+                    kv!("fooz", "baz", 2, VALUE_DELETE),
+                    kv!("fooz", "baz", 1, 0),
                 ],
             );
             let mut compact_def = generate_test_compect_def(agate, 1, 2);
@@ -473,9 +484,9 @@ mod compaction {
             get_all_and_check(
                 agate,
                 vec![
-                    KeyValVersion::new("foo", "bar", 3, VALUE_DELETE),
-                    KeyValVersion::new("fooz", "baz", 2, VALUE_DELETE),
-                    KeyValVersion::new("fooz", "baz", 1, 0),
+                    kv!("foo", "bar", 3, VALUE_DELETE),
+                    kv!("fooz", "baz", 2, VALUE_DELETE),
+                    kv!("fooz", "baz", 1, 0),
                 ],
             );
         })
@@ -483,12 +494,12 @@ mod compaction {
 
     #[test]
     fn test_l1_to_l2_without_overlap() {
-        with_agate_test(|agate| {
+        with_agate_test_options(test_options(), |agate| {
             let l1 = vec![
-                KeyValVersion::new("foo", "bar", 3, VALUE_DELETE),
-                KeyValVersion::new("fooz", "baz", 1, VALUE_DELETE),
+                kv!("foo", "bar", 3, VALUE_DELETE),
+                kv!("fooz", "baz", 1, VALUE_DELETE),
             ];
-            let l2 = vec![KeyValVersion::new("fooo", "barr", 2, 0)];
+            let l2 = vec![kv!("fooo", "barr", 2, 0)];
 
             create_and_open(agate, l1, 1);
             create_and_open(agate, l2, 2);
@@ -498,9 +509,9 @@ mod compaction {
             get_all_and_check(
                 agate,
                 vec![
-                    KeyValVersion::new("foo", "bar", 3, VALUE_DELETE),
-                    KeyValVersion::new("fooo", "barr", 2, 0),
-                    KeyValVersion::new("fooz", "baz", 1, VALUE_DELETE),
+                    kv!("foo", "bar", 3, VALUE_DELETE),
+                    kv!("fooo", "barr", 2, 0),
+                    kv!("fooz", "baz", 1, VALUE_DELETE),
                 ],
             );
             let mut compact_def = generate_test_compect_def(agate, 1, 2);
@@ -511,7 +522,217 @@ mod compaction {
                 .run_compact_def(std::usize::MAX, 1, &mut compact_def)
                 .unwrap();
 
-            get_all_and_check(agate, vec![KeyValVersion::new("fooo", "barr", 2, 0)]);
+            get_all_and_check(agate, vec![kv!("fooo", "barr", 2, 0)]);
+        })
+    }
+
+    #[test]
+    fn test_l1_to_l2_with_splits() {
+        with_agate_test_options(test_options(), |agate| {
+            let l1 = vec![kv!("C", "bar", 3, VALUE_DELETE)];
+            let l21 = vec![kv!("A", "bar", 2, 0)];
+            let l22 = vec![kv!("B", "bar", 2, 0)];
+            let l23 = vec![kv!("C", "bar", 2, 0)];
+            let l24 = vec![kv!("D", "bar", 2, 0)];
+            let l3 = vec![kv!("fooz", "baz", 1, 0)];
+
+            create_and_open(agate, l1, 1);
+            create_and_open(agate, l21, 2);
+            create_and_open(agate, l22, 2);
+            create_and_open(agate, l23, 2);
+            create_and_open(agate, l24, 2);
+            create_and_open(agate, l3, 3);
+
+            agate.core.orc.set_discard_ts(10);
+
+            get_all_and_check(
+                agate,
+                vec![
+                    kv!("A", "bar", 2, 0),
+                    kv!("B", "bar", 2, 0),
+                    kv!("C", "bar", 3, VALUE_DELETE),
+                    kv!("C", "bar", 2, 0),
+                    kv!("D", "bar", 2, 0),
+                    kv!("fooz", "baz", 1, 0),
+                ],
+            );
+
+            let mut compact_def = generate_test_compect_def(agate, 1, 2);
+
+            agate
+                .core
+                .lvctl
+                .core
+                .run_compact_def(std::usize::MAX, 1, &mut compact_def)
+                .unwrap();
+
+            get_all_and_check(
+                agate,
+                vec![
+                    kv!("A", "bar", 2, 0),
+                    kv!("B", "bar", 2, 0),
+                    kv!("D", "bar", 2, 0),
+                    kv!("fooz", "baz", 1, 0),
+                ],
+            );
+        })
+    }
+}
+
+mod compaction_two_versions {
+    use super::*;
+    use crate::db::tests::{generate_test_agate_options, with_agate_test_options};
+    use crate::value::*;
+    use crate::AgateOptions;
+
+    fn test_options() -> AgateOptions {
+        let mut options = generate_test_agate_options();
+        // disable compaction
+        options.num_compactors = 0;
+        options.num_versions_to_keep = 2;
+
+        options
+    }
+
+    #[test]
+    fn test_with_overlap() {
+        with_agate_test_options(test_options(), |agate| {
+            let l1 = vec![kv!("foo", "bar", 3, 0), kv!("fooz", "baz", 1, VALUE_DELETE)];
+            let l2 = vec![kv!("foo", "bar", 2, 0)];
+            let l3 = vec![kv!("foo", "bar", 1, 0)];
+
+            create_and_open(agate, l1, 1);
+            create_and_open(agate, l2, 2);
+            create_and_open(agate, l3, 3);
+
+            agate.core.orc.set_discard_ts(10);
+
+            get_all_and_check(
+                agate,
+                vec![
+                    kv!("foo", "bar", 3, 0),
+                    kv!("foo", "bar", 2, 0),
+                    kv!("foo", "bar", 1, 0),
+                    kv!("fooz", "baz", 1, 1),
+                ],
+            );
+
+            let mut compact_def = generate_test_compect_def(agate, 1, 2);
+            run_compact!(agate, 1, compact_def);
+
+            get_all_and_check(
+                agate,
+                vec![
+                    kv!("foo", "bar", 3, 0),
+                    kv!("foo", "bar", 2, 0),
+                    kv!("foo", "bar", 1, 0),
+                    kv!("fooz", "baz", 1, 1),
+                ],
+            );
+
+            let mut compact_def = generate_test_compect_def(agate, 2, 3);
+            run_compact!(agate, 2, compact_def);
+
+            get_all_and_check(
+                agate,
+                vec![kv!("foo", "bar", 3, 0), kv!("foo", "bar", 2, 0)],
+            );
+        })
+    }
+}
+
+mod compaction_all_versions {
+    use super::*;
+    use crate::db::tests::{generate_test_agate_options, with_agate_test_options};
+    use crate::value::*;
+    use crate::AgateOptions;
+
+    fn test_options() -> AgateOptions {
+        let mut options = generate_test_agate_options();
+        // disable compaction
+        options.num_compactors = 0;
+        options.num_versions_to_keep = std::usize::MAX;
+
+        options
+    }
+
+    #[test]
+    fn test_without_overlap() {
+        with_agate_test_options(test_options(), |agate| {
+            let l1 = vec![kv!("foo", "bar", 3, 0), kv!("fooz", "baz", 1, VALUE_DELETE)];
+            let l2 = vec![kv!("foo", "bar", 2, 0)];
+            let l3 = vec![kv!("foo", "bar", 1, 0)];
+
+            create_and_open(agate, l1, 1);
+            create_and_open(agate, l2, 2);
+            create_and_open(agate, l3, 3);
+
+            agate.core.orc.set_discard_ts(10);
+
+            get_all_and_check(
+                agate,
+                vec![
+                    kv!("foo", "bar", 3, 0),
+                    kv!("foo", "bar", 2, 0),
+                    kv!("foo", "bar", 1, 0),
+                    kv!("fooz", "baz", 1, 1),
+                ],
+            );
+
+            let mut compact_def = generate_test_compect_def(agate, 1, 2);
+            run_compact!(agate, 1, compact_def);
+
+            get_all_and_check(
+                agate,
+                vec![
+                    kv!("foo", "bar", 3, 0),
+                    kv!("foo", "bar", 2, 0),
+                    kv!("foo", "bar", 1, 0),
+                    kv!("fooz", "baz", 1, 1),
+                ],
+            );
+
+            let mut compact_def = generate_test_compect_def(agate, 2, 3);
+            run_compact!(agate, 2, compact_def);
+
+            get_all_and_check(
+                agate,
+                vec![
+                    kv!("foo", "bar", 3, 0),
+                    kv!("foo", "bar", 2, 0),
+                    kv!("foo", "bar", 1, 0),
+                ],
+            );
+        })
+    }
+
+    #[test]
+    fn test_with_overlap() {
+        with_agate_test_options(test_options(), |agate| {
+            let l1 = vec![
+                kv!("foo", "bar", 3, VALUE_DELETE),
+                kv!("fooz", "baz", 1, VALUE_DELETE),
+            ];
+            let l2 = vec![kv!("fooo", "barr", 2, 0)];
+
+            create_and_open(agate, l1, 1);
+            create_and_open(agate, l2, 2);
+
+            agate.core.orc.set_discard_ts(10);
+
+            get_all_and_check(
+                agate,
+                vec![
+                    kv!("foo", "bar", 3, VALUE_DELETE),
+                    kv!("fooo", "barr", 2, 0),
+                    kv!("fooz", "baz", 1, VALUE_DELETE),
+                ],
+            );
+
+            let mut compact_def = generate_test_compect_def(agate, 1, 2);
+            run_compact!(agate, 1, compact_def);
+
+            get_all_and_check(agate, vec![kv!("fooo", "barr", 2, 0)]);
         })
     }
 }
