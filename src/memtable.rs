@@ -66,8 +66,7 @@ impl MemTable {
         let mut max_version = core.max_version;
         if let Some(ref mut wal) = core.wal {
             let mut it = wal.iter()?;
-            while let Some(entry) = it.next() {
-                let entry = entry?;
+            while let Some(entry) = it.next()? {
                 let ts = get_ts(entry.key);
                 if ts > max_version {
                     max_version = ts;

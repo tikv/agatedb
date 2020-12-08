@@ -272,7 +272,7 @@ impl<'a> WalIterator<'a> {
     }
 
     /// Get next entry from WAL
-    pub fn next(&mut self) -> Option<Result<EntryRef<'_>>> {
+    pub fn next(&mut self) -> Result<Option<EntryRef<'_>>> {
         use std::io::ErrorKind;
 
         let entry = self.entry_reader.entry(&mut self.reader);
@@ -280,19 +280,19 @@ impl<'a> WalIterator<'a> {
         match entry {
             Ok(entry) => {
                 if entry.is_zero() {
-                    return None;
+                    return Ok(None);
                 }
                 // TODO: process transaction-related metadata
-                Some(Ok(entry))
+                Ok(Some(entry))
             }
             Err(Error::Io(err)) => {
                 if err.kind() == ErrorKind::UnexpectedEof {
-                    None
+                    Ok(None)
                 } else {
-                    return Some(Err(Error::Io(err)));
+                    Err(Error::Io(err))
                 }
             }
-            Err(err) => Some(Err(err)),
+            Err(err) => Err(err),
         }
     }
 }
@@ -355,8 +355,7 @@ mod tests {
         }
         let mut it = wal.iter().unwrap();
         let mut cnt = 0;
-        while let Some(entry) = it.next() {
-            let entry = entry.unwrap();
+        while let Some(entry) = it.next().unwrap() {
             assert_eq!(entry.key, cnt.to_string().as_bytes());
             assert_eq!(entry.value, cnt.to_string().as_bytes());
             cnt += 1;
