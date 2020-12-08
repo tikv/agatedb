@@ -170,6 +170,12 @@ impl CompactDef {
             prios,
         }
     }
+
+    pub fn all_tables(&self) -> Vec<Table> {
+        let mut tables = self.top.clone();
+        tables.append(&mut self.bot.clone());
+        tables
+    }
 }
 
 impl CompactStatus {

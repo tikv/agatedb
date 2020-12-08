@@ -133,6 +133,7 @@ pub struct AgateOptions {
     // TODO: docs
     pub in_memory: bool,
     pub sync_writes: bool,
+    pub num_versions_to_keep: usize,
     pub create_if_not_exists: bool,
 
     // Memtable options
@@ -187,6 +188,7 @@ impl Default for AgateOptions {
             num_memtables: 5,
             in_memory: false,
             sync_writes: false,
+            num_versions_to_keep: 1,
             value_threshold: 1 << 10,
             value_log_file_size: 1 << 30 - 1,
             value_log_max_entries: 1000000,
@@ -261,8 +263,9 @@ impl Core {
     fn new(opts: AgateOptions) -> Result<Self> {
         // create first mem table
 
+        let orc = Arc::new(Oracle::new(opts.managed_txns, opts.detect_conflicts));
         let manifest = Arc::new(ManifestFile::open_or_create_manifest_file(&opts)?);
-        let lvctl = LevelsController::new(opts.clone(), manifest.clone())?;
+        let lvctl = LevelsController::new(opts.clone(), manifest.clone(), orc.clone())?;
 
         let (imm_tables, mut next_mem_fid) = Self::open_mem_tables(&opts)?;
         let mt = Self::open_mem_table(&opts.dir, opts.clone(), next_mem_fid)?;
@@ -277,7 +280,7 @@ impl Core {
             lvctl,
             flush_channel: crossbeam_channel::bounded(opts.num_memtables),
             manifest,
-            orc: Arc::new(Oracle::new(opts.managed_txns, opts.detect_conflicts)),
+            orc,
             block_writes: AtomicBool::new(false),
             write_channel: bounded(KV_WRITE_CH_CAPACITY),
             closers: Closers {

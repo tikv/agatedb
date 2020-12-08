@@ -170,7 +170,6 @@ fn get_all_and_check(agate: &mut Agate, expected: Vec<KeyValVersion>) {
             let mut cnt = 0;
             while iter.valid() {
                 let it = iter.item();
-                println!("{:?}", it.key);
                 assert!(cnt < expected.len());
                 assert_bytes_eq!(&it.key, &expected[cnt].key);
                 assert_bytes_eq!(&it.vptr, &expected[cnt].value);
@@ -188,6 +187,42 @@ fn get_all_and_check(agate: &mut Agate, expected: Vec<KeyValVersion>) {
 mod compaction {
     use super::*;
 
+    fn generate_test_compect_def(
+        agate: &Agate,
+        this_level_id: usize,
+        next_level_id: usize,
+    ) -> CompactDef {
+        let targets = agate.core.lvctl.core.level_targets();
+        let cpt_prio = CompactionPriority {
+            targets: targets.clone(),
+            level: 0,
+            score: 0.0,
+            adjusted: 0.0,
+            drop_prefixes: vec![],
+        };
+        let mut compact_def = CompactDef::new(
+            0,
+            agate.core.lvctl.core.levels[this_level_id].clone(),
+            this_level_id,
+            agate.core.lvctl.core.levels[next_level_id].clone(),
+            next_level_id,
+            cpt_prio,
+            targets,
+        );
+        compact_def.top = agate.core.lvctl.core.levels[this_level_id]
+            .read()
+            .unwrap()
+            .tables
+            .clone();
+        compact_def.bot = agate.core.lvctl.core.levels[next_level_id]
+            .read()
+            .unwrap()
+            .tables
+            .clone();
+        compact_def.targets.base_level = next_level_id;
+        compact_def
+    }
+
     #[test]
     fn test_l0_to_l1() {
         with_agate_test(|agate| {
@@ -201,7 +236,7 @@ mod compaction {
             create_and_open(agate, l01, 0);
             create_and_open(agate, l1, 1);
 
-            // TODO: set discard ts
+            agate.core.orc.set_discard_ts(10);
 
             get_all_and_check(
                 agate,
@@ -210,6 +245,106 @@ mod compaction {
                     KeyValVersion::new("foo", "bar", 2, 0),
                     KeyValVersion::new("foo", "bar", 1, 0),
                     KeyValVersion::new("fooz", "barz", 1, 0),
+                ],
+            );
+            let mut compact_def = generate_test_compect_def(agate, 0, 1);
+            agate
+                .core
+                .lvctl
+                .core
+                .run_compact_def(std::usize::MAX, 0, &mut compact_def)
+                .unwrap();
+            get_all_and_check(
+                agate,
+                vec![
+                    KeyValVersion::new("foo", "bar", 3, 0),
+                    KeyValVersion::new("fooz", "barz", 1, 0),
+                ],
+            );
+        })
+    }
+
+    #[test]
+    fn test_l0_to_l1_with_dup() {
+        with_agate_test(|agate| {
+            let l0 = vec![
+                KeyValVersion::new("foo", "barNew", 3, 0),
+                KeyValVersion::new("fooz", "baz", 1, 0),
+            ];
+            let l01 = vec![KeyValVersion::new("foo", "bar", 4, 0)];
+            let l1 = vec![KeyValVersion::new("foo", "bar", 3, 0)];
+            create_and_open(agate, l0, 0);
+            create_and_open(agate, l01, 0);
+            create_and_open(agate, l1, 1);
+
+            agate.core.orc.set_discard_ts(10);
+
+            get_all_and_check(
+                agate,
+                vec![
+                    KeyValVersion::new("foo", "bar", 4, 0),
+                    KeyValVersion::new("foo", "barNew", 3, 0),
+                    KeyValVersion::new("fooz", "baz", 1, 0),
+                ],
+            );
+            let mut compact_def = generate_test_compect_def(agate, 0, 1);
+            agate
+                .core
+                .lvctl
+                .core
+                .run_compact_def(std::usize::MAX, 0, &mut compact_def)
+                .unwrap();
+            get_all_and_check(
+                agate,
+                vec![
+                    KeyValVersion::new("foo", "bar", 4, 0),
+                    KeyValVersion::new("fooz", "baz", 1, 0),
+                ],
+            );
+        })
+    }
+
+    #[test]
+    fn test_l0_to_l1_with_lower_overlap() {
+        with_agate_test(|agate| {
+            let l0 = vec![
+                KeyValVersion::new("foo", "bar", 3, 0),
+                KeyValVersion::new("fooz", "baz", 1, 0),
+            ];
+            let l01 = vec![KeyValVersion::new("foo", "bar", 2, 0)];
+            let l1 = vec![KeyValVersion::new("foo", "bar", 1, 0)];
+            let l2 = vec![KeyValVersion::new("foo", "bar", 0, 0)];
+
+            create_and_open(agate, l0, 0);
+            create_and_open(agate, l01, 0);
+            create_and_open(agate, l1, 1);
+            create_and_open(agate, l2, 2);
+
+            agate.core.orc.set_discard_ts(10);
+
+            get_all_and_check(
+                agate,
+                vec![
+                    KeyValVersion::new("foo", "bar", 3, 0),
+                    KeyValVersion::new("foo", "bar", 2, 0),
+                    KeyValVersion::new("foo", "bar", 1, 0),
+                    KeyValVersion::new("foo", "bar", 0, 0),
+                    KeyValVersion::new("fooz", "baz", 1, 0),
+                ],
+            );
+            let mut compact_def = generate_test_compect_def(agate, 0, 1);
+            agate
+                .core
+                .lvctl
+                .core
+                .run_compact_def(std::usize::MAX, 0, &mut compact_def)
+                .unwrap();
+            get_all_and_check(
+                agate,
+                vec![
+                    KeyValVersion::new("foo", "bar", 3, 0),
+                    KeyValVersion::new("foo", "bar", 0, 0),
+                    KeyValVersion::new("fooz", "baz", 1, 0),
                 ],
             );
         })
