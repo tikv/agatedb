@@ -301,6 +301,11 @@ impl<'a> WalIterator<'a> {
     }
 
     /// Get next entry from WAL
+    ///
+    /// This function will:
+    /// return Ok(None) if we reached first corrupted entry, and we could stop iteration
+    /// return Ok(Some(entry)) if we read a new entry
+    /// return Err if the error is not recoverable
     pub fn next(&mut self) -> Result<Option<EntryRef<'_>>> {
         use std::io::ErrorKind;
 
