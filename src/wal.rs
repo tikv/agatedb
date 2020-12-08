@@ -69,6 +69,9 @@ impl Header {
 
     /// Decode header from byte stream
     pub fn decode(&mut self, bytes: &mut impl Buf) -> Result<()> {
+        if bytes.remaining() <= 2 {
+            return Err(Error::VarDecode("should be at least 2 bytes"));
+        }
         self.meta = bytes.get_u8();
         self.user_meta = bytes.get_u8();
         self.key_len = decode_varint(bytes)? as u32;
@@ -160,9 +163,8 @@ impl Wal {
     pub fn zero_next_entry(&mut self) -> Result<()> {
         let range =
             &mut self.mmap_file[self.write_at as usize..self.write_at as usize + MAX_HEADER_SIZE];
-        // this code could be optimized by compiler to write 8 bytes a time
-        for x in range {
-            *x = 0;
+        unsafe {
+            std::ptr::write_bytes(range.as_mut_ptr(), 0, range.len());
         }
         Ok(())
     }
@@ -235,6 +237,7 @@ impl Wal {
         }
         self.size = end as u32;
         self.file.set_len(end)?;
+        self.file.sync_all()?;
         Ok(())
     }
 
@@ -311,6 +314,11 @@ impl<'a> WalIterator<'a> {
                 // TODO: process transaction-related metadata
                 Some(Ok(entry))
             }
+            // ignore prost varint decode error
+            Err(Error::Decode(_)) => None,
+            // ignore custom decode error (e.g. header <= 2)
+            Err(Error::VarDecode(_)) => None,
+            // ignore file length < key, value size
             Err(Error::Io(err)) => {
                 if err.kind() == ErrorKind::UnexpectedEof {
                     None
@@ -376,6 +384,44 @@ mod tests {
             assert_eq!(entry.key, cnt.to_string().as_bytes());
             assert_eq!(entry.value, cnt.to_string().as_bytes());
             cnt += 1;
+        }
+        assert_eq!(cnt, 20);
+    }
+
+    #[test]
+    fn test_wal_iterator_trunc() {
+        let tmp_dir = TempDir::new("agatedb").unwrap();
+        let mut opts = AgateOptions::default();
+        opts.value_log_file_size = 4096;
+        let wal_path = tmp_dir.path().join("1.wal");
+        let mut wal = Wal::open(wal_path.clone(), opts.clone()).unwrap();
+        for i in 0..20 {
+            let entry = Entry::new(Bytes::from(i.to_string()), Bytes::from(i.to_string()));
+            wal.write_entry(&entry).unwrap();
+        }
+        drop(wal);
+
+        for trunc_length in (50..100).rev() {
+            // truncate some data from WAL
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&wal_path)
+                .unwrap();
+            file.set_len(trunc_length).unwrap();
+            drop(file);
+
+            // reopen WAL and iterate
+            let mut wal = Wal::open(wal_path.clone(), opts.clone()).unwrap();
+            let mut it = wal.iter().unwrap();
+            let mut cnt = 0;
+            while let Some(entry) = it.next() {
+                let entry = entry.unwrap();
+                assert_eq!(entry.key, cnt.to_string().as_bytes());
+                assert_eq!(entry.value, cnt.to_string().as_bytes());
+                cnt += 1;
+            }
+            assert!(cnt < 20);
         }
     }
 }
