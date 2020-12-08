@@ -657,7 +657,7 @@ mod compaction_all_versions {
     }
 
     #[test]
-    fn test_without_overlap() {
+    fn test_with_overlap() {
         with_agate_test_options(test_options(), |agate| {
             let l1 = vec![kv!("foo", "bar", 3, 0), kv!("fooz", "baz", 1, VALUE_DELETE)];
             let l2 = vec![kv!("foo", "bar", 2, 0)];
@@ -707,7 +707,7 @@ mod compaction_all_versions {
     }
 
     #[test]
-    fn test_with_overlap() {
+    fn test_without_overlap() {
         with_agate_test_options(test_options(), |agate| {
             let l1 = vec![
                 kv!("foo", "bar", 3, VALUE_DELETE),
