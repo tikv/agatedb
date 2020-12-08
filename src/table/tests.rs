@@ -21,7 +21,7 @@ fn test_generate_key() {
     assert_eq!(key(b"key", 233), Bytes::from("key0233"));
 }
 
-fn get_test_table_options() -> Options {
+pub(crate) fn get_test_table_options() -> Options {
     Options {
         block_size: 4 * 1024,
         table_size: 0,
@@ -92,7 +92,7 @@ fn build_table(kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> TableGuard {
     // Table::open_in_memory(data, 233, opts).unwrap()
 }
 
-fn build_table_data(mut kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> Bytes {
+pub(crate) fn build_table_data(mut kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> Bytes {
     let mut builder = Builder::new(opts);
     kv_pairs.sort_by(|x, y| x.0.cmp(&y.0));
 
@@ -392,13 +392,25 @@ fn test_table_checksum() {
     let mut opts = get_test_table_options();
     opts.checksum_mode = ChecksumVerificationMode::OnTableAndBlockRead;
     let kv_pairs = generate_table_data(b"k", 10000, opts.clone());
-    let mut table_data = build_table_data(kv_pairs, opts.clone()).to_vec();
-    let start = rng.gen_range(0, table_data.len() - 100);
-    rng.fill_bytes(&mut table_data[start..start + 100]);
-    assert!(matches!(
-        Table::open_in_memory(Bytes::from(table_data), 233, opts),
-        Err(Error::InvalidChecksum(_))
-    ));
+    let table_data = build_table_data(kv_pairs, opts.clone()).to_vec();
+    for _ in 0..10 {
+        let mut table_data = table_data.clone();
+        let x = rng.gen_range(0, table_data.len());
+        let y = rng.gen_range(0, table_data.len());
+        let start = x.min(y);
+        let end = x.max(y);
+
+        rng.fill_bytes(&mut table_data[start..end]);
+
+        let result = Table::open_in_memory(Bytes::from(table_data), 233, opts.clone());
+        assert!(result.is_err());
+        if !matches!(result, Err(Error::InvalidChecksum(_))) {
+            println!(
+                "expected invalid checksum error, found {:?}",
+                result.err().unwrap()
+            );
+        }
+    }
 }
 
 fn test_iterator_error_eof() {
