@@ -137,7 +137,7 @@ impl Core {
         Ok(())
     }
 
-    fn get(&self, key: &Bytes, max_value: Value, start_level: usize) -> Result<Value> {
+    fn get(&self, key: &Bytes, mut max_value: Value, start_level: usize) -> Result<Value> {
         // TODO: check is_closed
 
         let version = get_ts(key);
@@ -147,16 +147,16 @@ impl Core {
                 continue;
             }
             match handler.read()?.get(key) {
-                Ok(Some(value)) => {
+                Ok(value) => {
                     if value.value.is_empty() && value.meta == 0 {
                         continue;
                     }
                     if value.version == version {
                         return Ok(value);
                     }
-                }
-                Ok(None) => {
-                    continue;
+                    if max_value.version < value.version {
+                        max_value = value;
+                    }
                 }
                 Err(err) => {
                     return Err(Error::CustomError(

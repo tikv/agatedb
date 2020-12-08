@@ -159,17 +159,22 @@ impl BlockIterator {
             SeekPos::Current => self.idx,
         };
 
+        println!("seek={:?}", key);
+
         let found_entry_idx = util::search(self.entry_offsets().len(), |idx| {
             use std::cmp::Ordering::*;
             if idx < start_index {
                 return false;
             }
             self.set_idx(idx);
+            println!("current={:?}", self.key);
             match COMPARATOR.compare_key(&self.key, &key) {
                 Less => false,
                 _ => true,
             }
         });
+
+        println!("found={:?}", found_entry_idx);
 
         self.set_idx(found_entry_idx);
     }
@@ -331,6 +336,7 @@ impl<T: AsRef<TableInner>> TableRefIterator<T> {
         }
 
         self.seek_helper(idx - 1, key);
+
         if IteratorError::check_eof(&self.err) {
             if idx == self.table.as_ref().offsets_length() {
                 return;
