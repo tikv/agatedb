@@ -148,7 +148,7 @@ impl LevelHandler {
                 new_tables.push(table.clone());
                 continue;
             }
-            self.total_size -= table.size();
+            self.total_size = self.total_size.saturating_sub(table.size());
         }
 
         for table in to_add {
@@ -177,7 +177,7 @@ impl LevelHandler {
                 new_tables.push(table.clone());
                 continue;
             }
-            self.total_size -= table.size();
+            self.total_size = self.total_size.saturating_sub(table.size());
         }
 
         self.tables = new_tables;
@@ -212,8 +212,10 @@ impl LevelHandler {
 
         let mut tables = self.tables.clone();
         opts.pick_tables(&mut tables);
-        let iter = ConcatIterator::from_tables(tables, 0);
-        iters.push(TableIterators::from(iter));
+        if !tables.is_empty() {
+            let iter = ConcatIterator::from_tables(tables, 0);
+            iters.push(TableIterators::from(iter));
+        }
         return;
     }
 }

@@ -54,7 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        sanitizer: ["address", "leak", "memory", "thread"]
+        sanitizer: ["address", "leak", "memory"]
     steps:
       - uses: actions/checkout@v2
         name: Checkout 🛎️
@@ -78,3 +78,29 @@ jobs:
           args: -Zbuild-std --target x86_64-unknown-linux-gnu --features sanitizer-test
         env:
           RUSTFLAGS: "-Zsanitizer=${{ matrix.sanitizer }}"
+  thread_sanitizer_test:
+    name: Test with Thread Sanitizer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        name: Checkout 🛎️
+      - uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-thread-cargo-sanitizer-test
+      - uses: actions-rs/toolchain@v1
+        name: Setup Cargo Toolchain 🛎️
+        with:
+          components: rustfmt, clippy, rust-src
+          toolchain: nightly
+          default: true
+      - uses: actions-rs/cargo@v1
+        name: Running Tests with thread sanitizer 🚀
+        with:
+          command: test
+          args: --all-features -Zbuild-std --target x86_64-unknown-linux-gnu
+        env:
+          RUSTFLAGS: "-Zsanitizer=thread"

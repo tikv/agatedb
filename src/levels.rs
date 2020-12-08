@@ -1,6 +1,9 @@
 mod compaction;
 mod handler;
 
+#[cfg(test)]
+pub(crate) mod tests;
+
 use compaction::{
     get_key_range, get_key_range_single, CompactDef, CompactStatus, CompactionPriority, KeyRange,
     LevelCompactStatus, Targets,
@@ -9,8 +12,8 @@ use handler::LevelHandler;
 
 use proto::meta::ManifestChangeSet;
 
-use crate::format::{get_ts, key_with_ts, user_key};
 use crate::manifest::{new_create_change, new_delete_change, ManifestFile};
+use crate::ops::oracle::Oracle;
 use crate::opt::build_table_options;
 use crate::table::{MergeIterator, TableIterators};
 use crate::util::{has_any_prefixes, same_key, KeyComparator, COMPARATOR};
@@ -18,6 +21,10 @@ use crate::value::{Value, ValuePointer};
 use crate::AgateIterator;
 use crate::TableBuilder;
 use crate::{closer::Closer, iterator::IteratorOptions};
+use crate::{
+    format::{get_ts, key_with_ts, user_key},
+    iterator::is_deleted_or_expired,
+};
 use crate::{AgateOptions, Table};
 use crate::{Error, Result};
 
@@ -30,22 +37,23 @@ use bytes::{BufMut, Bytes, BytesMut};
 use crossbeam_channel::{select, tick};
 use yatp::task::callback::Handle;
 
-struct Core {
+pub(crate) struct Core {
     next_file_id: AtomicU64,
     // `levels[i].level == i` should be ensured
-    levels: Vec<Arc<RwLock<LevelHandler>>>,
+    pub(crate) levels: Vec<Arc<RwLock<LevelHandler>>>,
     opts: AgateOptions,
     // TODO: agate oracle, manifest should be added here
     cpt_status: RwLock<CompactStatus>,
     manifest: Arc<ManifestFile>,
+    orc: Arc<Oracle>,
 }
 
 pub struct LevelsController {
-    core: Arc<Core>,
+    pub(crate) core: Arc<Core>,
 }
 
 impl Core {
-    fn new(opts: AgateOptions, manifest: Arc<ManifestFile>) -> Result<Self> {
+    fn new(opts: AgateOptions, manifest: Arc<ManifestFile>, orc: Arc<Oracle>) -> Result<Self> {
         let mut levels = vec![];
         let mut cpt_status_levels = vec![];
 
@@ -67,7 +75,7 @@ impl Core {
             }
             let table_opts = build_table_options(&opts);
             // TODO: set compression, data_key, cache
-            let filename = crate::table::new_filename(id, &opts.path);
+            let filename = crate::table::new_filename(id, &opts.dir);
             let table = Table::open(&filename, table_opts)?;
             // TODO: allow checksum mismatch tables
             tables[table_manifest.level as usize].push(table);
@@ -93,6 +101,7 @@ impl Core {
                 tables: HashSet::new(),
             }),
             manifest,
+            orc,
         };
 
         // TODO: load levels from disk
@@ -448,16 +457,22 @@ impl Core {
 
         let start_time = std::time::Instant::now();
 
+        let has_overlap =
+            self.check_overlap(&compact_def.all_tables(), compact_def.next_level_id + 1);
+
         if kr.left.len() > 0 {
             iter.seek(&kr.left);
         } else {
             iter.rewind();
         }
 
+        let discard_ts = self.orc.discard_at_or_below();
+
         let mut skip_key = BytesMut::new();
         let mut last_key = BytesMut::new();
-        let _num_builds = 0;
         let mut num_versions = 0;
+        let mut num_keys: u64 = 0;
+        let mut num_skips: u64 = 0;
 
         while iter.valid() {
             if kr.right.len() > 0 {
@@ -473,23 +488,33 @@ impl Core {
             let mut vp = ValuePointer::default();
 
             while iter.valid() {
+                let iter_key = Bytes::copy_from_slice(iter.key());
+
                 if !compact_def.drop_prefixes.is_empty()
-                    && has_any_prefixes(iter.key(), &compact_def.drop_prefixes)
+                    && has_any_prefixes(&iter_key, &compact_def.drop_prefixes)
                 {
+                    num_skips += 1;
                     // TODO: update stats of vlog
+
+                    iter.next();
+                    continue;
                 }
 
                 if !skip_key.is_empty() {
-                    if same_key(iter.key(), &skip_key) {
+                    if same_key(&iter_key, &skip_key) {
+                        num_skips += 1;
                         // update stats of vlog
+
+                        iter.next();
+                        continue;
                     } else {
                         skip_key.clear();
                     }
                 }
 
-                if !same_key(iter.key(), &last_key) {
+                if !same_key(&iter_key, &last_key) {
                     if !kr.right.is_empty()
-                        && COMPARATOR.compare_key(iter.key(), &kr.right) != std::cmp::Ordering::Less
+                        && COMPARATOR.compare_key(&iter_key, &kr.right) != std::cmp::Ordering::Less
                     {
                         break;
                     }
@@ -513,15 +538,39 @@ impl Core {
                 }
 
                 let vs = iter.value();
-                let _version = get_ts(iter.key());
+                let version = get_ts(&iter_key);
 
-                // TODO: check ts-related properties
+                if version <= discard_ts && vs.meta & crate::value::VALUE_MERGE_ENTRY == 0 {
+                    num_versions += 1;
+
+                    let last_valid_version = vs.meta & crate::value::VALUE_DISCARD_EARLIER_VERSIONS
+                        != 0
+                        || num_versions == self.opts.num_versions_to_keep;
+                    let is_expired = is_deleted_or_expired(vs.meta, vs.expires_at);
+
+                    if is_expired || last_valid_version {
+                        skip_key = BytesMut::from(&iter_key[..]);
+                        if !is_expired && last_valid_version {
+                            // do nothing
+                        } else if has_overlap {
+                            // do nothing
+                        } else {
+                            num_skips += 1;
+                            // TODO: update stats of vlog
+
+                            iter.next();
+                            continue;
+                        }
+                    }
+                }
+
+                num_keys += 1;
 
                 if vs.meta & crate::value::VALUE_POINTER != 0 {
                     vp.decode(&vs.value);
                 }
 
-                builder.add(&Bytes::copy_from_slice(iter.key()), vs, vp.len);
+                builder.add(&iter_key, vs, vp.len);
 
                 iter.next();
             }
@@ -536,7 +585,7 @@ impl Core {
             if self.opts.in_memory {
                 table = Table::open_in_memory(builder.finish(), file_id, bopts)?;
             } else {
-                let filename = crate::table::new_filename(file_id, &self.opts.path);
+                let filename = crate::table::new_filename(file_id, &self.opts.dir);
                 table = Table::create(&filename, builder.finish(), bopts)?;
             }
 
@@ -544,12 +593,14 @@ impl Core {
         }
 
         println!(
-            "compactor {}, sub_compact took {} mills, produce {} tables",
+            "compactor {}, sub_compact took {} mills, produce {} tables, added {} keys, skipped {} keys",
             compact_def.compactor_id,
             std::time::Instant::now()
                 .duration_since(start_time)
                 .as_millis(),
-            tables.len()
+            tables.len(),
+            num_keys,
+            num_skips
         );
 
         Ok(tables)
@@ -736,12 +787,28 @@ impl Core {
         x.reverse();
         x
     }
+
+    fn check_overlap(&self, tables: &[Table], level: usize) -> bool {
+        let kr = get_key_range(tables);
+        for (idx, lh) in self.levels.iter().enumerate() {
+            if idx < level {
+                continue;
+            }
+            let lvl = lh.write().unwrap();
+            let (left, right) = lvl.overlapping_tables(&kr);
+            drop(lvl);
+            if right - left > 0 {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 impl LevelsController {
-    pub fn new(opts: AgateOptions, manifest: Arc<ManifestFile>) -> Result<Self> {
+    pub fn new(opts: AgateOptions, manifest: Arc<ManifestFile>, orc: Arc<Oracle>) -> Result<Self> {
         Ok(Self {
-            core: Arc::new(Core::new(opts, manifest)?),
+            core: Arc::new(Core::new(opts, manifest, orc)?),
         })
     }
 
@@ -846,25 +913,4 @@ fn build_change_set(compact_def: &CompactDef, new_tables: &[Table]) -> ManifestC
     }
 
     ManifestChangeSet { changes }
-}
-
-#[cfg(test)]
-pub(crate) mod tests {
-    use super::LevelsController;
-
-    pub fn helper_dump_levels(lvctl: &LevelsController) {
-        for level in &lvctl.core.levels {
-            let level = level.read().unwrap();
-            println!("--- Level {} ---", level.level);
-            for table in &level.tables {
-                println!(
-                    "#{} ({:?} - {:?}, {})",
-                    table.id(),
-                    table.smallest(),
-                    table.biggest(),
-                    table.size()
-                );
-            }
-        }
-    }
 }

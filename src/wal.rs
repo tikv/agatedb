@@ -8,6 +8,7 @@ use memmap::{MmapMut, MmapOptions};
 use prost::{decode_length_delimiter, encode_length_delimiter, length_delimiter_len};
 use std::fs::{File, OpenOptions};
 
+use std::fs;
 use std::io::Cursor;
 use std::mem::ManuallyDrop;
 use std::path::PathBuf;
@@ -271,7 +272,7 @@ impl<'a> WalIterator<'a> {
     }
 
     /// Get next entry from WAL
-    pub fn next(&mut self) -> Option<Result<EntryRef<'_>>> {
+    pub fn next(&mut self) -> Result<Option<EntryRef<'_>>> {
         use std::io::ErrorKind;
 
         let entry = self.entry_reader.entry(&mut self.reader);
@@ -279,19 +280,85 @@ impl<'a> WalIterator<'a> {
         match entry {
             Ok(entry) => {
                 if entry.is_zero() {
-                    return None;
+                    return Ok(None);
                 }
                 // TODO: process transaction-related metadata
-                Some(Ok(entry))
+                Ok(Some(entry))
             }
             Err(Error::Io(err)) => {
                 if err.kind() == ErrorKind::UnexpectedEof {
-                    None
+                    Ok(None)
                 } else {
-                    return Some(Err(Error::Io(err)));
+                    Err(Error::Io(err))
                 }
             }
-            Err(err) => Some(Err(err)),
+            Err(err) => Err(err),
+        }
+    }
+}
+
+impl Drop for Wal {
+    fn drop(&mut self) {
+        unsafe {
+            ManuallyDrop::drop(&mut self.mmap_file);
+        }
+        let file = unsafe { ManuallyDrop::take(&mut self.file) };
+        if !self.save_after_close {
+            file.set_len(0).unwrap();
+            drop(file);
+            fs::remove_file(&self.path).unwrap();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempdir::TempDir;
+    #[test]
+    fn test_wal_create() {
+        let tmp_dir = TempDir::new("agatedb").unwrap();
+        let mut opts = AgateOptions::default();
+        opts.value_log_file_size = 4096;
+        Wal::open(tmp_dir.path().join("1.wal"), opts).unwrap();
+    }
+
+    #[test]
+    fn test_header_encode() {
+        let header = Header {
+            key_len: 233333,
+            value_len: 2333,
+            expires_at: std::u64::MAX - 2333333,
+            user_meta: b'A',
+            meta: b'B',
+        };
+
+        let mut buf = BytesMut::new();
+        header.encode(&mut buf);
+        let mut buf = buf.freeze();
+
+        let mut new_header = Header::default();
+        new_header.decode(&mut buf).unwrap();
+        assert_eq!(new_header, header);
+    }
+
+    #[test]
+    fn test_wal_iterator() {
+        let tmp_dir = TempDir::new("agatedb").unwrap();
+        let mut opts = AgateOptions::default();
+        opts.value_log_file_size = 4096;
+        let wal_path = tmp_dir.path().join("1.wal");
+        let mut wal = Wal::open(wal_path, opts).unwrap();
+        for i in 0..20 {
+            let entry = Entry::new(Bytes::from(i.to_string()), Bytes::from(i.to_string()));
+            wal.write_entry(&entry).unwrap();
+        }
+        let mut it = wal.iter().unwrap();
+        let mut cnt = 0;
+        while let Some(entry) = it.next().unwrap() {
+            assert_eq!(entry.key, cnt.to_string().as_bytes());
+            assert_eq!(entry.value, cnt.to_string().as_bytes());
+            cnt += 1;
         }
     }
 }
