@@ -38,19 +38,19 @@ impl ConcatIterator {
         self.cur = Some(idx);
     }
 
-    fn iter_mut(&mut self, idx: usize) -> &mut TableIterator {
-        self.iters[idx].as_mut().unwrap()
+    fn iter_mut(&mut self) -> &mut TableIterator {
+        self.iters[self.cur.unwrap()].as_mut().unwrap()
     }
 
-    fn iter_ref(&self, idx: usize) -> &TableIterator {
-        self.iters[idx].as_ref().unwrap()
+    fn iter_ref(&self) -> &TableIterator {
+        self.iters[self.cur.unwrap()].as_ref().unwrap()
     }
 }
 
 impl AgateIterator for ConcatIterator {
     fn next(&mut self) {
         let cur = self.cur.unwrap();
-        let cur_iter = self.iter_mut(cur);
+        let cur_iter = self.iter_mut();
         cur_iter.next();
         if cur_iter.valid() {
             return;
@@ -66,9 +66,9 @@ impl AgateIterator for ConcatIterator {
                     self.set_idx(cur - 1);
                 }
             }
-            if let Some(idx) = self.cur {
-                self.iter_mut(idx).rewind();
-                if self.iter_ref(idx).valid() {
+            if self.cur.is_some() {
+                self.iter_mut().rewind();
+                if self.iter_ref().valid() {
                     return;
                 }
             } else {
@@ -87,7 +87,7 @@ impl AgateIterator for ConcatIterator {
             self.set_idx(self.iters.len() - 1);
         }
 
-        self.iter_mut(self.cur.unwrap()).rewind();
+        self.iter_mut().rewind();
     }
 
     fn seek(&mut self, key: &Bytes) {
@@ -114,20 +114,20 @@ impl AgateIterator for ConcatIterator {
         }
 
         self.set_idx(idx);
-        self.iter_mut(idx).seek(key);
+        self.iter_mut().seek(key);
     }
 
     fn key(&self) -> &[u8] {
-        self.iter_ref(self.cur.unwrap()).key()
+        self.iter_ref().key()
     }
 
     fn value(&self) -> Value {
-        self.iter_ref(self.cur.unwrap()).value()
+        self.iter_ref().value()
     }
 
     fn valid(&self) -> bool {
-        if let Some(idx) = self.cur {
-            self.iter_ref(idx).valid()
+        if self.cur.is_some() {
+            self.iter_ref().valid()
         } else {
             false
         }
