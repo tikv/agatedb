@@ -1,5 +1,5 @@
 use super::*;
-use crate::{db::tests::with_agate_test, table::new_filename, Agate, TableOptions};
+use crate::{db::tests::with_agate_test, table::new_filename, Agate};
 
 pub fn helper_dump_levels(lvctl: &LevelsController) {
     for level in &lvctl.core.levels {
@@ -54,7 +54,7 @@ impl KeyValVersion {
 }
 
 fn create_and_open(agate: &mut Agate, td: Vec<KeyValVersion>, level: usize) {
-    let mut table_opts = TableOptions::default();
+    let mut table_opts = build_table_options(&agate.core.opts);
     table_opts.block_size = agate.core.opts.block_size;
     table_opts.bloom_false_positive = agate.core.opts.bloom_false_positive;
     let mut builder = TableBuilder::new(table_opts.clone());
@@ -1002,5 +1002,30 @@ mod miscellaneous {
                 }
             })
         }
+    }
+}
+
+mod key_version {
+    use super::*;
+    use crate::db::tests::{generate_test_agate_options, with_agate_test_options};
+
+    fn test_options() -> AgateOptions {
+        let mut options = generate_test_agate_options();
+        options.sync_writes = false;
+        options.in_memory = true;
+        options.mem_table_size = 4 << 20;
+
+        options
+    }
+
+    #[test]
+    fn test_memory_small_table() {
+        with_agate_test_options(test_options(), move |agate| {
+            let mut l0 = vec![];
+            for i in 0..10 {
+                l0.push(KeyValVersion::new(format!("{:05}", i), "foo", 1, 0));
+            }
+            create_and_open(agate, l0, 0);
+        })
     }
 }
