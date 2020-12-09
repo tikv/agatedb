@@ -2,7 +2,8 @@ use crate::entry::Entry;
 use crate::entry::EntryRef;
 use crate::wal::Header;
 use crate::{Error, Result};
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+use crossbeam_channel::Sender;
 use std::io::{Cursor, Read};
 use std::mem::MaybeUninit;
 
@@ -13,7 +14,6 @@ pub const VALUE_MERGE_ENTRY: u8 = 1 << 3;
 pub const VALUE_TXN: u8 = 1 << 6;
 pub const VALUE_FIN_TXN: u8 = 1 << 7;
 
-/// Value of a kv pair is packed into `Value` struct with extra information.
 #[derive(Default, Debug, Clone)]
 pub struct Value {
     pub meta: u8,
@@ -135,19 +135,34 @@ impl Value {
     }
 }
 
-/// A request contains multiple entries to be written into LSM tree.
+#[derive(Clone)]
 pub struct Request {
     pub entries: Vec<Entry>,
+    pub ptrs: Vec<ValuePointer>,
+    pub done: Option<Sender<Result<()>>>,
 }
 
-/// `ValuePointer` records the position of value saved in value log.
+#[derive(Clone, Default, Debug)]
 pub struct ValuePointer {
     pub file_id: u32,
     pub len: u32,
     pub offset: u32,
 }
 
-/// `EntryReader` reads entries from `BufReader`.
+impl ValuePointer {
+    pub fn decode(&mut self, mut bytes: &[u8]) {
+        self.file_id = bytes.get_u32();
+        self.len = bytes.get_u32();
+        self.offset = bytes.get_u32();
+    }
+
+    pub fn encode(&self, buf: &mut BytesMut) {
+        buf.put_u32(self.file_id);
+        buf.put_u32(self.len);
+        buf.put_u32(self.offset);
+    }
+}
+
 pub struct EntryReader {
     key: Vec<u8>,
     value: Vec<u8>,

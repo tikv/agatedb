@@ -1,8 +1,7 @@
+use crate::value::VALUE_DELETE;
 use bytes::Bytes;
 
-const DELETE: u8 = 1 << 0;
-const VALUE_POINTER: u8 = 1 << 1;
-
+#[derive(Clone)]
 pub struct Entry {
     pub key: Bytes,
     pub value: Bytes,
@@ -40,7 +39,15 @@ impl Entry {
     }
 
     pub fn mark_delete(&mut self) {
-        self.meta |= DELETE;
+        self.meta |= VALUE_DELETE;
+    }
+
+    pub fn estimate_size(&self, threshold: usize) -> usize {
+        if self.value.len() < threshold {
+            self.key.len() + self.value.len() + 2
+        } else {
+            self.key.len() + 12 + 2
+        }
     }
 
     // TODO: entry encoding will be done later, as current WAL encodes header and key / value separately
