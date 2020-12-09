@@ -46,11 +46,11 @@ impl Header {
     /// Header consists of a variable-size key length, variable-size value length,
     /// and fixed-size `expires_at`, `meta`, and `user_meta`.
     ///
-    /// +---------+-----------+------------+------+-----------+
-    /// | key_len | value_len | expires_at | meta | user_meta |
-    /// +-----------------------------------------------------+
-    /// | var len |  var len  |    u64     | u64  |    u64    |
-    /// +---------+-----------+------------+------+-----------+
+    /// +------+-----------+---------+-----------+-----------+
+    /// | meta | user_meta | key_len | value_len | expires_at|
+    /// +----------------------------------------------------+
+    /// | u64  |    u64    | var len |  var len  |    u64    |
+    /// +------+-----------+---------+-----------+-----------+
     pub fn encode(&self, bytes: &mut BytesMut) {
         let encoded_len = self.encoded_len();
         bytes.reserve(encoded_len);
