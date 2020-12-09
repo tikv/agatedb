@@ -1,10 +1,9 @@
 use crate::entry::Entry;
 use crate::entry::EntryRef;
 use crate::wal::Header;
-use crate::Result;
+use crate::{Error, Result};
 use bytes::{BufMut, Bytes, BytesMut};
-use std::io::BufReader;
-use std::io::{Read, Seek};
+use std::io::{Cursor, Read};
 use std::mem::MaybeUninit;
 
 pub const VALUE_DELETE: u8 = 1 << 0;
@@ -169,7 +168,25 @@ impl EntryReader {
     }
 
     /// Entry returns header, key and value.
-    pub fn entry<R: Read + Seek>(&mut self, _reader: &mut BufReader<R>) -> Result<EntryRef> {
-        unimplemented!()
+    pub fn entry(&mut self, reader: &mut Cursor<&[u8]>) -> Result<EntryRef> {
+        self.header.decode(reader)?;
+        if self.header.key_len > (1 << 16) {
+            return Err(Error::LogRead(
+                "key length must not be larger than 1 << 16".to_string(),
+            ));
+        }
+        // TODO: resize key and value without initialization
+        self.key.resize(self.header.key_len as usize, 0);
+        reader.read_exact(&mut self.key)?;
+        self.value.resize(self.header.value_len as usize, 0);
+        reader.read_exact(&mut self.value)?;
+        Ok(EntryRef {
+            key: &self.key,
+            value: &self.value,
+            meta: self.header.meta,
+            user_meta: self.header.user_meta,
+            expires_at: self.header.expires_at,
+            version: 0,
+        })
     }
 }

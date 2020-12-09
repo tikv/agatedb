@@ -2,6 +2,11 @@ pub mod binary;
 
 pub use skiplist::FixedLengthSuffixComparator as Comparator;
 pub use skiplist::{FixedLengthSuffixComparator, KeyComparator};
+
+use crate::Result;
+
+use std::fs::File;
+use std::path::Path;
 use std::{cmp, ptr};
 
 pub static COMPARATOR: FixedLengthSuffixComparator = make_comparator();
@@ -60,4 +65,9 @@ where
         }
     }
     i
+}
+
+pub fn sync_dir(path: &impl AsRef<Path>) -> Result<()> {
+    File::open(path.as_ref())?.sync_all()?;
+    Ok(())
 }
