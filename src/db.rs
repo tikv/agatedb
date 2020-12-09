@@ -791,7 +791,7 @@ pub(crate) mod tests {
         let mut requests: Vec<Request> = (0..n)
             .map(|i| Request {
                 entries: vec![Entry::new(
-                    key_with_ts(BytesMut::from(format!("{:08x}", i).as_str()), 0),
+                    key_with_ts(BytesMut::from(format!("{:08x}", i).as_str()), 1),
                     with_payload(
                         BytesMut::from(format!("{:08}", i).as_str()),
                         payload,
@@ -809,7 +809,7 @@ pub(crate) mod tests {
 
     pub fn verify_requests(n: usize, agate: &Agate) {
         for i in 0..n {
-            let key = key_with_ts(BytesMut::from(format!("{:08x}", i).as_str()), 0);
+            let key = key_with_ts(BytesMut::from(format!("{:08x}", i).as_str()), 1);
             let value = agate.get(&key).unwrap();
 
             assert!(!value.value.is_empty());
