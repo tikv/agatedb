@@ -196,7 +196,7 @@ impl Wal {
     }
 
     /// Decode entry from buffer
-    fn decode_entry(mut buf: &mut Bytes) -> Result<Entry> {
+    pub(crate) fn decode_entry(mut buf: &mut Bytes) -> Result<Entry> {
         let mut header = Header::default();
         header.decode(&mut buf)?;
         let kv = buf;

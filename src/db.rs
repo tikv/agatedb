@@ -16,12 +16,13 @@ use crate::{Table, TableBuilder, TableOptions};
 use bytes::{Bytes, BytesMut};
 use crossbeam_channel::{bounded, select, Receiver, Sender};
 use skiplist::{Skiplist, MAX_NODE_SIZE};
+use yatp::task::callback::Handle;
+
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, RwLock};
-use yatp::task::callback::Handle;
 
 const KV_WRITE_CH_CAPACITY: usize = 1000;
 
@@ -86,6 +87,7 @@ impl Agate {
             .max_thread_count(core.opts.num_compactors * 3 + 2)
             .min_thread_count(core.opts.num_compactors + 2)
             .build_callback_pool();
+
         let agate = Self {
             core,
             closer: closer.clone(),
@@ -698,6 +700,15 @@ pub(crate) mod tests {
     use rand::prelude::*;
     use tempdir::TempDir;
 
+    macro_rules! assert_bytes_eq {
+        ($left:expr, $right:expr) => {
+            assert_eq!(
+                Bytes::copy_from_slice($left),
+                Bytes::copy_from_slice($right)
+            )
+        };
+    }
+
     #[test]
     fn test_build() {
         with_agate_test(|_| {});
@@ -767,7 +778,7 @@ pub(crate) mod tests {
     #[test]
     fn test_simple_get_put() {
         with_agate_test(|agate| {
-            let key = key_with_ts(BytesMut::from("2333"), 0);
+            let key = key_with_ts(BytesMut::from("2333"), 1);
             let value = Bytes::from("2333333333333333");
             let req = Request {
                 entries: vec![Entry::new(key.clone(), value.clone())],
@@ -818,13 +829,12 @@ pub(crate) mod tests {
                 let vlog = agate.core.vlog.as_ref().as_ref().unwrap();
                 let mut vptr = ValuePointer::default();
                 vptr.decode(&value.value);
-                let kv = vlog.read(vptr).unwrap();
-                let key_length = key.len();
-                let v_key = &kv[..key_length];
-                let val = &kv[key_length..];
-                assert_eq!(key, v_key);
-                assert_eq!(&val[..8], format!("{:08}", i).as_bytes());
-                for j in &val[8..] {
+                let mut entry = vlog.read(vptr).unwrap();
+                let entry = Wal::decode_entry(&mut entry).unwrap();
+
+                assert_bytes_eq!(&key, &entry.key);
+                assert_bytes_eq!(&entry.value[..8], format!("{:08}", i).as_bytes());
+                for j in &entry.value[8..] {
                     assert_eq!(*j, (i % 256) as u8);
                 }
             } else {

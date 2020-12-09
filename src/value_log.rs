@@ -7,16 +7,18 @@ use bytes::{Bytes, BytesMut};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU32;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 fn vlog_file_path(dir: impl AsRef<Path>, fid: u32) -> PathBuf {
     dir.as_ref().join(format!("{:06}.vlog", fid))
 }
 
 struct Core {
-    // TODO: use scheme like memtable to separate current vLog
-    // and previous logs, so as to reduce usage of RwLock.
-    files_map: HashMap<u32, Arc<RwLock<Wal>>>,
+    /// `files_map` stores mapping from value log ID to WAL object.
+    /// TODO: use scheme like memtable to separate current vLog
+    /// and previous logs, so as to reduce usage of Mutex.
+    files_map: HashMap<u32, Arc<Mutex<Wal>>>,
+    /// maximum file ID opened
     max_fid: u32,
     files_to_delete: Vec<u32>,
     num_entries_written: u32,
@@ -33,14 +35,19 @@ impl Core {
     }
 }
 
+/// ValueLog stores all value logs of an agatedb instance.
 pub struct ValueLog {
+    /// value log directory
     dir_path: PathBuf,
+    /// value log file mapping, use `RwLock` to support concurrent read
     core: Arc<RwLock<Core>>,
+    /// offset of next write
     writeable_log_offset: AtomicU32,
     opts: AgateOptions,
 }
 
 impl ValueLog {
+    /// Create value logs from agatedb options
     pub fn new(opts: AgateOptions) -> Option<Self> {
         if opts.in_memory {
             None
@@ -65,13 +72,13 @@ impl ValueLog {
         Ok(())
     }
 
-    fn create_vlog_file(&self) -> Result<(u32, Arc<RwLock<Wal>>)> {
-        let mut core = self.core.write()?;
+    fn create_vlog_file(&self) -> Result<(u32, Arc<Mutex<Wal>>)> {
+        let mut core = self.core.write().unwrap();
         let fid = core.max_fid + 1;
         let path = self.file_path(fid);
         let wal = Wal::open(path, self.opts.clone())?;
         // TODO: only create new files
-        let wal = Arc::new(RwLock::new(wal));
+        let wal = Arc::new(Mutex::new(wal));
         assert!(core.files_map.insert(fid, wal.clone()).is_none());
         assert!(core.max_fid < fid);
         core.max_fid = fid;
@@ -98,9 +105,10 @@ impl ValueLog {
         result
     }
 
+    /// Open value log directory
     pub fn open(&self) -> Result<()> {
         self.populate_files_map()?;
-        if self.core.read()?.files_map.len() == 0 {
+        if self.core.read().unwrap().files_map.len() == 0 {
             self.create_vlog_file()?;
         }
         // TODO find empty files and iterate vlogs
@@ -112,19 +120,20 @@ impl ValueLog {
             .load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    /// write is thread-unsafe and should not be called concurrently
+    /// write requests to vlog, and put vlog pointers back in `Request`.
+    /// `write` should not be called concurrently, otherwise this will lead to wrong result.
     pub fn write(&self, requests: &mut [Request]) -> Result<()> {
         // TODO: validate writes
 
-        let core = self.core.read()?;
+        let core = self.core.read().unwrap();
         let mut current_log_id = core.max_fid;
         let mut current_log = core.files_map.get(&current_log_id).unwrap().clone();
         drop(core);
 
         // TODO: sync writes before return
 
-        let write = |buf: &[u8], current_log: Arc<RwLock<Wal>>| -> Result<()> {
-            let mut current_log = current_log.write()?;
+        let write = |buf: &[u8], current_log: Arc<Mutex<Wal>>| -> Result<()> {
+            let mut current_log = current_log.lock().unwrap();
             if buf.is_empty() {
                 return Ok(());
             }
@@ -144,9 +153,9 @@ impl ValueLog {
             Ok(())
         };
 
-        let to_disk = |current_log: Arc<RwLock<Wal>>| -> Result<bool> {
-            let mut current_log = current_log.write()?;
-            let core = self.core.read()?;
+        let to_disk = |current_log: Arc<Mutex<Wal>>| -> Result<bool> {
+            let mut current_log = current_log.lock().unwrap();
+            let core = self.core.read().unwrap();
             if self.w_offset() as u64 > self.opts.value_log_file_size
                 || core.num_entries_written > self.opts.value_log_max_entries
             {
@@ -194,7 +203,7 @@ impl ValueLog {
                 current_log = log;
             }
 
-            let mut core = self.core.write()?;
+            let mut core = self.core.write().unwrap();
             core.num_entries_written += written;
         }
 
@@ -204,8 +213,8 @@ impl ValueLog {
         Ok(())
     }
 
-    fn get_file(&self, value_ptr: &ValuePointer) -> Result<Arc<RwLock<Wal>>> {
-        let core = self.core.read()?;
+    fn get_file(&self, value_ptr: &ValuePointer) -> Result<Arc<Mutex<Wal>>> {
+        let core = self.core.read().unwrap();
         let file = core.files_map.get(&value_ptr.file_id).cloned();
         if let Some(file) = file {
             let max_fid = core.max_fid;
@@ -213,29 +222,24 @@ impl ValueLog {
             if value_ptr.file_id == max_fid {
                 let current_offset = self.w_offset();
                 if value_ptr.offset >= current_offset {
-                    return Err(Error::CustomError(format!(
-                        "invalid offset {} > {}",
-                        value_ptr.offset, current_offset
-                    )));
+                    return Err(Error::InvalidLogOffset(value_ptr.offset, current_offset));
                 }
             }
 
             Ok(file)
         } else {
-            return Err(Error::CustomError(format!(
-                "vlog {} not found",
-                value_ptr.file_id
-            )));
+            return Err(Error::VlogNotFound(value_ptr.file_id));
         }
     }
 
     /// Read data from vlogs.
     ///
-    /// TODO: let user to decide when to unlock
+    /// TODO: let user to decide when to unlock instead of blocking.
     pub(crate) fn read(&self, value_ptr: ValuePointer) -> Result<Bytes> {
         let log_file = self.get_file(&value_ptr)?;
-        let r = log_file.read()?;
+        let r = log_file.lock().unwrap();
         let mut buf = r.read(&value_ptr)?;
+        let original_buf = buf.slice(..);
         drop(r);
 
         // TODO: verify checksum
@@ -245,18 +249,69 @@ impl ValueLog {
         let kv = buf;
 
         if (kv.len() as u32) < header.key_len + header.value_len {
-            return Err(Error::CustomError(
-                format!(
-                    "invalud read vp: {:?}, kvlen {}, {}:{}",
-                    value_ptr,
-                    kv.len(),
-                    header.key_len,
-                    header.key_len + header.value_len
-                )
-                .to_string(),
-            ));
+            return Err(Error::InvalidValuePointer {
+                vptr: value_ptr,
+                kvlen: kv.len(),
+                range: header.key_len..header.key_len + header.value_len,
+            });
         }
+        Ok(original_buf)
+    }
+}
 
-        Ok(kv)
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entry::Entry;
+    use tempdir::TempDir;
+    use value::VALUE_POINTER;
+
+    #[test]
+    fn test_value_basic() {
+        let mut opts = AgateOptions::default();
+        let tmp_dir = TempDir::new("agatedb").unwrap();
+        opts.value_dir = tmp_dir.path().to_path_buf();
+        opts.value_threshold = 32;
+        opts.value_log_file_size = 1024;
+        let vlog = ValueLog::new(opts.clone()).unwrap();
+        vlog.open().unwrap();
+
+        let val1 = b"sampleval012345678901234567890123";
+        let val2 = b"samplevalb012345678901234567890123";
+
+        assert!(val1.len() > opts.value_threshold as usize);
+
+        let mut e1 = Entry::new(
+            Bytes::from_static(b"samplekey"),
+            Bytes::copy_from_slice(val1),
+        );
+        e1.meta = VALUE_POINTER;
+        let mut e2 = Entry::new(
+            Bytes::from_static(b"samplekeyb"),
+            Bytes::copy_from_slice(val2),
+        );
+        e2.meta = VALUE_POINTER;
+
+        let mut reqs = vec![Request {
+            entries: vec![e1, e2],
+            ptrs: vec![],
+            done: None,
+        }];
+
+        vlog.write(&mut reqs).unwrap();
+        let req = reqs.pop().unwrap();
+        assert_eq!(req.ptrs.len(), 2);
+
+        let mut buf1 = vlog.read(req.ptrs[0].clone()).unwrap();
+        let mut buf2 = vlog.read(req.ptrs[1].clone()).unwrap();
+
+        let e1 = Wal::decode_entry(&mut buf1).unwrap();
+        let e2 = Wal::decode_entry(&mut buf2).unwrap();
+
+        assert_eq!(&e1.key[..], b"samplekey");
+        assert_eq!(&e1.value[..], val1);
+
+        assert_eq!(&e2.key[..], b"samplekeyb");
+        assert_eq!(&e2.value[..], val2);
     }
 }

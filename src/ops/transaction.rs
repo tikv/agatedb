@@ -210,7 +210,7 @@ impl Transaction {
             if let Some(entry) = self.pending_writes.get(key) {
                 if key == &entry.key {
                     if is_deleted_or_expired(entry.meta, entry.expires_at) {
-                        return Err(Error::CustomError("key not found".to_string()));
+                        return Err(Error::KeyNotFound(()));
                     }
                     return Ok(Item {
                         meta: entry.meta,
@@ -236,12 +236,12 @@ impl Transaction {
 
         let vs = self.agate.get(&seek)?;
 
-        if vs.value.is_empty() || vs.meta == 0 {
-            return Err(Error::CustomError("key not found".to_string()));
+        if vs.value.is_empty() && vs.meta == 0 {
+            return Err(Error::KeyNotFound(()));
         }
 
         if is_deleted_or_expired(vs.meta, vs.expires_at) {
-            return Err(Error::CustomError("key not found".to_string()));
+            return Err(Error::KeyNotFound(()));
         }
 
         Ok(Item {
