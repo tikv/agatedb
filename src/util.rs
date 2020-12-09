@@ -5,9 +5,13 @@ pub use skiplist::FixedLengthSuffixComparator as Comparator;
 pub use skiplist::{FixedLengthSuffixComparator, KeyComparator};
 
 use std::collections::hash_map::DefaultHasher;
+use std::fs::File;
 use std::hash::{Hash, Hasher};
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{cmp, ptr};
+
+use crate::Result;
 
 pub static COMPARATOR: FixedLengthSuffixComparator = make_comparator();
 
@@ -90,4 +94,9 @@ pub fn unix_time() -> u64 {
         .duration_since(UNIX_EPOCH)
         .expect("Time went backwards");
     since_the_epoch.as_millis() as u64
+}
+
+pub fn sync_dir(path: &impl AsRef<Path>) -> Result<()> {
+    File::open(path.as_ref())?.sync_all()?;
+    Ok(())
 }

@@ -233,6 +233,7 @@ impl AgateIterator for MergeIterator {
 mod tests {
     use super::*;
     use crate::format::{key_with_ts, user_key};
+
     pub struct VecIterator {
         vec: Vec<Bytes>,
         pos: usize,
@@ -290,15 +291,27 @@ mod tests {
             .collect()
     }
 
+    /// `assert_bytes_eq` will first convert `left` and `right` into `bytes::Bytes`, and call `assert_eq!`.
+    /// When asserting eq, `Bytes` is more readable than `&[u8]` in output, as it will show characters as-is
+    /// and only escape control characters. For example, it will show `aaa` instead of `[97, 97, 97]`.
+    macro_rules! assert_bytes_eq {
+        ($left:expr, $right:expr) => {
+            assert_eq!(
+                Bytes::copy_from_slice($left),
+                Bytes::copy_from_slice($right)
+            )
+        };
+    }
+
     fn check_sequence_both(mut iter: Box<Iterators>, n: usize, reversed: bool) {
         // test sequentially iterate
         let mut cnt = 0;
         iter.rewind();
         while iter.valid() {
             let check_cnt = if reversed { n - 1 - cnt } else { cnt };
-            assert_eq!(
-                Bytes::copy_from_slice(user_key(iter.key())),
-                Bytes::copy_from_slice(format!("{:012x}", check_cnt).as_bytes())
+            assert_bytes_eq!(
+                user_key(iter.key()),
+                format!("{:012x}", check_cnt).as_bytes()
             );
             cnt += 1;
             iter.next();
@@ -320,10 +333,7 @@ mod tests {
                 } else {
                     format!("{:012x}", i + j).to_string()
                 };
-                assert_eq!(
-                    Bytes::copy_from_slice(user_key(iter.key())),
-                    Bytes::copy_from_slice(expected_key.as_bytes())
-                );
+                assert_bytes_eq!(user_key(iter.key()), expected_key.as_bytes());
                 iter.next();
             }
         }
@@ -346,7 +356,7 @@ mod tests {
                 BytesMut::from(format!("{:012x}", i).as_bytes()),
                 0,
             ));
-            assert_eq!(user_key(iter.key()), format!("{:012x}", i).as_bytes());
+            assert_bytes_eq!(user_key(iter.key()), format!("{:012x}", i).as_bytes());
         }
         let mut data = gen_vec_data(0xfff, |_| true);
         data.reverse();
@@ -356,7 +366,7 @@ mod tests {
                 BytesMut::from(format!("{:012x}", i).as_bytes()),
                 0,
             ));
-            assert_eq!(user_key(iter.key()), format!("{:012x}", i).as_bytes());
+            assert_bytes_eq!(user_key(iter.key()), format!("{:012x}", i).as_bytes());
         }
     }
 
