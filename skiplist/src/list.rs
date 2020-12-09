@@ -299,15 +299,30 @@ impl<C: KeyComparator> Skiplist<C> {
         None
     }
 
-    pub fn iter_ref(&self) -> IterRef<'_, C> {
+    pub fn iter_ref<'a>(&'a self) -> IterRef<&'a Skiplist<C>, C> {
         IterRef {
             list: self,
             cursor: ptr::null(),
+            _key_cmp: std::marker::PhantomData,
+        }
+    }
+
+    pub fn iter(&self) -> IterRef<Skiplist<C>, C> {
+        IterRef {
+            list: self.clone(),
+            cursor: ptr::null(),
+            _key_cmp: std::marker::PhantomData,
         }
     }
 
     pub fn mem_size(&self) -> u32 {
         self.core.arena.len()
+    }
+}
+
+impl<C> AsRef<Skiplist<C>> for Skiplist<C> {
+    fn as_ref(&self) -> &Skiplist<C> {
+        self
     }
 }
 
@@ -333,12 +348,16 @@ impl Drop for SkiplistCore {
 unsafe impl<C: Send> Send for Skiplist<C> {}
 unsafe impl<C: Sync> Sync for Skiplist<C> {}
 
-pub struct IterRef<'a, C> {
-    list: &'a Skiplist<C>,
+pub struct IterRef<T, C>
+where
+    T: AsRef<Skiplist<C>>,
+{
+    list: T,
     cursor: *const Node,
+    _key_cmp: std::marker::PhantomData<C>,
 }
 
-impl<'a, C: KeyComparator> IterRef<'a, C> {
+impl<T: AsRef<Skiplist<C>>, C: KeyComparator> IterRef<T, C> {
     pub fn valid(&self) -> bool {
         !self.cursor.is_null()
     }
@@ -357,38 +376,38 @@ impl<'a, C: KeyComparator> IterRef<'a, C> {
         assert!(self.valid());
         unsafe {
             let cursor_offset = (&*self.cursor).next_offset(0);
-            self.cursor = self.list.core.arena.get_mut(cursor_offset);
+            self.cursor = self.list.as_ref().core.arena.get_mut(cursor_offset);
         }
     }
 
     pub fn prev(&mut self) {
         assert!(self.valid());
         unsafe {
-            self.cursor = self.list.find_near(self.key(), true, false);
+            self.cursor = self.list.as_ref().find_near(self.key(), true, false);
         }
     }
 
     pub fn seek(&mut self, target: &[u8]) {
         unsafe {
-            self.cursor = self.list.find_near(target, false, true);
+            self.cursor = self.list.as_ref().find_near(target, false, true);
         }
     }
 
     pub fn seek_for_prev(&mut self, target: &[u8]) {
         unsafe {
-            self.cursor = self.list.find_near(target, true, true);
+            self.cursor = self.list.as_ref().find_near(target, true, true);
         }
     }
 
     pub fn seek_to_first(&mut self) {
         unsafe {
-            let cursor_offset = (&*self.list.core.head.as_ptr()).next_offset(0);
-            self.cursor = self.list.core.arena.get_mut(cursor_offset);
+            let cursor_offset = (&*self.list.as_ref().core.head.as_ptr()).next_offset(0);
+            self.cursor = self.list.as_ref().core.arena.get_mut(cursor_offset);
         }
     }
 
     pub fn seek_to_last(&mut self) {
-        self.cursor = self.list.find_last();
+        self.cursor = self.list.as_ref().find_last();
     }
 }
 

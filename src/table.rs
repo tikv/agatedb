@@ -1,6 +1,11 @@
 pub(crate) mod builder;
+pub mod concat_iterator;
 mod iterator;
-mod merge_iterator;
+pub mod merge_iterator;
+
+pub use concat_iterator::ConcatIterator;
+pub use merge_iterator::{Iterators as TableIterators, MergeIterator};
+pub type TableIterator = TableRefIterator<Arc<TableInner>>;
 
 use crate::bloom::Bloom;
 use crate::checksum;
@@ -9,8 +14,9 @@ use crate::opt::{ChecksumVerificationMode, Options};
 use crate::Error;
 use crate::Result;
 
-use bytes::{Buf, Bytes};
 use iterator::{TableRefIterator, ITERATOR_NOCACHE, ITERATOR_REVERSED};
+
+use bytes::{Buf, Bytes};
 use memmap::{Mmap, MmapOptions};
 use prost::Message;
 use proto::meta::{BlockOffset, Checksum, TableIndex};
@@ -18,9 +24,6 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
-pub type TableIterator = TableRefIterator<Arc<TableInner>>;
-
 #[cfg(test)]
 mod tests;
 
@@ -86,6 +89,9 @@ pub struct TableInner {
     opts: Options,
 }
 
+/// Table is simply an Arc to its internal TableInner structure.
+/// You may clone it without much overhead.
+#[derive(Clone)]
 pub struct Table {
     inner: Arc<TableInner>,
 }
@@ -531,4 +537,30 @@ impl Table {
     pub fn does_not_have(&self, hash: u32) -> bool {
         self.inner.does_not_have(hash)
     }
+
+    /// Get size of SST
+    pub fn size(&self) -> u64 {
+        self.inner.size()
+    }
+
+    /// Get ID of SST
+    pub fn id(&self) -> u64 {
+        self.inner.id()
+    }
+
+    pub fn biggest(&self) -> &Bytes {
+        self.inner.biggest()
+    }
+
+    pub fn smallest(&self) -> &Bytes {
+        self.inner.smallest()
+    }
+}
+
+fn id_to_filename(id: u64) -> String {
+    format!("{:06}.sst", id)
+}
+
+pub fn new_filename<P: AsRef<Path>>(id: u64, dir: P) -> PathBuf {
+    dir.as_ref().join(id_to_filename(id))
 }

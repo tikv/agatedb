@@ -1,6 +1,7 @@
 use bytes::{Bytes, BytesMut};
 use enum_dispatch::enum_dispatch;
 
+use super::concat_iterator::ConcatIterator;
 use super::TableIterator;
 use crate::iterator_trait::AgateIterator;
 use crate::util::{KeyComparator, COMPARATOR};
@@ -12,6 +13,7 @@ use crate::Value;
 #[enum_dispatch(AgateIterator)]
 pub enum Iterators {
     MergeIterator(MergeIterator),
+    ConcatIterator(ConcatIterator),
     TableIterator(TableIterator),
     #[cfg(test)]
     VecIterator(tests::VecIterator),
@@ -233,11 +235,16 @@ mod tests {
     pub struct VecIterator {
         vec: Vec<Bytes>,
         pos: usize,
+        reversed: bool,
     }
 
     impl VecIterator {
-        pub fn new(vec: Vec<Bytes>) -> Self {
-            VecIterator { vec, pos: 0 }
+        pub fn new(vec: Vec<Bytes>, reversed: bool) -> Self {
+            VecIterator {
+                vec,
+                pos: 0,
+                reversed,
+            }
         }
     }
 
@@ -253,9 +260,10 @@ mod tests {
         fn seek(&mut self, key: &Bytes) {
             let found_entry_idx = crate::util::search(self.vec.len(), |idx| {
                 use std::cmp::Ordering::*;
-                match COMPARATOR.compare_key(&self.vec[idx], &key) {
-                    Less => false,
-                    _ => true,
+                if self.reversed {
+                    COMPARATOR.compare_key(&self.vec[idx], &key) != Greater
+                } else {
+                    COMPARATOR.compare_key(&self.vec[idx], &key) != Less
                 }
             });
             self.pos = found_entry_idx;
@@ -281,47 +289,104 @@ mod tests {
             .collect()
     }
 
-    fn check_sequence(mut iter: Box<Iterators>, n: usize) {
+    /// `assert_bytes_eq` will first convert `left` and `right` into `bytes::Bytes`, and call `assert_eq!`.
+    /// When asserting eq, `Bytes` is more readable than `&[u8]` in output, as it will show characters as-is
+    /// and only escape control characters. For example, it will show `aaa` instead of `[97, 97, 97]`.
+    macro_rules! assert_bytes_eq {
+        ($left:expr, $right:expr) => {
+            assert_eq!(
+                Bytes::copy_from_slice($left),
+                Bytes::copy_from_slice($right)
+            )
+        };
+    }
+
+    fn check_sequence_both(mut iter: Box<Iterators>, n: usize, reversed: bool) {
+        // test sequentially iterate
         let mut cnt = 0;
         iter.rewind();
         while iter.valid() {
-            assert_eq!(user_key(iter.key()), format!("{:012x}", cnt).as_bytes());
+            let check_cnt = if reversed { n - 1 - cnt } else { cnt };
+            assert_bytes_eq!(
+                user_key(iter.key()),
+                format!("{:012x}", check_cnt).as_bytes()
+            );
             cnt += 1;
             iter.next();
         }
         assert_eq!(cnt, n);
+
+        iter.rewind();
+
+        // test seek
+        for i in 10..n - 10 {
+            iter.seek(&key_with_ts(
+                BytesMut::from(format!("{:012x}", i).as_bytes()),
+                0,
+            ));
+            for j in 0..10 {
+                assert!(iter.valid());
+                let expected_key = if reversed {
+                    format!("{:012x}", i - j).to_string()
+                } else {
+                    format!("{:012x}", i + j).to_string()
+                };
+                assert_bytes_eq!(user_key(iter.key()), expected_key.as_bytes());
+                iter.next();
+            }
+        }
     }
 
-    fn check_reverse_sequence(mut iter: Box<Iterators>, n: usize) {
-        let mut cnt: isize = n as isize - 1;
-        iter.rewind();
-        while iter.valid() {
-            assert_eq!(user_key(iter.key()), format!("{:012x}", cnt).as_bytes());
-            cnt -= 1;
-            iter.next();
+    fn check_sequence(iter: Box<Iterators>, n: usize) {
+        check_sequence_both(iter, n, false);
+    }
+
+    fn check_reverse_sequence(iter: Box<Iterators>, n: usize) {
+        check_sequence_both(iter, n, true);
+    }
+
+    #[test]
+    fn test_vec_iter_seek() {
+        let data = gen_vec_data(0xfff, |_| true);
+        let mut iter = VecIterator::new(data, false);
+        for i in 0..0xfff {
+            iter.seek(&key_with_ts(
+                BytesMut::from(format!("{:012x}", i).as_bytes()),
+                0,
+            ));
+            assert_bytes_eq!(user_key(iter.key()), format!("{:012x}", i).as_bytes());
         }
-        assert_eq!(cnt, -1);
+        let mut data = gen_vec_data(0xfff, |_| true);
+        data.reverse();
+        let mut iter = VecIterator::new(data, true);
+        for i in 0..0xfff {
+            iter.seek(&key_with_ts(
+                BytesMut::from(format!("{:012x}", i).as_bytes()),
+                0,
+            ));
+            assert_bytes_eq!(user_key(iter.key()), format!("{:012x}", i).as_bytes());
+        }
     }
 
     #[test]
     fn test_merge_2iters_iterate() {
-        let a = gen_vec_data(10000, |x| x % 5 == 0);
-        let b = gen_vec_data(10000, |x| x % 5 != 0);
+        let a = gen_vec_data(0xfff, |x| x % 5 == 0);
+        let b = gen_vec_data(0xfff, |x| x % 5 != 0);
         let mut rev_a = a.clone();
         rev_a.reverse();
         let mut rev_b = b.clone();
         rev_b.reverse();
 
-        let iter_a = Box::new(Iterators::from(VecIterator::new(a)));
-        let iter_b = Box::new(Iterators::from(VecIterator::new(b)));
+        let iter_a = Box::new(Iterators::from(VecIterator::new(a, false)));
+        let iter_b = Box::new(Iterators::from(VecIterator::new(b, false)));
         let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], false);
 
-        check_sequence(merge_iter, 10000);
+        check_sequence(merge_iter, 0xfff);
 
-        let iter_a = Box::new(Iterators::from(VecIterator::new(rev_a)));
-        let iter_b = Box::new(Iterators::from(VecIterator::new(rev_b)));
+        let iter_a = Box::new(Iterators::from(VecIterator::new(rev_a, true)));
+        let iter_b = Box::new(Iterators::from(VecIterator::new(rev_b, true)));
         let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], true);
-        check_reverse_sequence(merge_iter, 10000);
+        check_reverse_sequence(merge_iter, 0xfff);
     }
 
     #[test]
@@ -331,7 +396,7 @@ mod tests {
         let vec_map_size = vec_map.len();
         let vecs: Vec<Vec<Bytes>> = vec_map
             .into_iter()
-            .map(|i| gen_vec_data(10000, |x| x % vec_map_size == i))
+            .map(|i| gen_vec_data(0xfff, |x| x % vec_map_size == i))
             .collect();
         let rev_vecs: Vec<Vec<Bytes>> = vecs
             .iter()
@@ -344,16 +409,16 @@ mod tests {
 
         let iters: Vec<Box<Iterators>> = vecs
             .into_iter()
-            .map(|vec| Box::new(Iterators::from(VecIterator::new(vec))))
+            .map(|vec| Box::new(Iterators::from(VecIterator::new(vec, false))))
             .collect();
 
-        check_sequence(MergeIterator::from_iterators(iters, false), 10000);
+        check_sequence(MergeIterator::from_iterators(iters, false), 0xfff);
 
         let rev_iters: Vec<Box<Iterators>> = rev_vecs
             .into_iter()
-            .map(|vec| Box::new(Iterators::from(VecIterator::new(vec))))
+            .map(|vec| Box::new(Iterators::from(VecIterator::new(vec, true))))
             .collect();
 
-        check_reverse_sequence(MergeIterator::from_iterators(rev_iters, true), 10000);
+        check_reverse_sequence(MergeIterator::from_iterators(rev_iters, true), 0xfff);
     }
 }
