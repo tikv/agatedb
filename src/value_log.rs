@@ -7,16 +7,18 @@ use bytes::{Bytes, BytesMut};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU32;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 fn vlog_file_path(dir: impl AsRef<Path>, fid: u32) -> PathBuf {
     dir.as_ref().join(format!("{:06}.vlog", fid))
 }
 
 struct Core {
-    // TODO: use scheme like memtable to separate current vLog
-    // and previous logs, so as to reduce usage of RwLock.
-    files_map: HashMap<u32, Arc<RwLock<Wal>>>,
+    /// `files_map` stores mapping from value log ID to WAL object.
+    /// TODO: use scheme like memtable to separate current vLog
+    /// and previous logs, so as to reduce usage of Mutex.
+    files_map: HashMap<u32, Arc<Mutex<Wal>>>,
+    /// maximum file ID opened
     max_fid: u32,
     files_to_delete: Vec<u32>,
     num_entries_written: u32,
@@ -33,14 +35,19 @@ impl Core {
     }
 }
 
+/// ValueLog stores all value logs of an agatedb instance.
 pub struct ValueLog {
+    /// value log directory
     dir_path: PathBuf,
+    /// value log file mapping, use `RwLock` to support concurrent read
     core: Arc<RwLock<Core>>,
+    /// offset of next write
     writeable_log_offset: AtomicU32,
     opts: AgateOptions,
 }
 
 impl ValueLog {
+    /// Create value logs from agatedb options
     pub fn new(opts: AgateOptions) -> Option<Self> {
         if opts.in_memory {
             None
@@ -65,13 +72,13 @@ impl ValueLog {
         Ok(())
     }
 
-    fn create_vlog_file(&self) -> Result<(u32, Arc<RwLock<Wal>>)> {
+    fn create_vlog_file(&self) -> Result<(u32, Arc<Mutex<Wal>>)> {
         let mut core = self.core.write().unwrap();
         let fid = core.max_fid + 1;
         let path = self.file_path(fid);
         let wal = Wal::open(path, self.opts.clone())?;
         // TODO: only create new files
-        let wal = Arc::new(RwLock::new(wal));
+        let wal = Arc::new(Mutex::new(wal));
         assert!(core.files_map.insert(fid, wal.clone()).is_none());
         assert!(core.max_fid < fid);
         core.max_fid = fid;
@@ -98,6 +105,7 @@ impl ValueLog {
         result
     }
 
+    /// Open value log directory
     pub fn open(&self) -> Result<()> {
         self.populate_files_map()?;
         if self.core.read().unwrap().files_map.len() == 0 {
@@ -112,7 +120,8 @@ impl ValueLog {
             .load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    /// write is thread-unsafe and should not be called concurrently
+    /// write requests to vlog, and put vlog pointers back in `Request`.
+    /// `write` should not be called concurrently, otherwise this will lead to wrong result.
     pub fn write(&self, requests: &mut [Request]) -> Result<()> {
         // TODO: validate writes
 
@@ -123,8 +132,8 @@ impl ValueLog {
 
         // TODO: sync writes before return
 
-        let write = |buf: &[u8], current_log: Arc<RwLock<Wal>>| -> Result<()> {
-            let mut current_log = current_log.write().unwrap();
+        let write = |buf: &[u8], current_log: Arc<Mutex<Wal>>| -> Result<()> {
+            let mut current_log = current_log.lock().unwrap();
             if buf.is_empty() {
                 return Ok(());
             }
@@ -144,8 +153,8 @@ impl ValueLog {
             Ok(())
         };
 
-        let to_disk = |current_log: Arc<RwLock<Wal>>| -> Result<bool> {
-            let mut current_log = current_log.write().unwrap();
+        let to_disk = |current_log: Arc<Mutex<Wal>>| -> Result<bool> {
+            let mut current_log = current_log.lock().unwrap();
             let core = self.core.read().unwrap();
             if self.w_offset() as u64 > self.opts.value_log_file_size
                 || core.num_entries_written > self.opts.value_log_max_entries
@@ -204,7 +213,7 @@ impl ValueLog {
         Ok(())
     }
 
-    fn get_file(&self, value_ptr: &ValuePointer) -> Result<Arc<RwLock<Wal>>> {
+    fn get_file(&self, value_ptr: &ValuePointer) -> Result<Arc<Mutex<Wal>>> {
         let core = self.core.read().unwrap();
         let file = core.files_map.get(&value_ptr.file_id).cloned();
         if let Some(file) = file {
@@ -225,10 +234,10 @@ impl ValueLog {
 
     /// Read data from vlogs.
     ///
-    /// TODO: let user to decide when to unlock
+    /// TODO: let user to decide when to unlock instead of blocking.
     pub(crate) fn read(&self, value_ptr: ValuePointer) -> Result<Bytes> {
         let log_file = self.get_file(&value_ptr)?;
-        let r = log_file.read().unwrap();
+        let r = log_file.lock().unwrap();
         let mut buf = r.read(&value_ptr)?;
         drop(r);
 
