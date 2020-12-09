@@ -239,6 +239,7 @@ impl ValueLog {
         let log_file = self.get_file(&value_ptr)?;
         let r = log_file.lock().unwrap();
         let mut buf = r.read(&value_ptr)?;
+        let original_buf = buf.slice(..);
         drop(r);
 
         // TODO: verify checksum
@@ -254,6 +255,63 @@ impl ValueLog {
                 range: header.key_len..header.key_len + header.value_len,
             });
         }
-        Ok(kv)
+        Ok(original_buf)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entry::Entry;
+    use tempdir::TempDir;
+    use value::VALUE_POINTER;
+
+    #[test]
+    fn test_value_basic() {
+        let mut opts = AgateOptions::default();
+        let tmp_dir = TempDir::new("agatedb").unwrap();
+        opts.value_dir = tmp_dir.path().to_path_buf();
+        opts.value_threshold = 32;
+        opts.value_log_file_size = 1024;
+        let vlog = ValueLog::new(opts.clone()).unwrap();
+        vlog.open().unwrap();
+
+        let val1 = b"sampleval012345678901234567890123";
+        let val2 = b"samplevalb012345678901234567890123";
+
+        assert!(val1.len() > opts.value_threshold as usize);
+
+        let mut e1 = Entry::new(
+            Bytes::from_static(b"samplekey"),
+            Bytes::copy_from_slice(val1),
+        );
+        e1.meta = VALUE_POINTER;
+        let mut e2 = Entry::new(
+            Bytes::from_static(b"samplekeyb"),
+            Bytes::copy_from_slice(val2),
+        );
+        e2.meta = VALUE_POINTER;
+
+        let mut reqs = vec![Request {
+            entries: vec![e1, e2],
+            ptrs: vec![],
+            done: None,
+        }];
+
+        vlog.write(&mut reqs).unwrap();
+        let req = reqs.pop().unwrap();
+        assert_eq!(req.ptrs.len(), 2);
+
+        let mut buf1 = vlog.read(req.ptrs[0].clone()).unwrap();
+        let mut buf2 = vlog.read(req.ptrs[1].clone()).unwrap();
+
+        let e1 = Wal::decode_entry(&mut buf1).unwrap();
+        let e2 = Wal::decode_entry(&mut buf2).unwrap();
+
+        assert_eq!(&e1.key[..], b"samplekey");
+        assert_eq!(&e1.value[..], val1);
+
+        assert_eq!(&e2.key[..], b"samplekeyb");
+        assert_eq!(&e2.value[..], val2);
     }
 }
