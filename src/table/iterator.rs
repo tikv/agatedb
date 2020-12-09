@@ -331,6 +331,7 @@ impl<T: AsRef<TableInner>> TableRefIterator<T> {
         }
 
         self.seek_helper(idx - 1, key);
+
         if IteratorError::check_eof(&self.err) {
             if idx == self.table.as_ref().offsets_length() {
                 return;

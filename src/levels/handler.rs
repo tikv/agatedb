@@ -78,11 +78,11 @@ impl LevelHandler {
         }
     }
 
-    pub fn get(&self, key: &Bytes) -> Result<Option<Value>> {
+    pub fn get(&self, key: &Bytes) -> Result<Value> {
         let tables = self.get_table_for_key(key);
         let key_no_ts = user_key(key);
         let hash = farmhash::fingerprint32(key_no_ts);
-        let mut max_vs: Option<Value> = None;
+        let mut max_vs = Value::default();
 
         for table in tables {
             if table.does_not_have(hash) {
@@ -97,15 +97,11 @@ impl LevelHandler {
 
             if crate::util::same_key(key, it.key()) {
                 let version = get_ts(it.key());
-                if let Some(ref max_vs) = max_vs {
-                    if !max_vs.version < version {
-                        continue;
-                    }
+                if max_vs.version < version {
+                    let mut vs = it.value();
+                    vs.version = version;
+                    max_vs = vs;
                 }
-
-                let mut vs = it.value();
-                vs.version = version;
-                max_vs = Some(vs)
             }
         }
 
