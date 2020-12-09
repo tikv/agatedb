@@ -42,6 +42,15 @@ impl Header {
     }
 
     /// Encode header into bytes
+    ///
+    /// Header consists of a variable-size key length, variable-size value length,
+    /// and fixed-size `expires_at`, `meta`, and `user_meta`.
+    ///
+    /// +---------+-----------+------------+------+-----------+
+    /// | key_len | value_len | expires_at | meta | user_meta |
+    /// +-----------------------------------------------------+
+    /// | var len |  var len  |    u64     | u64  |    u64    |
+    /// +---------+-----------+------------+------+-----------+
     pub fn encode(&self, bytes: &mut BytesMut) {
         let encoded_len = self.encoded_len();
         bytes.reserve(encoded_len);
@@ -174,9 +183,9 @@ impl Wal {
     /// Encode entry to buffer
     ///
     /// The entry is encoded to a header followed by plain key and value.
-    /// Header consists of a variable-size key length, variable-size value length,
-    /// and fixed-size `expires_at`, `meta`, and `user_meta`. They are then followed
-    /// by key bytes of key length, and value bytes of value length.
+    /// +--------+-----+-------+
+    /// | header | key | value |
+    /// +--------+-----+-------+
     pub(crate) fn encode_entry(mut buf: &mut BytesMut, entry: &Entry) -> usize {
         let header = Header {
             key_len: entry.key.len() as u32,
