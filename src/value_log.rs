@@ -66,7 +66,7 @@ impl ValueLog {
     }
 
     fn create_vlog_file(&self) -> Result<(u32, Arc<RwLock<Wal>>)> {
-        let mut core = self.core.write()?;
+        let mut core = self.core.write().unwrap();
         let fid = core.max_fid + 1;
         let path = self.file_path(fid);
         let wal = Wal::open(path, self.opts.clone())?;
@@ -100,7 +100,7 @@ impl ValueLog {
 
     pub fn open(&self) -> Result<()> {
         self.populate_files_map()?;
-        if self.core.read()?.files_map.len() == 0 {
+        if self.core.read().unwrap().files_map.len() == 0 {
             self.create_vlog_file()?;
         }
         // TODO find empty files and iterate vlogs
@@ -116,7 +116,7 @@ impl ValueLog {
     pub fn write(&self, requests: &mut [Request]) -> Result<()> {
         // TODO: validate writes
 
-        let core = self.core.read()?;
+        let core = self.core.read().unwrap();
         let mut current_log_id = core.max_fid;
         let mut current_log = core.files_map.get(&current_log_id).unwrap().clone();
         drop(core);
@@ -124,7 +124,7 @@ impl ValueLog {
         // TODO: sync writes before return
 
         let write = |buf: &[u8], current_log: Arc<RwLock<Wal>>| -> Result<()> {
-            let mut current_log = current_log.write()?;
+            let mut current_log = current_log.write().unwrap();
             if buf.is_empty() {
                 return Ok(());
             }
@@ -145,8 +145,8 @@ impl ValueLog {
         };
 
         let to_disk = |current_log: Arc<RwLock<Wal>>| -> Result<bool> {
-            let mut current_log = current_log.write()?;
-            let core = self.core.read()?;
+            let mut current_log = current_log.write().unwrap();
+            let core = self.core.read().unwrap();
             if self.w_offset() as u64 > self.opts.value_log_file_size
                 || core.num_entries_written > self.opts.value_log_max_entries
             {
@@ -194,7 +194,7 @@ impl ValueLog {
                 current_log = log;
             }
 
-            let mut core = self.core.write()?;
+            let mut core = self.core.write().unwrap();
             core.num_entries_written += written;
         }
 
@@ -205,7 +205,7 @@ impl ValueLog {
     }
 
     fn get_file(&self, value_ptr: &ValuePointer) -> Result<Arc<RwLock<Wal>>> {
-        let core = self.core.read()?;
+        let core = self.core.read().unwrap();
         let file = core.files_map.get(&value_ptr.file_id).cloned();
         if let Some(file) = file {
             let max_fid = core.max_fid;
@@ -213,19 +213,13 @@ impl ValueLog {
             if value_ptr.file_id == max_fid {
                 let current_offset = self.w_offset();
                 if value_ptr.offset >= current_offset {
-                    return Err(Error::CustomError(format!(
-                        "invalid offset {} > {}",
-                        value_ptr.offset, current_offset
-                    )));
+                    return Err(Error::InvalidLogOffset(value_ptr.offset, current_offset));
                 }
             }
 
             Ok(file)
         } else {
-            return Err(Error::CustomError(format!(
-                "vlog {} not found",
-                value_ptr.file_id
-            )));
+            return Err(Error::VlogNotFound(value_ptr.file_id));
         }
     }
 
@@ -234,7 +228,7 @@ impl ValueLog {
     /// TODO: let user to decide when to unlock
     pub(crate) fn read(&self, value_ptr: ValuePointer) -> Result<Bytes> {
         let log_file = self.get_file(&value_ptr)?;
-        let r = log_file.read()?;
+        let r = log_file.read().unwrap();
         let mut buf = r.read(&value_ptr)?;
         drop(r);
 
@@ -245,18 +239,12 @@ impl ValueLog {
         let kv = buf;
 
         if (kv.len() as u32) < header.key_len + header.value_len {
-            return Err(Error::CustomError(
-                format!(
-                    "invalud read vp: {:?}, kvlen {}, {}:{}",
-                    value_ptr,
-                    kv.len(),
-                    header.key_len,
-                    header.key_len + header.value_len
-                )
-                .to_string(),
-            ));
+            return Err(Error::InvalidValuePointer {
+                vptr: value_ptr,
+                kvlen: kv.len(),
+                range: header.key_len..header.key_len + header.value_len,
+            });
         }
-
         Ok(kv)
     }
 }

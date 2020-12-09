@@ -1,7 +1,9 @@
-use std::io;
 use std::result;
+use std::{io, ops::Range};
 
 use thiserror::Error;
+
+use crate::value::ValuePointer;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -27,6 +29,16 @@ pub enum Error {
     DBClosed,
     #[error("{0}")]
     LogRead(String),
+    #[error("Invalid VP: {vptr:?}, kvlen {kvlen}, {range:?}")]
+    InvalidValuePointer {
+        vptr: ValuePointer,
+        kvlen: usize,
+        range: Range<u32>,
+    },
+    #[error("Invalid Log Offset: {0} > {1}")]
+    InvalidLogOffset(u32, u32),
+    #[error("VLog Not Found: id={0}")]
+    VlogNotFound(u32),
 }
 
 impl From<io::Error> for Error {
