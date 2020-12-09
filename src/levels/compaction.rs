@@ -170,6 +170,12 @@ impl CompactDef {
             prios,
         }
     }
+
+    pub fn all_tables(&self) -> Vec<Table> {
+        let mut tables = self.top.clone();
+        tables.append(&mut self.bot.clone());
+        tables
+    }
 }
 
 impl CompactStatus {
@@ -210,14 +216,14 @@ impl CompactStatus {
         let next_level = compact_def.next_level_id;
         if self.levels[this_level].overlaps_with(&compact_def.this_range) {
             return Err(Error::CustomError(format!(
-                "{:?} overlap with this level {:?}",
-                compact_def.this_range, self.levels[this_level].ranges
+                "{:?} overlap with this level {} {:?}",
+                compact_def.this_range, compact_def.this_level_id, self.levels[this_level].ranges
             )));
         }
         if self.levels[next_level].overlaps_with(&compact_def.next_range) {
             return Err(Error::CustomError(format!(
-                "{:?} overlap with next level {:?}",
-                compact_def.next_range, self.levels[next_level].ranges
+                "{:?} overlap with next level {} {:?}",
+                compact_def.next_range, compact_def.next_level_id, self.levels[next_level].ranges
             )));
         }
 

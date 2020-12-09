@@ -1,5 +1,3 @@
-pub mod binary;
-
 use crate::format::user_key;
 
 use bytes::Bytes;

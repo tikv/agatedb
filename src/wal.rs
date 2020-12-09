@@ -1,17 +1,15 @@
 use crate::entry::{Entry, EntryRef};
-use crate::util::binary::{
-    decode_varint_u32, decode_varint_u64, encode_varint_u32_to_array, encode_varint_u64_to_array,
-    varint_u32_bytes_len, varint_u64_bytes_len,
-};
 use crate::value::{EntryReader, ValuePointer};
 use crate::AgateOptions;
 use crate::Error;
 use crate::Result;
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use memmap::{MmapMut, MmapOptions};
-use std::fs::{self, File, OpenOptions};
-use std::io::BufReader;
-use std::io::{Seek, SeekFrom};
+use prost::{decode_length_delimiter, encode_length_delimiter, length_delimiter_len};
+use std::fs::{File, OpenOptions};
+
+use std::fs;
+use std::io::Cursor;
 use std::mem::ManuallyDrop;
 use std::path::PathBuf;
 
@@ -36,56 +34,31 @@ impl Header {
     /// Get length of header if being encoded
     pub fn encoded_len(&self) -> usize {
         1 + 1
-            + varint_u64_bytes_len(self.expires_at) as usize
-            + varint_u32_bytes_len(self.key_len) as usize
-            + varint_u32_bytes_len(self.value_len) as usize
+            + length_delimiter_len(self.expires_at as usize)
+            + length_delimiter_len(self.key_len as usize)
+            + length_delimiter_len(self.value_len as usize)
     }
 
     /// Encode header into bytes
     pub fn encode(&self, bytes: &mut BytesMut) {
         let encoded_len = self.encoded_len();
         bytes.reserve(encoded_len);
-        unsafe {
-            let buf = bytes.bytes_mut();
-            assert!(buf.len() >= encoded_len);
-            *(*buf.get_unchecked_mut(0)).as_mut_ptr() = self.meta;
-            *(*buf.get_unchecked_mut(1)).as_mut_ptr() = self.user_meta;
-            let mut index = 2;
-            index += encode_varint_u32_to_array(
-                (*buf.get_unchecked_mut(index)).as_mut_ptr(),
-                self.key_len,
-            );
-            index += encode_varint_u32_to_array(
-                (*buf.get_unchecked_mut(index)).as_mut_ptr(),
-                self.value_len,
-            );
-            index += encode_varint_u64_to_array(
-                (*buf.get_unchecked_mut(index)).as_mut_ptr(),
-                self.expires_at,
-            );
-            bytes.advance_mut(index);
-        }
-        debug_assert_eq!(bytes.len(), encoded_len);
+
+        bytes.put_u8(self.meta);
+        bytes.put_u8(self.user_meta);
+        encode_length_delimiter(self.key_len as usize, bytes).unwrap();
+        encode_length_delimiter(self.value_len as usize, bytes).unwrap();
+        encode_length_delimiter(self.expires_at as usize, bytes).unwrap();
     }
 
     /// Decode header from bytes
-    pub fn decode(&mut self, bytes: &[u8]) -> Result<usize> {
-        if bytes.len() < 2 {
-            return Err(Error::VarDecode("failed to decode, length < 2"));
-        }
-        self.meta = bytes[0];
-        self.user_meta = bytes[1];
-        let mut read = 2;
-        let (key_len, cnt) = decode_varint_u32(&bytes[read..])?;
-        read += cnt as usize;
-        self.key_len = key_len;
-        let (value_len, cnt) = decode_varint_u32(&bytes[read..])?;
-        read += cnt as usize;
-        self.value_len = value_len;
-        let (expires_at, cnt) = decode_varint_u64(&bytes[read..])?;
-        read += cnt as usize;
-        self.expires_at = expires_at;
-        Ok(read)
+    pub fn decode(&mut self, mut bytes: &mut impl Buf) -> Result<()> {
+        self.meta = bytes.get_u8();
+        self.user_meta = bytes.get_u8();
+        self.key_len = decode_length_delimiter(&mut bytes)? as u32;
+        self.value_len = decode_length_delimiter(&mut bytes)? as u32;
+        self.expires_at = decode_length_delimiter(&mut bytes)? as u64;
+        Ok(())
     }
 }
 
@@ -198,10 +171,10 @@ impl Wal {
         return buf.len();
     }
 
-    fn decode_entry(buf: &mut Bytes) -> Result<Entry> {
+    fn decode_entry(mut buf: &mut Bytes) -> Result<Entry> {
         let mut header = Header::default();
-        let header_len = header.decode(buf)?;
-        let kv = buf.slice(header_len..);
+        let _header_len = header.decode(&mut buf)?;
+        let kv = buf;
         Ok(Entry {
             meta: header.meta,
             user_meta: header.user_meta,
@@ -251,9 +224,11 @@ impl Wal {
         Ok(())
     }
 
+    /// Get WAL iterator
     pub fn iter(&mut self) -> Result<WalIterator> {
-        self.file.seek(SeekFrom::Start(0))?;
-        Ok(WalIterator::new(BufReader::new(&mut self.file)))
+        Ok(WalIterator::new(Cursor::new(
+            &self.mmap_file[0..self.size as usize],
+        )))
     }
 
     pub fn should_flush(&self) -> bool {
@@ -281,40 +256,43 @@ impl Wal {
         self.save_after_close = true;
     }
 }
-
 pub struct WalIterator<'a> {
-    reader: BufReader<&'a mut File>,
+    /// `reader` stores the file to read
+    reader: Cursor<&'a [u8]>,
+    /// `entry_reader` operates on `reader` and buffers entry information
     entry_reader: EntryReader,
 }
 
 impl<'a> WalIterator<'a> {
-    pub fn new(reader: BufReader<&'a mut File>) -> Self {
+    pub fn new(reader: Cursor<&'a [u8]>) -> Self {
         Self {
             reader,
             entry_reader: EntryReader::new(),
         }
     }
 
-    pub fn next(&mut self) -> Option<Result<EntryRef<'_>>> {
+    /// Get next entry from WAL
+    pub fn next(&mut self) -> Result<Option<EntryRef<'_>>> {
         use std::io::ErrorKind;
 
         let entry = self.entry_reader.entry(&mut self.reader);
+
         match entry {
             Ok(entry) => {
                 if entry.is_zero() {
-                    return None;
+                    return Ok(None);
                 }
                 // TODO: process transaction-related metadata
-                Some(Ok(entry))
+                Ok(Some(entry))
             }
             Err(Error::Io(err)) => {
                 if err.kind() == ErrorKind::UnexpectedEof {
-                    None
+                    Ok(None)
                 } else {
-                    return Some(Err(Error::Io(err)));
+                    Err(Error::Io(err))
                 }
             }
-            Err(err) => Some(Err(err)),
+            Err(err) => Err(err),
         }
     }
 }
@@ -341,7 +319,7 @@ mod tests {
     fn test_wal_create() {
         let tmp_dir = TempDir::new("agatedb").unwrap();
         let mut opts = AgateOptions::default();
-        opts.value_log_file_size(4096);
+        opts.value_log_file_size = 4096;
         Wal::open(tmp_dir.path().join("1.wal"), opts).unwrap();
     }
 
@@ -368,7 +346,7 @@ mod tests {
     fn test_wal_iterator() {
         let tmp_dir = TempDir::new("agatedb").unwrap();
         let mut opts = AgateOptions::default();
-        opts.value_log_file_size(4096);
+        opts.value_log_file_size = 4096;
         let wal_path = tmp_dir.path().join("1.wal");
         let mut wal = Wal::open(wal_path, opts).unwrap();
         for i in 0..20 {
@@ -377,8 +355,7 @@ mod tests {
         }
         let mut it = wal.iter().unwrap();
         let mut cnt = 0;
-        while let Some(entry) = it.next() {
-            let entry = entry.unwrap();
+        while let Some(entry) = it.next().unwrap() {
             assert_eq!(entry.key, cnt.to_string().as_bytes());
             assert_eq!(entry.value, cnt.to_string().as_bytes());
             cnt += 1;

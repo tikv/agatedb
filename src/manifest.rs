@@ -73,7 +73,7 @@ impl ManifestFile {
         } else {
             // TODO: read-only mode
             Ok(Self::help_open_or_create_manifest_file(
-                &opt.path,
+                &opt.dir,
                 MANIFEST_DELETION_REWRITE_THRESHOLD,
             )?)
         }
@@ -369,10 +369,10 @@ mod tests {
         let tmp_dir = TempDir::new("agatedb").unwrap();
         let mut options = AgateOptions::default();
 
-        options
-            .create()
-            .in_memory(false)
-            .value_log_file_size(4 << 20);
+        options.create();
+
+        options.in_memory = false;
+        options.value_log_file_size = 4 << 20;
 
         options.mem_table_size = 1 << 14;
         // set base level size small enought to make the compactor flush L0 to L5 and L6

@@ -1,6 +1,6 @@
 use super::TableOptions;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Options {
     /// size of each block inside SST
     pub table_size: u64,
@@ -23,6 +23,12 @@ pub enum ChecksumVerificationMode {
     // OnTableAndBlockRead indicates checksum should be verified
     // on SSTable opening and on every block read.
     OnTableAndBlockRead,
+}
+
+impl Default for ChecksumVerificationMode {
+    fn default() -> Self {
+        return Self::NoVerification;
+    }
 }
 
 pub fn build_table_options(opt: &crate::AgateOptions) -> TableOptions {

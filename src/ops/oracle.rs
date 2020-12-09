@@ -107,7 +107,7 @@ impl Oracle {
         commit_info.cleanup_committed_transactions();
     }
 
-    fn discard_at_or_below(&self) -> u64 {
+    pub(crate) fn discard_at_or_below(&self) -> u64 {
         if self.is_managed {
             let commit_info = self.commit_info.lock().unwrap();
             commit_info.discard_ts

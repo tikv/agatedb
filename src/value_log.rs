@@ -235,14 +235,14 @@ impl ValueLog {
     pub(crate) fn read(&self, value_ptr: ValuePointer) -> Result<Bytes> {
         let log_file = self.get_file(&value_ptr)?;
         let r = log_file.read()?;
-        let buf = r.read(&value_ptr)?;
+        let mut buf = r.read(&value_ptr)?;
         drop(r);
 
         // TODO: verify checksum
 
         let mut header = Header::default();
-        let header_len = header.decode(&buf)?;
-        let kv = buf.slice(header_len..);
+        header.decode(&mut buf)?;
+        let kv = buf;
 
         if (kv.len() as u32) < header.key_len + header.value_len {
             return Err(Error::CustomError(
