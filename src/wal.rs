@@ -1,4 +1,5 @@
 use crate::entry::{Entry, EntryRef};
+use crate::util::sync_dir;
 use crate::value::{EntryReader, ValuePointer};
 use crate::AgateOptions;
 use crate::Error;
@@ -40,6 +41,15 @@ impl Header {
     }
 
     /// Encode header into bytes
+    ///
+    /// Header consists of a variable-size key length, variable-size value length,
+    /// and fixed-size `expires_at`, `meta`, and `user_meta`.
+    ///
+    /// +------+-----------+---------+-----------+-----------+
+    /// | meta | user_meta | key_len | value_len | expires_at|
+    /// +----------------------------------------------------+
+    /// | u64  |    u64    | var len |  var len  |    u64    |
+    /// +------+-----------+---------+-----------+-----------+
     pub fn encode(&self, bytes: &mut BytesMut) {
         let encoded_len = self.encoded_len();
         bytes.reserve(encoded_len);
@@ -51,8 +61,11 @@ impl Header {
         encode_length_delimiter(self.expires_at as usize, bytes).unwrap();
     }
 
-    /// Decode header from bytes
+    /// Decode header from byte stream
     pub fn decode(&mut self, mut bytes: &mut impl Buf) -> Result<()> {
+        if bytes.remaining() <= 2 {
+            return Err(Error::VarDecode("should be at least 2 bytes"));
+        }
         self.meta = bytes.get_u8();
         self.user_meta = bytes.get_u8();
         self.key_len = decode_length_delimiter(&mut bytes)? as u32;
@@ -62,8 +75,10 @@ impl Header {
     }
 }
 
-/// WAL of a memtable
+/// WAL of a memtable or a value log
 ///
+/// TODO: This WAL simply stores key-value pair in sequence without checksum,
+/// encryption and compression. These will be done later.
 /// TODO: delete WAL file when reference to WAL (or memtable) comes to 0
 pub struct Wal {
     path: PathBuf,
@@ -77,6 +92,7 @@ pub struct Wal {
 }
 
 impl Wal {
+    /// open or create a WAL from options
     pub fn open(path: PathBuf, opts: AgateOptions) -> Result<Wal> {
         let (file, bootstrap) = if path.exists() {
             (
@@ -93,9 +109,9 @@ impl Wal {
                 .read(true)
                 .write(true)
                 .open(&path)?;
-            // TODO: use mmap to specify size instead of filling up the file
             file.set_len(2 * opts.value_log_file_size)?;
             file.sync_all()?;
+            sync_dir(&path.parent().unwrap())?;
             (file, true)
         };
         let mmap_file = unsafe { MmapOptions::new().map_mut(&file)? };
@@ -105,7 +121,8 @@ impl Wal {
             size: mmap_file.len() as u32,
             mmap_file: ManuallyDrop::new(mmap_file),
             opts,
-            write_at: 0, // TODO: current implementation doesn't have keyID and baseIV header
+            write_at: 0,
+            // TODO: current implementation doesn't have keyID and baseIV header
             buf: BytesMut::new(),
             save_after_close: false,
         };
@@ -144,11 +161,18 @@ impl Wal {
     pub fn zero_next_entry(&mut self) -> Result<()> {
         let range =
             &mut self.mmap_file[self.write_at as usize..self.write_at as usize + MAX_HEADER_SIZE];
-        // TODO: optimize zero fill
-        range.fill(0);
+        unsafe {
+            std::ptr::write_bytes(range.as_mut_ptr(), 0, range.len());
+        }
         Ok(())
     }
 
+    /// Encode entry to buffer
+    ///
+    /// The entry is encoded to a header followed by plain key and value.
+    /// +--------+-----+-------+
+    /// | header | key | value |
+    /// +--------+-----+-------+
     pub(crate) fn encode_entry(mut buf: &mut BytesMut, entry: &Entry) -> usize {
         let header = Header {
             key_len: entry.key.len() as u32,
@@ -171,9 +195,10 @@ impl Wal {
         return buf.len();
     }
 
+    /// Decode entry from buffer
     fn decode_entry(mut buf: &mut Bytes) -> Result<Entry> {
         let mut header = Header::default();
-        let _header_len = header.decode(&mut buf)?;
+        header.decode(&mut buf)?;
         let kv = buf;
         Ok(Entry {
             meta: header.meta,
@@ -187,6 +212,7 @@ impl Wal {
         })
     }
 
+    /// Read value from WAL (when used as value log)
     pub(crate) fn read(&self, p: &ValuePointer) -> Result<Bytes> {
         let offset = p.offset;
         let size = self.mmap_file.len() as u64;
@@ -205,6 +231,7 @@ impl Wal {
         ))
     }
 
+    /// Truncate WAL
     pub fn truncate(&mut self, end: u64) -> Result<()> {
         // TODO: check read only
         let metadata = self.file.metadata()?;
@@ -213,9 +240,11 @@ impl Wal {
         }
         self.size = end as u32;
         self.file.set_len(end)?;
+        self.file.sync_all()?;
         Ok(())
     }
 
+    /// Finish WAL writing
     pub(crate) fn done_writing(&mut self, offset: u32) -> Result<()> {
         if self.opts.sync_writes {
             self.file.sync_all()?;
@@ -235,14 +264,20 @@ impl Wal {
         self.write_at as u64 > self.opts.value_log_file_size
     }
 
+    /// Get real size of WAL. After truncating, WAL mmap file will have different
+    /// size against real file. `size` stores the actual length.
     pub(crate) fn size(&self) -> u32 {
         self.size
     }
 
+    /// When using WAL as value log, we will need to extend or shrink actual size
+    /// of WAL file from outside functions.
     pub(crate) fn set_size(&mut self, size: u32) {
         self.size = size;
     }
 
+    /// When using WAL as value log, we will need to extend or shrink actual size
+    /// of WAL file from outside functions.
     pub(crate) fn set_len(&mut self, len: u64) -> Result<()> {
         self.file.set_len(len)?;
         Ok(())
@@ -272,6 +307,11 @@ impl<'a> WalIterator<'a> {
     }
 
     /// Get next entry from WAL
+    ///
+    /// This function will:
+    /// return Ok(None) if we reached first corrupted entry, and we could stop iteration
+    /// return Ok(Some(entry)) if we read a new entry
+    /// return Err if the error is not recoverable
     pub fn next(&mut self) -> Result<Option<EntryRef<'_>>> {
         use std::io::ErrorKind;
 
@@ -285,6 +325,11 @@ impl<'a> WalIterator<'a> {
                 // TODO: process transaction-related metadata
                 Ok(Some(entry))
             }
+            // ignore prost varint decode error
+            Err(Error::Decode(_)) => Ok(None),
+            // ignore custom decode error (e.g. header <= 2)
+            Err(Error::VarDecode(_)) => Ok(None),
+            // ignore file length < key, value size
             Err(Error::Io(err)) => {
                 if err.kind() == ErrorKind::UnexpectedEof {
                     Ok(None)
@@ -348,17 +393,59 @@ mod tests {
         let mut opts = AgateOptions::default();
         opts.value_log_file_size = 4096;
         let wal_path = tmp_dir.path().join("1.wal");
-        let mut wal = Wal::open(wal_path, opts).unwrap();
+        let mut wal = Wal::open(wal_path.clone(), opts.clone()).unwrap();
         for i in 0..20 {
             let entry = Entry::new(Bytes::from(i.to_string()), Bytes::from(i.to_string()));
             wal.write_entry(&entry).unwrap();
         }
+        wal.close_and_save();
+
+        // reopen WAL and iterate
+        let mut wal = Wal::open(wal_path, opts).unwrap();
         let mut it = wal.iter().unwrap();
         let mut cnt = 0;
         while let Some(entry) = it.next().unwrap() {
             assert_eq!(entry.key, cnt.to_string().as_bytes());
             assert_eq!(entry.value, cnt.to_string().as_bytes());
             cnt += 1;
+        }
+        assert_eq!(cnt, 20);
+    }
+
+    #[test]
+    fn test_wal_iterator_trunc() {
+        let tmp_dir = TempDir::new("agatedb").unwrap();
+        let mut opts = AgateOptions::default();
+        opts.value_log_file_size = 4096;
+        let wal_path = tmp_dir.path().join("1.wal");
+        let mut wal = Wal::open(wal_path.clone(), opts.clone()).unwrap();
+        for i in 0..20 {
+            let entry = Entry::new(Bytes::from(i.to_string()), Bytes::from(i.to_string()));
+            wal.write_entry(&entry).unwrap();
+        }
+        wal.close_and_save();
+
+        for trunc_length in (50..100).rev() {
+            // truncate some data from WAL
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&wal_path)
+                .unwrap();
+            file.set_len(trunc_length).unwrap();
+            drop(file);
+
+            // reopen WAL and iterate
+            let mut wal = Wal::open(wal_path.clone(), opts.clone()).unwrap();
+            let mut it = wal.iter().unwrap();
+            let mut cnt = 0;
+            while let Some(entry) = it.next().unwrap() {
+                assert_eq!(entry.key, cnt.to_string().as_bytes());
+                assert_eq!(entry.value, cnt.to_string().as_bytes());
+                cnt += 1;
+            }
+            assert!(cnt < 20);
+            wal.close_and_save();
         }
     }
 }
