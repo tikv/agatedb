@@ -42,6 +42,8 @@ pub enum Error {
     CustomError(String),
     #[error("{0}")]
     TxnTooBig(String),
+    #[error("Key not found")]
+    KeyNotFound(())
 }
 
 impl From<io::Error> for Error {
