@@ -3,6 +3,7 @@ use crate::util::binary::{
     encode_varint_u32_to_array, encode_varint_u64_to_array, varint_u32_bytes_len,
     varint_u64_bytes_len,
 };
+use crate::util::sync_dir;
 use crate::value::{EntryReader, ValuePointer};
 use crate::AgateOptions;
 use crate::Error;
@@ -116,6 +117,7 @@ impl Wal {
                 .open(&path)?;
             file.set_len(2 * opts.value_log_file_size)?;
             file.sync_all()?;
+            sync_dir(&path.parent().unwrap())?;
             (file, true)
         };
         let mmap_file = unsafe { MmapOptions::new().map_mut(&file)? };
@@ -170,6 +172,11 @@ impl Wal {
     }
 
     /// Encode entry to buffer
+    ///
+    /// The entry is encoded to a header followed by plain key and value.
+    /// Header consists of a variable-size key length, variable-size value length,
+    /// and fixed-size `expires_at`, `meta`, and `user_meta`. They are then followed
+    /// by key bytes of key length, and value bytes of value length.
     pub(crate) fn encode_entry(mut buf: &mut BytesMut, entry: &Entry) -> usize {
         let header = Header {
             key_len: entry.key.len() as u32,
@@ -328,7 +335,7 @@ impl<'a> WalIterator<'a> {
                 if err.kind() == ErrorKind::UnexpectedEof {
                     Ok(None)
                 } else {
-                    return Err(Error::Io(err));
+                    Err(Error::Io(err))
                 }
             }
             Err(err) => Err(err),
