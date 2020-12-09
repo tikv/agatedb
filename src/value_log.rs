@@ -233,8 +233,11 @@ impl ValueLog {
     }
 
     /// Read data from vlogs.
+    /// The returned value is a `Bytes`, including the whole entry.
+    /// You may need to manually decode it with `Wal::decode_wntry`.
     ///
     /// TODO: let user to decide when to unlock instead of blocking.
+    /// TODO: return header together with k-v pair.
     pub(crate) fn read(&self, value_ptr: ValuePointer) -> Result<Bytes> {
         let log_file = self.get_file(&value_ptr)?;
         let r = log_file.lock().unwrap();
