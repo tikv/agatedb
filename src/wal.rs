@@ -290,6 +290,10 @@ impl Wal {
     pub fn close_and_save(mut self) {
         self.save_after_close = true;
     }
+
+    pub fn mark_close_and_save(&mut self) {
+        self.save_after_close = true;
+    }
 }
 pub struct WalIterator<'a> {
     /// `reader` stores the file to read

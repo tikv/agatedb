@@ -2,11 +2,13 @@ use crate::Error;
 
 mod managed_db {
     use crate::{
-        db::tests::{generate_test_agate_options, with_agate_test_options},
+        db::tests::{
+            generate_test_agate_options, with_agate_test, with_agate_test_options, with_payload,
+        },
         entry::Entry,
         AgateOptions,
     };
-    use bytes::Bytes;
+    use bytes::{Bytes, BytesMut};
 
     use super::*;
 
@@ -84,5 +86,48 @@ mod managed_db {
         let mut opts = generate_test_agate_options();
         opts.in_memory = true;
         test_with_options(opts);
+    }
+
+    macro_rules! assert_bytes_eq {
+        ($left:expr, $right:expr) => {
+            assert_eq!(
+                Bytes::copy_from_slice($left),
+                Bytes::copy_from_slice($right)
+            )
+        };
+    }
+
+    #[test]
+    fn test_big_value() {
+        with_agate_test(|agate| {
+            let payload = 1 << 20;
+            let key = |i| Bytes::from(format!("{:08x}", i));
+
+            for i in 0..15 {
+                let mut txn = agate.new_transaction_at(3, true);
+                let entry = Entry::new(
+                    key(i),
+                    with_payload(BytesMut::from(&key(i)[..]), payload, (i % 256) as u8),
+                );
+                txn.set_entry(entry).unwrap();
+                txn.commit_at(7).unwrap();
+            }
+
+            agate
+                .view(|txn| {
+                    for i in 0..15 {
+                        let key = key(i);
+                        let item = txn.get(&key).unwrap();
+                        assert_bytes_eq!(&key, &item.key);
+                        let value = item.value();
+                        assert_bytes_eq!(&key, &value[..8]);
+                        for j in &value[8..] {
+                            assert_eq!(*j, (i % 256) as u8);
+                        }
+                    }
+                    Ok(())
+                })
+                .unwrap();
+        });
     }
 }

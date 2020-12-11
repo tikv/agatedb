@@ -791,7 +791,7 @@ pub(crate) mod tests {
         });
     }
 
-    fn with_payload(mut buf: BytesMut, payload: usize, fill_char: u8) -> Bytes {
+    pub fn with_payload(mut buf: BytesMut, payload: usize, fill_char: u8) -> Bytes {
         let mut payload_buf = vec![];
         payload_buf.resize(payload, fill_char);
         buf.extend_from_slice(&payload_buf);
