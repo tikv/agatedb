@@ -1,14 +1,18 @@
 use bytes::{Bytes, BytesMut};
 
+use crate::wal::Wal;
 use crate::{
     format::user_key,
     get_ts, key_with_ts,
     table::{MergeIterator, TableIterators},
+    value::{ValuePointer, VALUE_POINTER},
     value_log::ValueLog,
     Table,
 };
 use crate::{ops::transaction::Transaction, AgateIterator, Value};
+
 use skiplist::{KeyComparator, Skiplist};
+use std::cell::RefCell;
 use std::sync::Arc;
 
 use crate::ops::transaction::AGATE_PREFIX;
@@ -24,11 +28,10 @@ impl Default for PrefetchStatus {
     }
 }
 
-#[derive(Default)]
 pub struct Item {
     pub(crate) key: Bytes,
     pub(crate) vptr: Bytes,
-    pub(crate) value: Bytes,
+    value: RefCell<Bytes>,
     pub(crate) version: u64,
     pub(crate) expires_at: u64,
 
@@ -36,6 +39,66 @@ pub struct Item {
 
     pub(crate) meta: u8,
     pub(crate) user_meta: u8,
+
+    agate: Arc<crate::db::Core>,
+}
+
+impl Item {
+    pub(crate) fn new(agate: Arc<crate::db::Core>) -> Self {
+        Self {
+            key: Bytes::new(),
+            vptr: Bytes::new(),
+            value: RefCell::new(Bytes::new()),
+            version: 0,
+            expires_at: 0,
+            status: PrefetchStatus::No,
+            meta: 0,
+            user_meta: 0,
+            agate,
+        }
+    }
+
+    fn has_value(&self) -> bool {
+        if self.meta == 0 && self.vptr.is_empty() {
+            false
+        } else {
+            true
+        }
+    }
+
+    fn yield_item_value(&self) {
+        let mut value = self.value.borrow_mut();
+        if !self.has_value() {
+            *value = Bytes::new();
+            return;
+        }
+        if self.meta & VALUE_POINTER == 0 {
+            *value = self.vptr.clone();
+            return;
+        }
+        let mut vptr = ValuePointer::default();
+        vptr.decode(&self.vptr);
+        let vlog = (*self.agate.vlog).as_ref().unwrap();
+        let raw_buffer = vlog.read(vptr);
+        if let Ok(mut raw_buffer) = raw_buffer {
+            let entry = Wal::decode_entry(&mut raw_buffer).unwrap();
+            *value = entry.value;
+        } else {
+            panic!("read value log of older version is not implemented");
+        }
+    }
+
+    pub fn value(&self) -> Bytes {
+        if matches!(self.status, PrefetchStatus::No) {
+            self.yield_item_value()
+        }
+        return self.value.borrow().clone();
+    }
+
+    pub(crate) fn set_value(&mut self, value: Bytes) {
+        self.status = PrefetchStatus::Prefetched;
+        *self.value.borrow_mut() = value;
+    }
 }
 
 pub fn is_deleted_or_expired(meta: u8, expires_at: u64) -> bool {
@@ -195,7 +258,7 @@ impl Iterator<'_> {
         }
 
         if self.opt.all_versions {
-            let mut item = Item::default();
+            let mut item = Item::new(self.txn.agate.clone());
             Self::fill_item(&mut item, key, &self.table_iter.value(), &self.opt);
             self.item = Some(item);
             self.table_iter.next();
@@ -219,7 +282,7 @@ impl Iterator<'_> {
 
         // TODO: prefetch
 
-        let mut item = Item::default();
+        let mut item = Item::new(self.txn.agate.clone());
         Self::fill_item(&mut item, key, &self.table_iter.value(), &self.opt);
         self.item = Some(item);
 
@@ -240,7 +303,8 @@ impl Iterator<'_> {
         item.version = get_ts(key);
         item.key = Bytes::copy_from_slice(user_key(key));
         item.vptr = vs.value.clone();
-        item.value = Bytes::new();
+        item.value = RefCell::new(Bytes::new());
+        item.status = PrefetchStatus::No;
 
         if opts.prefetch_values {
             unimplemented!();
