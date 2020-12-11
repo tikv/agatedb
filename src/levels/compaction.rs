@@ -9,7 +9,8 @@ use crate::format::{key_with_ts, user_key};
 use crate::util::{KeyComparator, COMPARATOR};
 use crate::{Error, Result, Table};
 
-// TODO: use enum for this struct
+/// Represents a range of keys from `left` to `right`
+/// TODO: use enum for this struct to represent infinite / finite range
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct KeyRange {
     pub left: Bytes,
@@ -42,6 +43,7 @@ impl KeyRange {
         }
     }
 
+    /// Extend current key range with another
     pub fn extend(&mut self, range: &Self) {
         if self.is_empty() {
             *self = range.clone();
@@ -64,6 +66,7 @@ impl KeyRange {
         }
     }
 
+    /// Check if two key ranges overlap
     pub fn overlaps_with(&self, dst: &Self) -> bool {
         if self.is_empty() {
             return true;

@@ -13,11 +13,13 @@ pub struct IteratorOptions {
 }
 
 impl IteratorOptions {
+    /// Check if a table should be included in iterator
     pub fn pick_table(&self, _table: &Table) -> bool {
         true
         // TODO: implement table selection logic
     }
 
+    /// Remove unnecessary tables
     pub fn pick_tables(&self, _tables: &mut Vec<Table>) {
         return;
         // TODO: implement table selection logic
