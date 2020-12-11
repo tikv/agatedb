@@ -6,6 +6,7 @@ mod db;
 mod entry;
 mod error;
 mod format;
+mod iterator;
 mod iterator_trait;
 mod levels;
 mod memtable;

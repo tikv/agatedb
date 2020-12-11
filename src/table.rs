@@ -23,7 +23,9 @@ use proto::meta::{BlockOffset, Checksum, TableIndex};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+
 #[cfg(test)]
 mod tests;
 
@@ -39,6 +41,7 @@ enum MmapFile {
     Memory {
         data: Bytes,
     },
+    None,
 }
 
 impl MmapFile {
@@ -47,6 +50,7 @@ impl MmapFile {
         match self {
             Self::File { .. } => false,
             Self::Memory { .. } => true,
+            Self::None => unreachable!(),
         }
     }
 
@@ -87,6 +91,9 @@ pub struct TableInner {
     has_bloom_filter: bool,
     /// table options
     opts: Options,
+    /// by default, when `TableInner` is dropped, the SST file will be
+    /// deleted. By setting this to true, it won't be deleted.
+    save_after_close: AtomicBool,
 }
 
 /// Table is simply an Arc to its internal TableInner structure.
@@ -144,6 +151,7 @@ impl TableInner {
             index_len: 0,
             opts,
             has_bloom_filter: false,
+            save_after_close: AtomicBool::new(false),
         };
         inner.init_biggest_and_smallest()?;
 
@@ -172,6 +180,7 @@ impl TableInner {
             index_start: 0,
             index_len: 0,
             has_bloom_filter: false,
+            save_after_close: AtomicBool::new(false),
         };
         inner.init_biggest_and_smallest()?;
 
@@ -232,8 +241,25 @@ impl TableInner {
         Ok(&self.index.offsets[0])
     }
 
-    fn key_splits(&mut self, _n: usize, _prefix: Bytes) -> Vec<String> {
-        unimplemented!()
+    // split the table into at least (n - 1) ranges (when n >= blocks) based on block offsets
+    fn key_splits(&mut self, n: usize, prefix: Bytes) -> Vec<Bytes> {
+        if n == 0 {
+            return vec![];
+        }
+
+        let offset_length = self.offsets_length();
+        let jump = (offset_length / n).max(1);
+
+        let mut result = vec![];
+
+        for i in (0..offset_length).step_by(jump) {
+            let block = self.offsets(i).unwrap();
+            if block.key.starts_with(&prefix) {
+                result.push(Bytes::copy_from_slice(&block.key))
+            }
+        }
+
+        result
     }
 
     fn fetch_index(&self) -> &TableIndex {
@@ -347,6 +373,7 @@ impl TableInner {
         match &self.file {
             MmapFile::Memory { .. } => "<memtable>".to_string(),
             MmapFile::File { name, .. } => name.to_string_lossy().into_owned(),
+            MmapFile::None => unreachable!(),
         }
     }
 
@@ -421,6 +448,7 @@ impl TableInner {
                     Ok(Bytes::copy_from_slice(&mmap[offset..offset + size]))
                 }
             }
+            MmapFile::None => unreachable!(),
         }
     }
 
@@ -434,19 +462,25 @@ impl TableInner {
     }
 }
 
-/*
 impl Drop for TableInner {
     fn drop(&mut self) {
-        let f = match self.file.take() {
-            Some(f) => f,
-            None => return,
-        };
-        f.file.set_len(0).unwrap();
-        drop(f.file);
-        fs::remove_file(&f.path).unwrap();
+        if let MmapFile::File { file, mmap, name } =
+            std::mem::replace(&mut self.file, MmapFile::None)
+        {
+            drop(mmap);
+            // It is possible that table is opened in read-only mode,
+            // so we cannot set_len.
+            // file.set_len(0).unwrap();
+            if !self
+                .save_after_close
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                drop(file);
+                fs::remove_file(&name).unwrap();
+            }
+        }
     }
 }
-*/
 
 /// Block contains several entries. It can be obtained from an SST.
 #[derive(Default)]
@@ -554,6 +588,16 @@ impl Table {
 
     pub fn smallest(&self) -> &Bytes {
         self.inner.smallest()
+    }
+
+    pub fn is_in_memory(&self) -> bool {
+        self.inner.is_in_memory()
+    }
+
+    pub fn mark_save(&self) {
+        self.inner
+            .save_after_close
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
