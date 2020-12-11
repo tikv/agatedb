@@ -103,7 +103,7 @@ pub struct LevelCompactStatus {
 impl LevelCompactStatus {
     pub fn remove(&mut self, dst: &KeyRange) -> bool {
         let prev_ranges_len = self.ranges.len();
-        // TODO: remove in place
+        // TODO: remove in place requires `drain_filter` feature.
         self.ranges = self.ranges.iter().filter(|x| x != &dst).cloned().collect();
 
         prev_ranges_len != self.ranges.len()
@@ -183,7 +183,6 @@ impl CompactDef {
 
 impl CompactStatus {
     pub fn delete(&mut self, compact_def: &CompactDef) {
-        // TODO: level is immutable, we could access it without read
         let this_level_id = compact_def.this_level_id;
         assert!(this_level_id < self.levels.len() - 1);
 
@@ -193,6 +192,7 @@ impl CompactStatus {
         this_level.del_size -= compact_def.this_size;
         let mut found = this_level.remove(&compact_def.this_range);
         drop(this_level);
+
         if !compact_def.next_range.is_empty() {
             let next_level = &mut self.levels[next_level_id];
             found = next_level.remove(&compact_def.next_range) && found;
@@ -207,15 +207,18 @@ impl CompactStatus {
         }
 
         for table in compact_def.top.iter() {
-            assert!(self.tables.get(&table.id()).is_some());
-            // TODO: delete table
+            assert!(self.tables.remove(&table.id()));
+        }
+
+        for table in compact_def.bot.iter() {
+            assert!(self.tables.remove(&table.id()));
         }
     }
 
     pub fn compare_and_add(&mut self, compact_def: &CompactDef) -> Result<()> {
-        let tl = compact_def.this_level_id;
-        assert!(tl < self.levels.len() - 1);
         let this_level = compact_def.this_level_id;
+        assert!(this_level < self.levels.len() - 1);
+
         let next_level = compact_def.next_level_id;
         if self.levels[this_level].overlaps_with(&compact_def.this_range) {
             return Err(Error::CompactionError(format!(
