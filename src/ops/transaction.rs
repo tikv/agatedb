@@ -1,8 +1,8 @@
 use crate::{
     db::Agate,
     format::{append_ts, user_key},
+    iterator::is_deleted_or_expired,
     iterator::Item,
-    iterator::{is_deleted_or_expired, PrefetchStatus},
     key_with_ts,
     util::{KeyComparator, COMPARATOR},
     AgateIterator, Value,
