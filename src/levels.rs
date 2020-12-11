@@ -570,7 +570,7 @@ impl Core {
                     vp.decode(&vs.value);
                 }
 
-                builder.add(&iter_key, vs, vp.len);
+                builder.add(&iter_key, &vs, vp.len);
 
                 iter.next();
             }

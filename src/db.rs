@@ -517,7 +517,7 @@ impl Core {
             if vs.meta & value::VALUE_POINTER != 0 {
                 panic!("value pointer not supported");
             }
-            builder.add(iter.key(), vs, 0); // TODO: support vlog length
+            builder.add(iter.key(), &vs, 0); // TODO: support vlog length
             iter.next();
         }
         builder

@@ -61,7 +61,7 @@ fn create_and_open(agate: &mut Agate, td: Vec<KeyValVersion>, level: usize) {
     for item in td {
         let key = key_with_ts(&item.key[..], item.version);
         let value = Value::new_with_meta(item.value.clone(), item.meta, 0);
-        builder.add(&key, value, 0);
+        builder.add(&key, &value, 0);
     }
     let filename = new_filename(agate.core.lvctl.reserve_file_id(), &agate.core.opts.dir);
     let table = Table::create(&filename, builder.finish(), table_opts).unwrap();

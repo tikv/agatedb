@@ -69,7 +69,7 @@ impl Builder {
         util::bytes_diff(&self.base_key, key)
     }
 
-    fn add_helper(&mut self, key: &Bytes, v: Value, vlog_len: u32) {
+    fn add_helper(&mut self, key: &Bytes, v: &Value, vlog_len: u32) {
         self.key_hashes.push(farmhash::fingerprint32(user_key(key)));
         // TODO: check ts
         let diff_key = if self.base_key.is_empty() {
@@ -140,7 +140,7 @@ impl Builder {
     }
 
     /// Add key-value pair to table
-    pub fn add(&mut self, key: &Bytes, value: Value, vlog_len: u32) {
+    pub fn add(&mut self, key: &Bytes, value: &Value, vlog_len: u32) {
         if self.should_finish_block(&key, &value) {
             self.finish_block();
             self.base_key.clear();
@@ -148,7 +148,7 @@ impl Builder {
             self.base_offset = self.buf.len() as u32;
             self.entry_offsets.clear();
         }
-        self.add_helper(key, value, vlog_len);
+        self.add_helper(key, &value, vlog_len);
     }
 
     /// Check if entries reach its capacity
@@ -244,7 +244,7 @@ mod tests {
             } else if builder.should_finish_block(&k, &vs) {
                 block_first_keys.push(k.clone());
             }
-            builder.add(&k, vs, 0);
+            builder.add(&k, &vs, 0);
         }
 
         let table = Table::create(&filename, builder.finish(), opts).unwrap();
