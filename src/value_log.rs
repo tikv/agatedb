@@ -35,6 +35,14 @@ impl Core {
     }
 }
 
+impl Drop for Core {
+    fn drop(&mut self) {
+        for (_, wal) in &mut self.files_map {
+            wal.lock().unwrap().mark_close_and_save()
+        }
+    }
+}
+
 /// ValueLog stores all value logs of an agatedb instance.
 pub struct ValueLog {
     /// value log directory

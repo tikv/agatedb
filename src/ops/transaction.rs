@@ -1,8 +1,8 @@
 use crate::{
     db::Agate,
     format::{append_ts, user_key},
+    iterator::is_deleted_or_expired,
     iterator::Item,
-    iterator::{is_deleted_or_expired, PrefetchStatus},
     key_with_ts,
     util::{KeyComparator, COMPARATOR},
     AgateIterator, Value,
@@ -206,22 +206,20 @@ impl Transaction {
             return Err(Error::CustomError("txn discarded".to_string()));
         }
 
+        let mut item = Item::new(self.agate.clone());
+
         if self.update {
             if let Some(entry) = self.pending_writes.get(key) {
                 if key == &entry.key {
                     if is_deleted_or_expired(entry.meta, entry.expires_at) {
                         return Err(Error::KeyNotFound(()));
                     }
-                    return Ok(Item {
-                        meta: entry.meta,
-                        value: entry.value.clone(),
-                        user_meta: entry.user_meta,
-                        key: entry.key.clone(),
-                        status: PrefetchStatus::Prefetched,
-                        version: self.read_ts,
-                        expires_at: entry.expires_at,
-                        vptr: Bytes::new(),
-                    });
+                    item.meta = entry.meta;
+                    item.set_value(entry.value.clone());
+                    item.user_meta = entry.user_meta;
+                    item.key = entry.key.clone();
+                    item.version = self.read_ts;
+                    item.expires_at = entry.expires_at;
                 }
             }
 
@@ -244,16 +242,13 @@ impl Transaction {
             return Err(Error::KeyNotFound(()));
         }
 
-        Ok(Item {
-            key: key.clone(),
-            version: vs.version,
-            meta: vs.meta,
-            user_meta: vs.user_meta,
-            vptr: vs.value,
-            expires_at: vs.expires_at,
-            value: Bytes::new(),
-            status: PrefetchStatus::No,
-        })
+        item.key = key.clone();
+        item.version = vs.version;
+        item.meta = vs.meta;
+        item.user_meta = vs.user_meta;
+        item.vptr = vs.value;
+        item.expires_at = vs.expires_at;
+        Ok(item)
     }
 
     pub(crate) fn add_read_key(&self, key: &Bytes) {
