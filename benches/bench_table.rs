@@ -34,7 +34,7 @@ fn bench_table_builder(c: &mut Criterion) {
         b.iter(|| {
             let mut builder = TableBuilder::new(opts.clone());
             for j in 0..KEY_COUNT {
-                builder.add(&key_list[j], vs.clone(), 0);
+                builder.add(&key_list[j], &vs, 0);
             }
             builder.finish()
         });
@@ -79,7 +79,7 @@ fn get_table_for_benchmark(count: usize) -> TableGuard {
     for i in 0..count {
         let k = Bytes::from(format!("{:016x}", i));
         let v = Bytes::from(i.to_string());
-        builder.add(&k, Value::new(v), 0);
+        builder.add(&k, &Value::new(v), 0);
     }
 
     TableGuard {
@@ -114,7 +114,7 @@ fn bench_table(c: &mut Criterion) {
             let mut builder = TableBuilder::new(builder_opts.clone());
             it.seek_to_first();
             while it.valid() {
-                builder.add(&Bytes::copy_from_slice(it.key()), it.value(), 0);
+                builder.add(&Bytes::copy_from_slice(it.key()), &it.value(), 0);
                 it.next();
             }
             builder.finish()
