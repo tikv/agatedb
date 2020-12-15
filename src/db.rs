@@ -45,10 +45,11 @@ pub struct Core {
     closers: Closers,
 }
 
+#[derive(Clone)]
 pub struct Agate {
     pub(crate) core: Arc<Core>,
     closer: Closer,
-    pool: yatp::ThreadPool<yatp::task::callback::TaskCell>,
+    pool: Arc<yatp::ThreadPool<yatp::task::callback::TaskCell>>,
 }
 
 struct FlushTask {
@@ -83,10 +84,12 @@ impl Agate {
         let flush_core = core.clone();
         let writer_core = core.clone();
         let closer = Closer::new();
-        let pool = yatp::Builder::new("agatedb")
-            .max_thread_count(core.opts.num_compactors * 3 + 2)
-            .min_thread_count(core.opts.num_compactors + 2)
-            .build_callback_pool();
+        let pool = Arc::new(
+            yatp::Builder::new("agatedb")
+                .max_thread_count(core.opts.num_compactors * 3 + 2)
+                .min_thread_count(core.opts.num_compactors + 2)
+                .build_callback_pool(),
+        );
 
         let agate = Self {
             core,
@@ -98,8 +101,9 @@ impl Agate {
             .pool
             .spawn(move |_: &mut Handle<'_>| flush_core.flush_memtable().unwrap());
 
+        let agate_cloned = agate.clone();
         agate.pool.spawn(move |_: &mut Handle<'_>| {
-            writer_core
+            agate_cloned
                 .do_writes(writer_core.closers.writes.clone())
                 .unwrap()
         });
@@ -588,32 +592,46 @@ impl Core {
             return Ok(());
         }
 
-        // TODO: process subscriptions
+        let dones: Vec<_> = requests.iter().map(|x| x.done.clone()).collect();
 
-        if let Some(ref vlog) = *self.vlog {
-            vlog.write(&mut requests)?;
-        }
+        let f = || {
+            // TODO: process subscriptions
 
-        let mut cnt = 0;
-
-        // writing to LSM
-        for req in requests {
-            if req.entries.is_empty() {
-                continue;
-            }
-            cnt += req.entries.len();
-
-            while let Err(_) = self.ensure_room_for_write() {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-                // println!("wait for room... {:?}", err)
+            if let Some(ref vlog) = *self.vlog {
+                vlog.write(&mut requests)?;
             }
 
-            self.write_to_lsm(req)?;
+            let mut cnt = 0;
+
+            // writing to LSM
+            for req in requests {
+                if req.entries.is_empty() {
+                    continue;
+                }
+                cnt += req.entries.len();
+
+                while let Err(_) = self.ensure_room_for_write() {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    // println!("wait for room... {:?}", err)
+                }
+
+                self.write_to_lsm(req)?;
+            }
+
+            println!("{} entries written", cnt);
+
+            Ok(())
+        };
+
+        let result = f();
+
+        for done in dones {
+            if let Some(done) = done {
+                done.send(result.clone()).unwrap();
+            }
         }
 
-        println!("{} entries written", cnt);
-
-        Ok(())
+        result
     }
 
     pub(crate) fn get_mem_tables(&self) -> Vec<Arc<MemTable>> {
@@ -653,27 +671,6 @@ impl Core {
         self.write_channel.0.send(req)?;
         Ok(rx)
     }
-
-    fn do_writes(&self, closer: Closer) -> Result<()> {
-        println!("start doing writes");
-        loop {
-            select! {
-                recv(self.write_channel.1) -> req => {
-                    // TODO: blocking writes
-                    // TODO: batch write
-                    let req = req.unwrap();
-                    println!("request received!");
-                    if let Some(done) = req.done.clone() {
-                        done.send(self.write_requests(vec![req])).unwrap();
-                    }
-                },
-                recv(closer.has_been_closed()) -> _ => {
-                    // TODO: process pending writes
-                    return Ok(());
-                }
-            }
-        }
-    }
 }
 
 impl Agate {
@@ -687,6 +684,85 @@ impl Agate {
 
     pub fn write_requests(&self, request: Vec<Request>) -> Result<()> {
         self.core.write_requests(request)
+    }
+
+    fn do_writes(&self, closer: Closer) -> Result<()> {
+        println!("start doing writes");
+
+        let (pending_tx, pending_rx) = bounded(1);
+
+        const STATUS_WRITE: usize = 0;
+        const STATUS_CLOSED: usize = 1;
+
+        let mut reqs = vec![];
+
+        let status = loop {
+            let req;
+
+            // We wait until there is at least one request
+            select! {
+                recv(self.core.write_channel.1) -> req_recv => {
+                    req = req_recv.unwrap();
+                }
+                recv(closer.has_been_closed()) -> _ => {
+                    break STATUS_CLOSED;
+                }
+            }
+
+            reqs.push(req);
+
+            let status = loop {
+                if reqs.len() >= 3 * KV_WRITE_CH_CAPACITY {
+                    pending_tx.send(()).unwrap();
+                    break STATUS_WRITE;
+                }
+
+                select! {
+                    send(pending_tx, ()) -> _ => {
+                        break STATUS_WRITE;
+                    }
+                    recv(self.core.write_channel.1) -> req => {
+                        let req = req.unwrap();
+                        reqs.push(req);
+                    }
+                    recv(closer.has_been_closed()) -> _ => {
+                        break STATUS_CLOSED;
+                    }
+                }
+            };
+
+            if status == STATUS_CLOSED {
+                break STATUS_CLOSED;
+            } else if status == STATUS_WRITE {
+                let rx = pending_rx.clone();
+                let core = self.core.clone();
+                let reqs = reqs.drain(..).collect();
+                self.pool.spawn(move |_: &mut Handle<'_>| {
+                    if let Err(err) = core.write_requests(reqs) {
+                        println!("failed to write: {:?}", err);
+                    }
+                    rx.recv().ok();
+                })
+            }
+        };
+
+        if status == STATUS_CLOSED {
+            loop {
+                select! {
+                    recv(self.core.write_channel.1) -> req => {
+                        reqs.push(req.unwrap());
+                    }
+                    default => {
+                        if let Err(err) = self.core.write_requests(reqs) {
+                            println!("failed to write: {:?}", err);
+                        }
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        unreachable!()
     }
 }
 
