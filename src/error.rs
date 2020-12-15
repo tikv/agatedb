@@ -1,19 +1,19 @@
 use std::io;
 use std::ops::Range;
 use std::result;
-use std::sync::PoisonError;
+use std::sync::{Arc, PoisonError};
 
 use crossbeam_channel::SendError;
 use thiserror::Error;
 
 use crate::value::ValuePointer;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone)]
 pub enum Error {
     #[error("Invalid Configuration: {0}")]
     Config(String),
     #[error("IO error: {0}")]
-    Io(#[source] Box<io::Error>),
+    Io(#[source] Arc<io::Error>),
     #[error("Empty key")]
     EmptyKey,
     #[error("{0}")]
@@ -62,7 +62,7 @@ pub enum Error {
 impl From<io::Error> for Error {
     #[inline]
     fn from(e: io::Error) -> Error {
-        Error::Io(Box::new(e))
+        Error::Io(Arc::new(e))
     }
 }
 
