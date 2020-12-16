@@ -37,8 +37,12 @@ impl Core {
 
 impl Drop for Core {
     fn drop(&mut self) {
-        for (_, wal) in &mut self.files_map {
-            wal.lock().unwrap().mark_close_and_save()
+        for (id, wal) in &mut self.files_map {
+            if let Ok(mut wal) = wal.lock() {
+                wal.mark_close_and_save();
+            } else {
+                println!("failed to acquire lock of wal #{}", id);
+            }
         }
     }
 }

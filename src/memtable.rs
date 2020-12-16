@@ -38,10 +38,16 @@ impl Drop for MemTable {
             .save_after_close
             .load(std::sync::atomic::Ordering::SeqCst)
         {
-            let mut core = self.core.write().unwrap();
-            let wal = core.wal.take();
-            if let Some(wal) = wal {
-                wal.close_and_save();
+            match self.core.write() {
+                Ok(mut core) => {
+                    let wal = core.wal.take();
+                    if let Some(wal) = wal {
+                        wal.close_and_save();
+                    }
+                }
+                Err(err) => {
+                    println!("failed to acquire memtable core lock: {:?}", err);
+                }
             }
         }
     }

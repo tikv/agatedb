@@ -473,7 +473,9 @@ impl Drop for TableInner {
                 .load(std::sync::atomic::Ordering::SeqCst)
             {
                 drop(file);
-                fs::remove_file(&name).unwrap();
+                if let Err(err) = fs::remove_file(&name) {
+                    println!("failed to remove file {:?}: {:?}", name, err);
+                }
             }
         }
     }
