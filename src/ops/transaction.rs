@@ -333,8 +333,6 @@ impl Transaction {
 
         let done = self.agate.send_to_write_channel(entries);
 
-        println!("--- sent to channel ---");
-
         if let Err(err) = done {
             orc.done_commit(commit_ts);
             return Err(err);

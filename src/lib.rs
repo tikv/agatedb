@@ -2,6 +2,7 @@
 #![feature(slice_fill)]
 #![feature(hash_drain_filter)]
 #![feature(drain_filter)]
+#![feature(backtrace)]
 
 mod bloom;
 mod checksum;
@@ -20,12 +21,13 @@ mod ops;
 pub mod opt;
 mod table;
 mod txn;
-mod util;
+pub mod util;
 mod value;
 mod value_log;
 mod wal;
 
 pub use format::{get_ts, key_with_ts};
+pub use iterator::IteratorOptions;
 pub use opt::ChecksumVerificationMode;
 pub use opt::Options as TableOptions;
 pub use table::builder::Builder as TableBuilder;

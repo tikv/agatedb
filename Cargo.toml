@@ -45,6 +45,10 @@ harness = false
 name = "bench_table"
 harness = false
 
+[[bench]]
+name = "bench_iterator"
+harness = false
+
 [profile.bench]
 opt-level = 3
 debug = false
