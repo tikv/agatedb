@@ -389,4 +389,30 @@ mod tests {
 
         tmp_dir.close().unwrap();
     }
+
+    #[test]
+    fn test_vlog_recover() {
+        let tmp_dir = TempDir::new("agatedb").unwrap();
+        let mut options = AgateOptions::default();
+
+        options.create();
+
+        options.in_memory = false;
+        options.value_log_file_size = 4 << 20;
+
+        options.mem_table_size = 1 << 14;
+        // set base level size small enought to make the compactor flush L0 to L5 and L6
+        options.base_level_size = 4 << 10;
+
+        let agate = options.open(&tmp_dir).unwrap();
+        agate.write_requests(generate_requests(2, 1 << 20)).unwrap();
+        verify_requests(2, &agate);
+        drop(agate);
+
+        let agate = options.open(&tmp_dir).unwrap();
+        verify_requests(2, &agate);
+        drop(agate);
+
+        tmp_dir.close().unwrap();
+    }
 }
