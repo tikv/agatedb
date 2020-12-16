@@ -123,14 +123,25 @@ impl ValueLog {
     /// write requests to vlog, and put vlog pointers back in `Request`.
     /// `write` should not be called concurrently, otherwise this will lead to wrong result.
     pub fn write(&self, requests: &mut [Request]) -> Result<()> {
+        let result = self.write_inner(requests);
+        if self.opts.sync_writes {
+            let core = self.core.read().unwrap();
+            let current_log_id = core.max_fid;
+            let current_log_ptr = core.files_map.get(&current_log_id).unwrap().clone();
+            let mut current_log = current_log_ptr.lock().unwrap();
+            drop(core);
+            current_log.sync()?;
+        }
+        result
+    }
+
+    pub fn write_inner(&self, requests: &mut [Request]) -> Result<()> {
         // TODO: validate writes
 
         let core = self.core.read().unwrap();
         let mut current_log_id = core.max_fid;
         let mut current_log = core.files_map.get(&current_log_id).unwrap().clone();
         drop(core);
-
-        // TODO: sync writes before return
 
         let write = |buf: &[u8], current_log: Arc<Mutex<Wal>>| -> Result<()> {
             let mut current_log = current_log.lock().unwrap();
