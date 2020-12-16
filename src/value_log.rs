@@ -33,17 +33,20 @@ impl Core {
             num_entries_written: 0,
         }
     }
+
+    fn drop_no_fail(&mut self) -> Result<()> {
+        for (_, wal) in &mut self.files_map {
+            let mut wal = wal.lock()?;
+            wal.mark_close_and_save();
+        }
+
+        Ok(())
+    }
 }
 
 impl Drop for Core {
     fn drop(&mut self) {
-        for (id, wal) in &mut self.files_map {
-            if let Ok(mut wal) = wal.lock() {
-                wal.mark_close_and_save();
-            } else {
-                println!("failed to acquire lock of wal #{}", id);
-            }
-        }
+        crate::util::no_fail(self.drop_no_fail(), "ValueLog::Core::drop");
     }
 }
 

@@ -457,10 +457,8 @@ impl TableInner {
         unimplemented!()
         // self.fetch_index()?.max_version()
     }
-}
 
-impl Drop for TableInner {
-    fn drop(&mut self) {
+    fn drop_no_fail(&mut self) -> Result<()> {
         if let MmapFile::File { file, mmap, name } =
             std::mem::replace(&mut self.file, MmapFile::None)
         {
@@ -473,11 +471,16 @@ impl Drop for TableInner {
                 .load(std::sync::atomic::Ordering::SeqCst)
             {
                 drop(file);
-                if let Err(err) = fs::remove_file(&name) {
-                    println!("failed to remove file {:?}: {:?}", name, err);
-                }
+                fs::remove_file(&name)?;
             }
         }
+        Ok(())
+    }
+}
+
+impl Drop for TableInner {
+    fn drop(&mut self) {
+        crate::util::no_fail(self.drop_no_fail(), "TableInner::drop");
     }
 }
 

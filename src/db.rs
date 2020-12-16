@@ -849,6 +849,8 @@ pub(crate) mod tests {
             Ok(_) => handle.join().expect("thread panic"),
             Err(err) => panic!("error: {:?}", err),
         }
+
+        crate::util::panic_if_fail();
     }
 
     #[test]

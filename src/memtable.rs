@@ -32,24 +32,25 @@ pub struct MemTable {
     save_after_close: AtomicBool,
 }
 
-impl Drop for MemTable {
-    fn drop(&mut self) {
+impl MemTable {
+    fn drop_no_fail(&mut self) -> Result<()> {
         if self
             .save_after_close
             .load(std::sync::atomic::Ordering::SeqCst)
         {
-            match self.core.write() {
-                Ok(mut core) => {
-                    let wal = core.wal.take();
-                    if let Some(wal) = wal {
-                        wal.close_and_save();
-                    }
-                }
-                Err(err) => {
-                    println!("failed to acquire memtable core lock: {:?}", err);
-                }
+            let mut core = self.core.write()?;
+            let wal = core.wal.take();
+            if let Some(wal) = wal {
+                wal.close_and_save();
             }
         }
+        Ok(())
+    }
+}
+
+impl Drop for MemTable {
+    fn drop(&mut self) {
+        crate::util::no_fail(self.drop_no_fail(), "MemTable::drop");
     }
 }
 

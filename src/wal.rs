@@ -346,8 +346,8 @@ impl<'a> WalIterator<'a> {
     }
 }
 
-impl Drop for Wal {
-    fn drop(&mut self) {
+impl Wal {
+    fn drop_no_fail(&mut self) -> Result<()> {
         unsafe {
             ManuallyDrop::drop(&mut self.mmap_file);
         }
@@ -355,8 +355,15 @@ impl Drop for Wal {
         if !self.save_after_close {
             file.set_len(0).unwrap();
             drop(file);
-            fs::remove_file(&self.path).unwrap();
+            fs::remove_file(&self.path)?;
         }
+        Ok(())
+    }
+}
+
+impl Drop for Wal {
+    fn drop(&mut self) {
+        crate::util::no_fail(self.drop_no_fail(), "Wal::drop");
     }
 }
 
