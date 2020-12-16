@@ -42,16 +42,22 @@ pub struct Transaction {
     pub(crate) agate: Arc<crate::db::Core>,
 }
 
-impl Agate {
-    pub fn new_transaction(&self, update: bool) -> Transaction {
+impl crate::db::Core {
+    pub fn new_transaction(self: &Arc<Self>, update: bool) -> Transaction {
         // TODO: read-only database
-        let mut txn = Transaction::new(self.core.clone());
+        let mut txn = Transaction::new(self.clone());
         txn.update = update;
         txn.count = 1;
         txn.size = TXN_KEY.len() + 10;
         // TODO: allocate transaction conflict_keys and pending_writes on demand
         // TODO: not is_managed
         txn
+    }
+}
+
+impl Agate {
+    pub fn new_transaction(&self, update: bool) -> Transaction {
+        self.core.new_transaction(update)
     }
 
     pub fn update(&self, f: impl FnOnce(&mut Transaction) -> Result<()>) -> Result<()> {

@@ -4,6 +4,7 @@
 #![feature(drain_filter)]
 #![feature(backtrace)]
 
+mod batch;
 mod bloom;
 mod checksum;
 mod closer;
