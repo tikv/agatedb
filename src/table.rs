@@ -480,7 +480,11 @@ impl TableInner {
 
 impl Drop for TableInner {
     fn drop(&mut self) {
-        crate::util::no_fail(self.drop_no_fail(), "TableInner::drop");
+        let filename = self.filename();
+        crate::util::no_fail(
+            self.drop_no_fail(),
+            &format!("TableInner::drop, {}", filename),
+        );
     }
 }
 
