@@ -48,7 +48,7 @@ jobs:
         name: Running Tests 🚀
         with:
           command: test
-          args: --workspace
+          args: --workspace -- --nocapture
   sanitizer_test:
     name: Test with Sanitizer
     runs-on: ubuntu-latest
@@ -75,7 +75,7 @@ jobs:
         name: Running Tests with ${{ matrix.sanitizer }} sanitizer 🚀
         with:
           command: test
-          args: -Zbuild-std --target x86_64-unknown-linux-gnu --features sanitizer-test
+          args: -Zbuild-std --target x86_64-unknown-linux-gnu --features sanitizer-test  -- --nocapture
         env:
           RUSTFLAGS: "-Zsanitizer=${{ matrix.sanitizer }}"
   thread_sanitizer_test:
@@ -101,6 +101,6 @@ jobs:
         name: Running Tests with thread sanitizer 🚀
         with:
           command: test
-          args: --all-features -Zbuild-std --target x86_64-unknown-linux-gnu
+          args: --all-features -Zbuild-std --target x86_64-unknown-linux-gnu -- --nocapture
         env:
           RUSTFLAGS: "-Zsanitizer=thread"

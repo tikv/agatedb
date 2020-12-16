@@ -4,12 +4,12 @@ use bytes::Bytes;
 pub use skiplist::FixedLengthSuffixComparator as Comparator;
 pub use skiplist::{FixedLengthSuffixComparator, KeyComparator};
 
-use std::collections::hash_map::DefaultHasher;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{cmp, ptr};
+use std::{collections::hash_map::DefaultHasher, sync::atomic::AtomicBool};
 
 use crate::Result;
 
@@ -99,4 +99,19 @@ pub fn unix_time() -> u64 {
 pub fn sync_dir(path: &impl AsRef<Path>) -> Result<()> {
     File::open(path.as_ref())?.sync_all()?;
     Ok(())
+}
+
+static FAILED: AtomicBool = AtomicBool::new(false);
+
+pub fn no_fail<T>(result: Result<T>, id: &str) {
+    if let Err(err) = result {
+        println!("WARN: {}, {:?}", id, err);
+        FAILED.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+pub fn panic_if_fail() {
+    if FAILED.load(std::sync::atomic::Ordering::SeqCst) {
+        panic!("failed");
+    }
 }

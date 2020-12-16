@@ -33,13 +33,20 @@ impl Core {
             num_entries_written: 0,
         }
     }
+
+    fn drop_no_fail(&mut self) -> Result<()> {
+        for (_, wal) in &mut self.files_map {
+            let mut wal = wal.lock()?;
+            wal.mark_close_and_save();
+        }
+
+        Ok(())
+    }
 }
 
 impl Drop for Core {
     fn drop(&mut self) {
-        for (_, wal) in &mut self.files_map {
-            wal.lock().unwrap().mark_close_and_save()
-        }
+        crate::util::no_fail(self.drop_no_fail(), "ValueLog::Core::drop");
     }
 }
 
@@ -76,7 +83,26 @@ impl ValueLog {
     }
 
     fn populate_files_map(&self) -> Result<()> {
-        // TODO: implement
+        let dir = std::fs::read_dir(&self.dir_path)?;
+        let mut core = self.core.write().unwrap();
+        for file in dir {
+            let file = file?;
+            if let Ok(filename) = file.file_name().into_string() {
+                if filename.ends_with(".vlog") {
+                    let fid: u32 = filename[..filename.len() - 5].parse().map_err(|err| {
+                        Error::CustomError(format!("failed to parse file ID {:?}", err))
+                    })?;
+                    let wal = Wal::open(file.path(), self.opts.clone())?;
+                    let wal = Arc::new(Mutex::new(wal));
+                    if let Some(_) = core.files_map.insert(fid, wal) {
+                        return Err(Error::CustomError(format!("duplicated vlog found {}", fid)));
+                    }
+                    if core.max_fid < fid {
+                        core.max_fid = fid;
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
@@ -116,10 +142,8 @@ impl ValueLog {
     /// Open value log directory
     pub fn open(&self) -> Result<()> {
         self.populate_files_map()?;
-        if self.core.read().unwrap().files_map.len() == 0 {
-            self.create_vlog_file()?;
-        }
         // TODO find empty files and iterate vlogs
+        self.create_vlog_file()?;
         Ok(())
     }
 
