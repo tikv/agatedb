@@ -45,7 +45,6 @@ pub struct Core {
     closers: Closers,
 }
 
-#[derive(Clone)]
 pub struct Agate {
     pub(crate) core: Arc<Core>,
     closer: Closer,
@@ -101,10 +100,10 @@ impl Agate {
             .pool
             .spawn(move |_: &mut Handle<'_>| flush_core.flush_memtable().unwrap());
 
-        let agate_cloned = agate.clone();
+        let core = agate.core.clone();
+        let pool = agate.pool.clone();
         agate.pool.spawn(move |_: &mut Handle<'_>| {
-            agate_cloned
-                .do_writes(writer_core.closers.writes.clone())
+            core.do_writes(writer_core.closers.writes.clone(), core.clone(), pool)
                 .unwrap()
         });
 
@@ -618,7 +617,7 @@ impl Core {
                 self.write_to_lsm(req)?;
             }
 
-            println!("{} entries written", cnt);
+            // println!("{} entries written", cnt);
 
             Ok(())
         };
@@ -671,22 +670,13 @@ impl Core {
         self.write_channel.0.send(req)?;
         Ok(rx)
     }
-}
 
-impl Agate {
-    pub fn get(&self, key: &Bytes) -> Result<Value> {
-        self.core.get(key)
-    }
-
-    pub fn write_to_lsm(&self, request: Request) -> Result<()> {
-        self.core.write_to_lsm(request)
-    }
-
-    pub fn write_requests(&self, request: Vec<Request>) -> Result<()> {
-        self.core.write_requests(request)
-    }
-
-    fn do_writes(&self, closer: Closer) -> Result<()> {
+    fn do_writes(
+        &self,
+        closer: Closer,
+        core: Arc<Self>,
+        pool: Arc<yatp::ThreadPool<yatp::task::callback::TaskCell>>,
+    ) -> Result<()> {
         println!("start doing writes");
 
         let (pending_tx, pending_rx) = bounded(1);
@@ -701,7 +691,7 @@ impl Agate {
 
             // We wait until there is at least one request
             select! {
-                recv(self.core.write_channel.1) -> req_recv => {
+                recv(core.write_channel.1) -> req_recv => {
                     req = req_recv.unwrap();
                 }
                 recv(closer.has_been_closed()) -> _ => {
@@ -721,7 +711,7 @@ impl Agate {
                     send(pending_tx, ()) -> _ => {
                         break STATUS_WRITE;
                     }
-                    recv(self.core.write_channel.1) -> req => {
+                    recv(core.write_channel.1) -> req => {
                         let req = req.unwrap();
                         reqs.push(req);
                     }
@@ -735,9 +725,9 @@ impl Agate {
                 break STATUS_CLOSED;
             } else if status == STATUS_WRITE {
                 let rx = pending_rx.clone();
-                let core = self.core.clone();
                 let reqs = reqs.drain(..).collect();
-                self.pool.spawn(move |_: &mut Handle<'_>| {
+                let core = core.clone();
+                pool.spawn(move |_: &mut Handle<'_>| {
                     if let Err(err) = core.write_requests(reqs) {
                         println!("failed to write: {:?}", err);
                     }
@@ -749,11 +739,11 @@ impl Agate {
         if status == STATUS_CLOSED {
             loop {
                 select! {
-                    recv(self.core.write_channel.1) -> req => {
+                    recv(core.write_channel.1) -> req => {
                         reqs.push(req.unwrap());
                     }
                     default => {
-                        if let Err(err) = self.core.write_requests(reqs) {
+                        if let Err(err) = core.write_requests(reqs) {
                             println!("failed to write: {:?}", err);
                         }
                         return Ok(());
@@ -763,6 +753,20 @@ impl Agate {
         }
 
         unreachable!()
+    }
+}
+
+impl Agate {
+    pub fn get(&self, key: &Bytes) -> Result<Value> {
+        self.core.get(key)
+    }
+
+    pub fn write_to_lsm(&self, request: Request) -> Result<()> {
+        self.core.write_to_lsm(request)
+    }
+
+    pub fn write_requests(&self, request: Vec<Request>) -> Result<()> {
+        self.core.write_requests(request)
     }
 }
 

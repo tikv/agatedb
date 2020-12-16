@@ -336,4 +336,8 @@ impl Iterator<'_> {
     pub fn rewind(&mut self) {
         self.seek(&Bytes::new());
     }
+
+    pub fn valid_for_prefix(&self, prefix: &Bytes) -> bool {
+        self.valid() && self.item().key.starts_with(&prefix[..])
+    }
 }
