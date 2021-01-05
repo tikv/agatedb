@@ -10,7 +10,7 @@ pub fn key_with_ts(key: impl Into<BytesMut>, ts: u64) -> Bytes {
 pub fn append_ts(key: &mut BytesMut, ts: u64) {
     key.reserve(8);
     let res = (u64::MAX - ts).to_be();
-    let buf = key.bytes_mut();
+    let buf = key.chunk_mut();
     unsafe {
         ptr::copy_nonoverlapping(
             &res as *const u64 as *const u8,
