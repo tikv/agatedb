@@ -97,7 +97,7 @@ impl ValueLog {
         }
         let mut result = vec![];
         for (fid, _) in core.files_map.iter() {
-            if to_be_deleted.get(fid).is_none() {
+            if !to_be_deleted.contains(fid) {
                 result.push(*fid);
             }
         }
