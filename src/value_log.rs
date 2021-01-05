@@ -181,7 +181,6 @@ impl ValueLog {
             // expand file size if space is not enough
             // TODO: handle value >= 4GB case
             let mut current_log = current_log.lock().unwrap();
-
             if end_offset >= current_log.size() {
                 current_log.set_len(end_offset as u64)?;
             }
@@ -191,11 +190,11 @@ impl ValueLog {
         };
 
         let to_disk = |current_log: &Mutex<Wal>| -> Result<bool> {
-            let mut current_log = current_log.lock().unwrap();
             let core = self.core.read().unwrap();
             if self.w_offset() as u64 > self.opts.value_log_file_size
                 || core.num_entries_written > self.opts.value_log_max_entries
             {
+                let mut current_log = current_log.lock().unwrap();
                 current_log.done_writing(self.w_offset())?;
                 Ok(true)
             } else {
