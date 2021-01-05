@@ -132,9 +132,18 @@ impl Agate {
     }
 
     fn close(&self) {
+        // block writes
+        self.core
+            .block_writes
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        // TODO: stop value GC
+        // TODO: implement signal and wait
+        self.core.closers.writes.close();
+        // TODO: drop write channel
+        // TODO: close vlog
+        // TODO: force compact L0
         // TODO: use closer for flush channel
         self.core.flush_channel.0.send(None).unwrap();
-        self.core.closers.writes.close();
         self.closer.close();
     }
 }
