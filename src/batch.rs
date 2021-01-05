@@ -84,4 +84,78 @@ impl WriteBatch {
 
         Ok(())
     }
+
+    fn delete(&mut self, key: Bytes) -> Result<()> {
+        if let Err(err) = self.txn.delete(key.clone()) {
+            if !matches!(err, Error::TxnTooBig(_)) {
+                return Err(err);
+            }
+        }
+        self.commit()?;
+        if let Err(err) = self.txn.delete(key) {
+            self.err = Some(err.clone());
+            return Err(err);
+        }
+        return Ok(());
+    }
+
+    fn flush(mut self) -> Result<()> {
+        self.commit()?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        db::tests::{
+            generate_test_agate_options, with_agate_test, with_agate_test_options, with_payload,
+        },
+        AgateOptions,
+    };
+    use bytes::Bytes;
+
+    fn test_with_options(options: AgateOptions) {
+        let key = |i| Bytes::from(format!("{:10}", i));
+        let value = |i| Bytes::from(format!("{:128}", i));
+
+        with_agate_test_options(options, move |agate| {
+            let mut wb = agate.new_write_batch_at(1);
+            const N: usize = 1000;
+            const M: usize = 500;
+            for i in 0..N {
+                wb.set(key(i), value(i)).unwrap();
+            }
+            for i in 0..M {
+                wb.delete(key(i)).unwrap();
+            }
+            wb.flush().unwrap();
+        })
+    }
+
+    #[test]
+    fn test_on_disk() {
+        let mut options = generate_test_agate_options();
+        options.value_threshold = 32;
+        test_with_options(options);
+    }
+
+    #[test]
+    fn test_in_memory() {
+        let mut opts = generate_test_agate_options();
+        opts.in_memory = true;
+        test_with_options(opts);
+    }
+
+    #[test]
+    fn test_empty_write_batch() {
+        with_agate_test(|agate| {
+            let wb = agate.new_write_batch_at(2);
+            wb.flush().unwrap();
+            let wb = agate.new_write_batch_at(208);
+            wb.flush().unwrap();
+            let wb = agate.new_write_batch_at(31);
+            wb.flush().unwrap();
+        })
+    }
 }
