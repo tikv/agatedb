@@ -5,8 +5,8 @@ authors = ["Jay Lee <busyjaylee@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-bytes = "0.5"
-prost = "0.6"
+bytes = "1.0"
+prost = "0.7"
 
 [build-dependencies]
 prost-build = { version = "0.6" }

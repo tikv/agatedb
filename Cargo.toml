@@ -6,14 +6,14 @@ edition = "2018"
 
 [dependencies]
 thiserror = "1.0"
-bytes = "0.5"
+bytes = "1.0"
 crc = "1.8"
 rand = "0.7"
 proto = { path = "proto" }
 skiplist = { path = "skiplist" }
 memmap = "0.7"
 farmhash = "1.1"
-prost = "0.6"
+prost = "0.7"
 enum_dispatch = "0.3"
 
 [dev-dependencies]
