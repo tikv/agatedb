@@ -16,6 +16,7 @@ use crate::{Table, TableBuilder, TableOptions};
 use bytes::{Bytes, BytesMut};
 use crossbeam_channel::{bounded, select, Receiver, Sender};
 use skiplist::{Skiplist, MAX_NODE_SIZE};
+use value::ValuePointer;
 use yatp::task::callback::Handle;
 
 use std::collections::VecDeque;
@@ -113,6 +114,20 @@ impl Agate {
             .lvctl
             .start_compact(closer.clone(), &agate.pool);
 
+        // flush all memtables
+        let num_of_memtables = agate.core.mts.read().unwrap().nums_of_memtable();
+        for idx in 0..num_of_memtables - 1 {
+            let mt = agate.core.mts.read().unwrap().table_imm(idx);
+            agate
+                .core
+                .flush_channel
+                .0
+                .send(Some(FlushTask {
+                    mt,
+                    drop_prefixes: vec![],
+                }))
+                .unwrap();
+        }
         agate
     }
 
@@ -281,7 +296,7 @@ impl Core {
             mts: RwLock::new(MemTables::new(Arc::new(mt), imm_tables)),
             opts: opts.clone(),
             next_mem_fid: AtomicUsize::new(next_mem_fid),
-            vlog: Arc::new(ValueLog::new(opts.clone())),
+            vlog: Arc::new(ValueLog::new(opts.clone())?),
             lvctl,
             flush_channel: crossbeam_channel::bounded(opts.num_memtables),
             manifest,
@@ -292,10 +307,6 @@ impl Core {
                 writes: Closer::new(),
             },
         };
-
-        if let Some(ref vlog) = *core.vlog {
-            vlog.open()?
-        }
 
         // TODO: initialize other structures
 
@@ -517,10 +528,14 @@ impl Core {
             // TODO: reduce encode / decode by using something like flatbuffer
             let mut vs = Value::default();
             vs.decode(iter.value());
-            if vs.meta & value::VALUE_POINTER != 0 {
-                panic!("value pointer not supported");
-            }
-            builder.add(iter.key(), &vs, 0); // TODO: support vlog length
+            let vlog_len = if vs.meta & value::VALUE_POINTER != 0 {
+                let mut vp = ValuePointer::default();
+                vp.decode(&vs.value);
+                vp.len
+            } else {
+                0
+            };
+            builder.add(iter.key(), &vs, vlog_len);
             iter.next();
         }
         builder

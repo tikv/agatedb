@@ -62,20 +62,25 @@ pub struct ValueLog {
 }
 
 impl ValueLog {
-    /// Create value logs from agatedb options
-    pub fn new(opts: AgateOptions) -> Option<Self> {
-        if opts.in_memory {
+    /// Create value logs from agatedb options.
+    /// If agate is created with in-memory mode, this function will return `None`.
+    pub fn new(opts: AgateOptions) -> Result<Option<Self>> {
+        let core = if opts.in_memory {
             None
         } else {
-            Some(Self {
+            let core = Self {
                 core: Arc::new(RwLock::new(Core::new())),
                 dir_path: opts.value_dir.clone(),
                 opts,
                 writeable_log_offset: AtomicU32::new(0),
-            })
+            };
             // TODO: garbage collection
             // TODO: discard stats
-        }
+            core.open()?;
+            Some(core)
+        };
+
+        Ok(core)
     }
 
     fn file_path(&self, fid: u32) -> PathBuf {
@@ -90,12 +95,15 @@ impl ValueLog {
             if let Ok(filename) = file.file_name().into_string() {
                 if filename.ends_with(".vlog") {
                     let fid: u32 = filename[..filename.len() - 5].parse().map_err(|err| {
-                        Error::CustomError(format!("failed to parse file ID {:?}", err))
+                        Error::InvalidFilename(format!("failed to parse file ID {:?}", err))
                     })?;
                     let wal = Wal::open(file.path(), self.opts.clone())?;
                     let wal = Arc::new(Mutex::new(wal));
                     if let Some(_) = core.files_map.insert(fid, wal) {
-                        return Err(Error::CustomError(format!("duplicated vlog found {}", fid)));
+                        return Err(Error::InvalidFilename(format!(
+                            "duplicated vlog found {}",
+                            fid
+                        )));
                     }
                     if core.max_fid < fid {
                         core.max_fid = fid;
@@ -131,7 +139,7 @@ impl ValueLog {
         }
         let mut result = vec![];
         for (fid, _) in core.files_map.iter() {
-            if to_be_deleted.get(fid).is_none() {
+            if !to_be_deleted.contains(fid) {
                 result.push(*fid);
             }
         }
@@ -140,7 +148,7 @@ impl ValueLog {
     }
 
     /// Open value log directory
-    pub fn open(&self) -> Result<()> {
+    fn open(&self) -> Result<()> {
         self.populate_files_map()?;
         // TODO find empty files and iterate vlogs
         self.create_vlog_file()?;
@@ -155,6 +163,19 @@ impl ValueLog {
     /// write requests to vlog, and put vlog pointers back in `Request`.
     /// `write` should not be called concurrently, otherwise this will lead to wrong result.
     pub fn write(&self, requests: &mut [Request]) -> Result<()> {
+        let result = self.write_inner(requests);
+        if self.opts.sync_writes {
+            let core = self.core.read().unwrap();
+            let current_log_id = core.max_fid;
+            let current_log_ptr = core.files_map.get(&current_log_id).unwrap().clone();
+            let mut current_log = current_log_ptr.lock().unwrap();
+            drop(core);
+            current_log.sync()?;
+        }
+        result
+    }
+
+    pub fn write_inner(&self, requests: &mut [Request]) -> Result<()> {
         // TODO: validate writes
 
         let core = self.core.read().unwrap();
@@ -162,10 +183,7 @@ impl ValueLog {
         let mut current_log = core.files_map.get(&current_log_id).unwrap().clone();
         drop(core);
 
-        // TODO: sync writes before return
-
-        let write = |buf: &[u8], current_log: Arc<Mutex<Wal>>| -> Result<()> {
-            let mut current_log = current_log.lock().unwrap();
+        let write = |buf: &[u8], current_log: &Mutex<Wal>| -> Result<()> {
             if buf.is_empty() {
                 return Ok(());
             }
@@ -177,6 +195,7 @@ impl ValueLog {
 
             // expand file size if space is not enough
             // TODO: handle value >= 4GB case
+            let mut current_log = current_log.lock().unwrap();
             if end_offset >= current_log.size() {
                 current_log.set_len(end_offset as u64)?;
             }
@@ -185,12 +204,12 @@ impl ValueLog {
             Ok(())
         };
 
-        let to_disk = |current_log: Arc<Mutex<Wal>>| -> Result<bool> {
-            let mut current_log = current_log.lock().unwrap();
+        let to_disk = |current_log: &Mutex<Wal>| -> Result<bool> {
             let core = self.core.read().unwrap();
             if self.w_offset() as u64 > self.opts.value_log_file_size
                 || core.num_entries_written > self.opts.value_log_max_entries
             {
+                let mut current_log = current_log.lock().unwrap();
                 current_log.done_writing(self.w_offset())?;
                 Ok(true)
             } else {
@@ -218,18 +237,18 @@ impl ValueLog {
                 p.offset = self.w_offset();
 
                 let orig_meta = entry.meta;
-                entry.meta = entry.meta & (!value::VALUE_FIN_TXN | value::VALUE_TXN);
+                entry.meta &= !value::VALUE_FIN_TXN | value::VALUE_TXN;
 
                 let plen = Wal::encode_entry(&mut buf, &entry);
                 entry.meta = orig_meta;
                 p.len = plen as u32;
                 req.ptrs.push(p);
-                write(&buf, current_log.clone())?;
+                write(&buf, &current_log)?;
 
                 written += 1;
             }
 
-            if to_disk(current_log.clone())? {
+            if to_disk(&current_log)? {
                 let (log_id, log) = self.create_vlog_file()?;
                 current_log_id = log_id;
                 current_log = log;
@@ -239,7 +258,7 @@ impl ValueLog {
             core.num_entries_written += written;
         }
 
-        if to_disk(current_log.clone())? {
+        if to_disk(&current_log)? {
             self.create_vlog_file()?;
         }
         Ok(())
@@ -265,8 +284,11 @@ impl ValueLog {
     }
 
     /// Read data from vlogs.
+    /// The returned value is a `Bytes`, including the whole entry.
+    /// You may need to manually decode it with `Wal::decode_wntry`.
     ///
     /// TODO: let user to decide when to unlock instead of blocking.
+    /// TODO: return header together with k-v pair.
     pub(crate) fn read(&self, value_ptr: ValuePointer) -> Result<Bytes> {
         let log_file = self.get_file(&value_ptr)?;
         let r = log_file.lock().unwrap();
@@ -305,8 +327,7 @@ mod tests {
         opts.value_dir = tmp_dir.path().to_path_buf();
         opts.value_threshold = 32;
         opts.value_log_file_size = 1024;
-        let vlog = ValueLog::new(opts.clone()).unwrap();
-        vlog.open().unwrap();
+        let vlog = ValueLog::new(opts.clone()).unwrap().unwrap();
 
         let val1 = b"sampleval012345678901234567890123";
         let val2 = b"samplevalb012345678901234567890123";

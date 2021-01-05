@@ -1,0 +1,16 @@
+[package]
+name = "agate_bench"
+version = "0.1.0"
+authors = ["Alex Chi <iskyzh@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+agatedb = { path = "../" }
+clap = "2.33"
+rand = "0.7"
+bytes = "1.0"
+yatp = { git = "https://github.com/tikv/yatp.git" }
+indicatif = "0.15"
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.4.0"
