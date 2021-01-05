@@ -114,6 +114,20 @@ impl Agate {
             .lvctl
             .start_compact(closer.clone(), &agate.pool);
 
+        // flush all memtables
+        let num_of_memtables = agate.core.mts.read().unwrap().nums_of_memtable();
+        for idx in 0..num_of_memtables - 1 {
+            let mt = agate.core.mts.read().unwrap().table_imm(idx);
+            agate
+                .core
+                .flush_channel
+                .0
+                .send(Some(FlushTask {
+                    mt,
+                    drop_prefixes: vec![],
+                }))
+                .unwrap();
+        }
         agate
     }
 

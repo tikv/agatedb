@@ -62,7 +62,8 @@ pub struct ValueLog {
 }
 
 impl ValueLog {
-    /// Create value logs from agatedb options
+    /// Create value logs from agatedb options.
+    /// If agate is created with in-memory mode, this function will return `None`.
     pub fn new(opts: AgateOptions) -> Result<Option<Self>> {
         let core = if opts.in_memory {
             None
@@ -94,12 +95,15 @@ impl ValueLog {
             if let Ok(filename) = file.file_name().into_string() {
                 if filename.ends_with(".vlog") {
                     let fid: u32 = filename[..filename.len() - 5].parse().map_err(|err| {
-                        Error::CustomError(format!("failed to parse file ID {:?}", err))
+                        Error::InvalidFilename(format!("failed to parse file ID {:?}", err))
                     })?;
                     let wal = Wal::open(file.path(), self.opts.clone())?;
                     let wal = Arc::new(Mutex::new(wal));
                     if let Some(_) = core.files_map.insert(fid, wal) {
-                        return Err(Error::CustomError(format!("duplicated vlog found {}", fid)));
+                        return Err(Error::InvalidFilename(format!(
+                            "duplicated vlog found {}",
+                            fid
+                        )));
                     }
                     if core.max_fid < fid {
                         core.max_fid = fid;
@@ -179,8 +183,7 @@ impl ValueLog {
         let mut current_log = core.files_map.get(&current_log_id).unwrap().clone();
         drop(core);
 
-        let write = |buf: &[u8], current_log: Arc<Mutex<Wal>>| -> Result<()> {
-            let mut current_log = current_log.lock().unwrap();
+        let write = |buf: &[u8], current_log: &Mutex<Wal>| -> Result<()> {
             if buf.is_empty() {
                 return Ok(());
             }
@@ -192,6 +195,7 @@ impl ValueLog {
 
             // expand file size if space is not enough
             // TODO: handle value >= 4GB case
+            let mut current_log = current_log.lock().unwrap();
             if end_offset >= current_log.size() {
                 current_log.set_len(end_offset as u64)?;
             }
@@ -200,12 +204,12 @@ impl ValueLog {
             Ok(())
         };
 
-        let to_disk = |current_log: Arc<Mutex<Wal>>| -> Result<bool> {
-            let mut current_log = current_log.lock().unwrap();
+        let to_disk = |current_log: &Mutex<Wal>| -> Result<bool> {
             let core = self.core.read().unwrap();
             if self.w_offset() as u64 > self.opts.value_log_file_size
                 || core.num_entries_written > self.opts.value_log_max_entries
             {
+                let mut current_log = current_log.lock().unwrap();
                 current_log.done_writing(self.w_offset())?;
                 Ok(true)
             } else {
@@ -233,18 +237,18 @@ impl ValueLog {
                 p.offset = self.w_offset();
 
                 let orig_meta = entry.meta;
-                entry.meta = entry.meta & (!value::VALUE_FIN_TXN | value::VALUE_TXN);
+                entry.meta &= !value::VALUE_FIN_TXN | value::VALUE_TXN;
 
                 let plen = Wal::encode_entry(&mut buf, &entry);
                 entry.meta = orig_meta;
                 p.len = plen as u32;
                 req.ptrs.push(p);
-                write(&buf, current_log.clone())?;
+                write(&buf, &current_log)?;
 
                 written += 1;
             }
 
-            if to_disk(current_log.clone())? {
+            if to_disk(&current_log)? {
                 let (log_id, log) = self.create_vlog_file()?;
                 current_log_id = log_id;
                 current_log = log;
@@ -254,7 +258,7 @@ impl ValueLog {
             core.num_entries_written += written;
         }
 
-        if to_disk(current_log.clone())? {
+        if to_disk(&current_log)? {
             self.create_vlog_file()?;
         }
         Ok(())

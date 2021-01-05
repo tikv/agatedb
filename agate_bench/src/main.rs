@@ -61,7 +61,9 @@ fn main() {
             let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
             let chunk_size: u64 = sub_matches.value_of("chunk_size").unwrap().parse().unwrap();
 
-            let agate = Arc::new(AgateOptions::default().open(directory).unwrap());
+            let mut options = AgateOptions::default();
+            options.create_if_not_exists = true;
+            let agate = Arc::new(options.open(directory).unwrap());
             let mut expected = 0;
             let pb = ProgressBar::new(key_nums);
 
