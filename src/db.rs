@@ -19,11 +19,11 @@ use skiplist::{Skiplist, MAX_NODE_SIZE};
 use value::ValuePointer;
 use yatp::task::callback::Handle;
 
-use std::{collections::VecDeque, time::Duration};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, RwLock};
+use std::{collections::VecDeque, time::Duration};
 
 const KV_WRITE_CH_CAPACITY: usize = 1000;
 
