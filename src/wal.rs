@@ -1,8 +1,4 @@
 use crate::entry::{Entry, EntryRef};
-use crate::util::binary::{
-    encode_varint_u32_to_array, encode_varint_u64_to_array, varint_u32_bytes_len,
-    varint_u64_bytes_len,
-};
 use crate::util::sync_dir;
 use crate::value::{EntryReader, ValuePointer};
 use crate::AgateOptions;
@@ -10,7 +6,7 @@ use crate::Error;
 use crate::Result;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use memmap::{MmapMut, MmapOptions};
-use prost::encoding::decode_varint;
+use prost::{decode_length_delimiter, encode_length_delimiter, length_delimiter_len};
 use std::fs::{File, OpenOptions};
 use std::io::Cursor;
 use std::path::PathBuf;
@@ -36,9 +32,9 @@ impl Header {
     /// Get length of header if being encoded
     pub fn encoded_len(&self) -> usize {
         1 + 1
-            + varint_u64_bytes_len(self.expires_at) as usize
-            + varint_u32_bytes_len(self.key_len) as usize
-            + varint_u32_bytes_len(self.value_len) as usize
+            + length_delimiter_len(self.expires_at as usize)
+            + length_delimiter_len(self.key_len as usize)
+            + length_delimiter_len(self.value_len as usize)
     }
 
     /// Encode header into bytes
@@ -54,39 +50,24 @@ impl Header {
     pub fn encode(&self, bytes: &mut BytesMut) {
         let encoded_len = self.encoded_len();
         bytes.reserve(encoded_len);
-        unsafe {
-            let buf = bytes.bytes_mut();
-            assert!(buf.len() >= encoded_len);
-            *(*buf.get_unchecked_mut(0)).as_mut_ptr() = self.meta;
-            *(*buf.get_unchecked_mut(1)).as_mut_ptr() = self.user_meta;
-            let mut index = 2;
-            index += encode_varint_u32_to_array(
-                (*buf.get_unchecked_mut(index)).as_mut_ptr(),
-                self.key_len,
-            );
-            index += encode_varint_u32_to_array(
-                (*buf.get_unchecked_mut(index)).as_mut_ptr(),
-                self.value_len,
-            );
-            index += encode_varint_u64_to_array(
-                (*buf.get_unchecked_mut(index)).as_mut_ptr(),
-                self.expires_at,
-            );
-            bytes.advance_mut(index);
-        }
-        debug_assert_eq!(bytes.len(), encoded_len);
+
+        bytes.put_u8(self.meta);
+        bytes.put_u8(self.user_meta);
+        encode_length_delimiter(self.key_len as usize, bytes).unwrap();
+        encode_length_delimiter(self.value_len as usize, bytes).unwrap();
+        encode_length_delimiter(self.expires_at as usize, bytes).unwrap();
     }
 
     /// Decode header from byte stream
-    pub fn decode(&mut self, bytes: &mut impl Buf) -> Result<()> {
+    pub fn decode(&mut self, mut bytes: &mut impl Buf) -> Result<()> {
         if bytes.remaining() <= 2 {
             return Err(Error::VarDecode("should be at least 2 bytes"));
         }
         self.meta = bytes.get_u8();
         self.user_meta = bytes.get_u8();
-        self.key_len = decode_varint(bytes)? as u32;
-        self.value_len = decode_varint(bytes)? as u32;
-        self.expires_at = decode_varint(bytes)? as u64;
+        self.key_len = decode_length_delimiter(&mut bytes)? as u32;
+        self.value_len = decode_length_delimiter(&mut bytes)? as u32;
+        self.expires_at = decode_length_delimiter(&mut bytes)? as u64;
         Ok(())
     }
 }
