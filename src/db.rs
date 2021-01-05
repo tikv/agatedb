@@ -18,6 +18,7 @@ pub use opt::AgateOptions;
 use skiplist::Skiplist;
 use yatp::task::callback::Handle;
 
+use crate::value::ValuePointer;
 use crate::{
     closer::Closer,
     entry::Entry,
@@ -408,10 +409,14 @@ impl Core {
             // TODO: reduce encode / decode by using something like flatbuffer
             let mut vs = Value::default();
             vs.decode(iter.value().clone());
-            if vs.meta & value::VALUE_POINTER != 0 {
-                panic!("value pointer not supported");
-            }
-            builder.add(iter.key(), &vs, 0); // TODO: support vlog length
+            let vlog_len = if vs.meta & value::VALUE_POINTER != 0 {
+                let mut vp = ValuePointer::default();
+                vp.decode(&vs.value);
+                vp.len
+            } else {
+                0
+            };
+            builder.add(iter.key(), &vs, vlog_len); // TODO: support vlog length
             iter.next();
         }
         builder
