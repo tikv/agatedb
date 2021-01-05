@@ -47,7 +47,8 @@ pub struct ValueLog {
 }
 
 impl ValueLog {
-    /// Create value logs from agatedb options
+    /// Create value logs from agatedb options.
+    /// If agate is created with in-memory mode, this function will return `None`.
     pub fn new(opts: AgateOptions) -> Result<Option<Self>> {
         let core = if opts.in_memory {
             None
