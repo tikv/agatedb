@@ -1,5 +1,3 @@
-pub mod binary;
-
 pub use skiplist::FixedLengthSuffixComparator as Comparator;
 pub use skiplist::{FixedLengthSuffixComparator, KeyComparator};
 
