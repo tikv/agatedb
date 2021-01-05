@@ -19,11 +19,11 @@ use skiplist::{Skiplist, MAX_NODE_SIZE};
 use value::ValuePointer;
 use yatp::task::callback::Handle;
 
-use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, RwLock};
+use std::{collections::VecDeque, time::Duration};
 
 const KV_WRITE_CH_CAPACITY: usize = 1000;
 
@@ -86,8 +86,8 @@ impl Agate {
         let closer = Closer::new();
         let pool = Arc::new(
             yatp::Builder::new("agatedb")
-                .max_thread_count(core.opts.num_compactors * 3 + 2)
-                .min_thread_count(core.opts.num_compactors + 2)
+                .max_thread_count(core.opts.num_compactors * 6 + 2)
+                .min_thread_count(core.opts.num_compactors * 3 + 2)
                 .build_callback_pool(),
         );
 
@@ -132,9 +132,20 @@ impl Agate {
     }
 
     fn close(&self) {
-        // TODO: use closer for flush channel
-        self.core.flush_channel.0.send(None).unwrap();
+        // block writes
+        self.core
+            .block_writes
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        // TODO: stop value GC
+        // TODO: implement signal and wait
         self.core.closers.writes.close();
+        // TODO: drop write channel
+        // TODO: close vlog
+        // TODO: force compact L0
+        // TODO: use closer for flush channel
+        // TODO: remove this sleep
+        std::thread::sleep(Duration::from_secs(2));
+        self.core.flush_channel.0.send(None).unwrap();
         self.closer.close();
     }
 }
