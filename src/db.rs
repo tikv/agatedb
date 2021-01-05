@@ -19,7 +19,7 @@ use skiplist::{Skiplist, MAX_NODE_SIZE};
 use value::ValuePointer;
 use yatp::task::callback::Handle;
 
-use std::collections::VecDeque;
+use std::{collections::VecDeque, time::Duration};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize};
@@ -143,6 +143,8 @@ impl Agate {
         // TODO: close vlog
         // TODO: force compact L0
         // TODO: use closer for flush channel
+        // TODO: remove this sleep
+        std::thread::sleep(Duration::from_secs(2));
         self.core.flush_channel.0.send(None).unwrap();
         self.closer.close();
     }
