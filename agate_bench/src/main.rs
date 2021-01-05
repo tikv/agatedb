@@ -1,11 +1,11 @@
 use agatedb::AgateOptions;
 use bytes::{Bytes, BytesMut};
 use clap::clap_app;
-use indicatif::ProgressBar;
+use indicatif::{ProgressBar, ProgressStyle};
+use rand::Rng;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use yatp::task::callback::Handle;
 
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
@@ -15,9 +15,11 @@ use tikv_jemallocator::Jemalloc;
 static GLOBAL: Jemalloc = Jemalloc;
 
 fn gen_kv_pair(key: u64, value_size: usize) -> (Bytes, Bytes) {
-    let key = Bytes::from(format!("{:016x}", key));
+    let key = Bytes::from(format!("vsz={:05}-k={:010}", value_size, key));
+
     let mut value = BytesMut::with_capacity(value_size);
     value.resize(value_size, 0);
+
     (key, value.freeze())
 }
 
@@ -49,10 +51,7 @@ fn main() {
 
     let directory = matches.value_of("directory").unwrap();
     let threads: usize = matches.value_of("threads").unwrap().parse().unwrap();
-    let pool = yatp::Builder::new("agatedb_bench")
-        .max_thread_count(threads)
-        .min_thread_count(threads)
-        .build_callback_pool();
+    let pool = threadpool::ThreadPool::new(threads);
     let (tx, rx) = channel();
 
     match matches.subcommand() {
@@ -63,33 +62,37 @@ fn main() {
 
             let mut options = AgateOptions::default();
             options.create_if_not_exists = true;
+            options.sync_writes = true;
             let agate = Arc::new(options.open(directory).unwrap());
             let mut expected = 0;
             let pb = ProgressBar::new(key_nums);
+            pb.set_style(ProgressStyle::default_bar()
+            .template(
+                "{prefix:.bold.dim} [{elapsed_precise}] [{bar:40}] [{per_sec}] ({pos}/{len}) {msg}",
+            )
+            .progress_chars("=> "));
 
             for i in 0..key_nums / chunk_size {
                 let agate = agate.clone();
                 let tx = tx.clone();
-                let pb = pb.clone();
-                pool.spawn(move |_: &mut Handle<'_>| {
-                    let range = i * chunk_size..(i + 1) * chunk_size;
+                pool.execute(move || {
+                    let range = (i * chunk_size)..((i + 1) * chunk_size);
                     let mut txn = agate.new_transaction_at(unix_time(), true);
-                    for j in range.clone() {
-                        let (key, value) = gen_kv_pair(j, value_size);
+                    let mut rng = rand::thread_rng();
+                    for _ in range.clone() {
+                        let (key, value) = gen_kv_pair(rng.gen_range(0, key_nums), value_size);
                         txn.set(key, value).unwrap();
                     }
                     txn.commit_at(unix_time()).unwrap();
-                    pb.set_message(&format!("processed {:?}", range));
-                    pb.inc(chunk_size);
                     tx.send(()).unwrap();
                 });
                 expected += 1;
             }
 
-            rx.iter().take(expected).fold((), |_, _| ());
+            for _ in rx.iter().take(expected) {
+                pb.inc(chunk_size);
+            }
             pb.finish_with_message("done");
-
-            pool.shutdown();
         }
         _ => panic!("unsupported command"),
     }

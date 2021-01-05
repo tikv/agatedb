@@ -165,7 +165,7 @@ impl Builder {
     }
 
     /// Finalize the table
-    pub fn finish(&mut self) -> Bytes {
+    pub fn finish(mut self) -> Bytes {
         self.finish_block();
         if self.buf.is_empty() {
             return Bytes::new();
@@ -187,7 +187,7 @@ impl Builder {
         let cs = self.build_checksum(&bytes);
         self.write_checksum(cs);
         // TODO: eliminate clone if we do not need builder any more after finish
-        self.buf.clone().freeze()
+        self.buf.freeze()
     }
 
     fn build_checksum(&self, data: &[u8]) -> Checksum {
@@ -306,7 +306,7 @@ mod tests {
             checksum_mode: crate::opt::ChecksumVerificationMode::NoVerification,
         };
 
-        let mut b = Builder::new(opt);
+        let b = Builder::new(opt);
 
         b.finish();
     }

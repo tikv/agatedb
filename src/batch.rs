@@ -99,7 +99,7 @@ impl WriteBatch {
         return Ok(());
     }
 
-    fn flush(mut self) -> Result<()> {
+    pub fn flush(mut self) -> Result<()> {
         self.commit()?;
         Ok(())
     }
