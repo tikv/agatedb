@@ -201,7 +201,9 @@ impl ValueLog {
             }
             let ptr = current_log.data()[start as usize..end_offset as usize].as_mut_ptr();
             drop(current_log);
-            unsafe { std::ptr::copy_nonoverlapping(buf.as_ptr(), ptr, buf.len()); }
+            unsafe {
+                std::ptr::copy_nonoverlapping(buf.as_ptr(), ptr, buf.len());
+            }
             let mut current_log = current_log_lck.lock().unwrap();
             current_log.set_size(end_offset);
             drop(current_log);
