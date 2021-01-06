@@ -26,7 +26,7 @@ pub struct Value {
 impl Into<Bytes> for Value {
     fn into(self) -> Bytes {
         // TODO: we can reduce unnecessary copy by re-writing `encode`
-        let mut buf = BytesMut::new();
+        let mut buf = BytesMut::with_capacity(self.encoded_size() as usize);
         self.encode(&mut buf);
         buf.freeze()
     }

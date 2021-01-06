@@ -558,7 +558,7 @@ impl Core {
             return Ok(());
         }
         let table_opts = opt::build_table_options(&self.opts);
-        let mut builder = Self::build_l0_table(ft, table_opts.clone());
+        let builder = Self::build_l0_table(ft, table_opts.clone());
 
         if builder.is_empty() {
             builder.finish();
@@ -710,7 +710,7 @@ impl Core {
         const STATUS_WRITE: usize = 0;
         const STATUS_CLOSED: usize = 1;
 
-        let mut reqs = vec![];
+        let mut reqs = Vec::with_capacity(10);
 
         let status = loop {
             let req;
@@ -751,7 +751,7 @@ impl Core {
                 break STATUS_CLOSED;
             } else if status == STATUS_WRITE {
                 let rx = pending_rx.clone();
-                let reqs = reqs.drain(..).collect();
+                let reqs = std::mem::replace(&mut reqs, Vec::with_capacity(10));
                 let core = core.clone();
                 pool.spawn(move |_: &mut Handle<'_>| {
                     if let Err(err) = core.write_requests(reqs) {

@@ -9,8 +9,8 @@ agatedb = { path = "../" }
 clap = "2.33"
 rand = "0.7"
 bytes = "1.0"
-yatp = { git = "https://github.com/tikv/yatp.git" }
 indicatif = "0.15"
+threadpool = "1.8"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.4.0"

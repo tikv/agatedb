@@ -183,7 +183,7 @@ impl ValueLog {
         let mut current_log = core.files_map.get(&current_log_id).unwrap().clone();
         drop(core);
 
-        let write = |buf: &[u8], current_log: &Mutex<Wal>| -> Result<()> {
+        let write = |buf: &[u8], current_log_lck: &Mutex<Wal>| -> Result<()> {
             if buf.is_empty() {
                 return Ok(());
             }
@@ -195,12 +195,18 @@ impl ValueLog {
 
             // expand file size if space is not enough
             // TODO: handle value >= 4GB case
-            let mut current_log = current_log.lock().unwrap();
+            let mut current_log = current_log_lck.lock().unwrap();
             if end_offset >= current_log.size() {
                 current_log.set_len(end_offset as u64)?;
             }
-            (&mut current_log.data()[start as usize..end_offset as usize]).clone_from_slice(buf);
+            let ptr = current_log.data()[start as usize..end_offset as usize].as_mut_ptr();
+            drop(current_log);
+            unsafe {
+                std::ptr::copy_nonoverlapping(buf.as_ptr(), ptr, buf.len());
+            }
+            let mut current_log = current_log_lck.lock().unwrap();
             current_log.set_size(end_offset);
+            drop(current_log);
             Ok(())
         };
 

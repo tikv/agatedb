@@ -1,10 +1,13 @@
 use crate::{Error, Result};
-use crc::crc32;
 use proto::meta::{checksum::Algorithm as ChecksumAlgorithm, Checksum};
 
 pub fn calculate_checksum(data: &[u8], algo: ChecksumAlgorithm) -> u64 {
     match algo {
-        ChecksumAlgorithm::Crc32c => crc32::checksum_castagnoli(data) as u64,
+        ChecksumAlgorithm::Crc32c => {
+            let mut hasher = crc32fast::Hasher::new();
+            hasher.update(data);
+            hasher.finalize() as u64
+        }
         ChecksumAlgorithm::XxHash64 => xxhash::checksum(data),
     }
 }

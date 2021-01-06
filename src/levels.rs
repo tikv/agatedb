@@ -794,7 +794,7 @@ impl Core {
             if idx < level {
                 continue;
             }
-            let lvl = lh.write().unwrap();
+            let lvl = lh.read().unwrap();
             let (left, right) = lvl.overlapping_tables(&kr);
             drop(lvl);
             if right - left > 0 {
