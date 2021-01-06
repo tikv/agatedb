@@ -10,6 +10,7 @@ bytes = "1.0"
 clap = "2.33"
 indicatif = "0.15"
 rand = "0.7"
+threadpool = "1.8"
 yatp = { git = "https://github.com/tikv/yatp.git" }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
