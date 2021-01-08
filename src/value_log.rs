@@ -7,7 +7,7 @@ use bytes::{Bytes, BytesMut};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU32;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 
 fn vlog_file_path(dir: impl AsRef<Path>, fid: u32) -> PathBuf {
     dir.as_ref().join(format!("{:06}.vlog", fid))
@@ -17,7 +17,7 @@ struct Core {
     /// `files_map` stores mapping from value log ID to WAL object.
     /// TODO: use scheme like memtable to separate current vLog
     /// and previous logs, so as to reduce usage of Mutex.
-    files_map: HashMap<u32, Arc<Mutex<Wal>>>,
+    files_map: HashMap<u32, Arc<RwLock<Wal>>>,
     /// maximum file ID opened
     max_fid: u32,
     files_to_delete: Vec<u32>,
@@ -36,7 +36,7 @@ impl Core {
 
     fn drop_no_fail(&mut self) -> Result<()> {
         for (_, wal) in &mut self.files_map {
-            let mut wal = wal.lock()?;
+            let mut wal = wal.write()?;
             wal.mark_close_and_save();
         }
 
@@ -98,7 +98,7 @@ impl ValueLog {
                         Error::InvalidFilename(format!("failed to parse file ID {:?}", err))
                     })?;
                     let wal = Wal::open(file.path(), self.opts.clone())?;
-                    let wal = Arc::new(Mutex::new(wal));
+                    let wal = Arc::new(RwLock::new(wal));
                     if let Some(_) = core.files_map.insert(fid, wal) {
                         return Err(Error::InvalidFilename(format!(
                             "duplicated vlog found {}",
@@ -114,13 +114,13 @@ impl ValueLog {
         Ok(())
     }
 
-    fn create_vlog_file(&self) -> Result<(u32, Arc<Mutex<Wal>>)> {
+    fn create_vlog_file(&self) -> Result<(u32, Arc<RwLock<Wal>>)> {
         let mut core = self.core.write().unwrap();
         let fid = core.max_fid + 1;
         let path = self.file_path(fid);
         let wal = Wal::open(path, self.opts.clone())?;
         // TODO: only create new files
-        let wal = Arc::new(Mutex::new(wal));
+        let wal = Arc::new(RwLock::new(wal));
         assert!(core.files_map.insert(fid, wal.clone()).is_none());
         assert!(core.max_fid < fid);
         core.max_fid = fid;
@@ -168,7 +168,7 @@ impl ValueLog {
             let core = self.core.read().unwrap();
             let current_log_id = core.max_fid;
             let current_log_ptr = core.files_map.get(&current_log_id).unwrap().clone();
-            let mut current_log = current_log_ptr.lock().unwrap();
+            let mut current_log = current_log_ptr.write().unwrap();
             drop(core);
             current_log.sync()?;
         }
@@ -183,7 +183,7 @@ impl ValueLog {
         let mut current_log = core.files_map.get(&current_log_id).unwrap().clone();
         drop(core);
 
-        let write = |buf: &[u8], current_log_lck: &Mutex<Wal>| -> Result<()> {
+        let write = |buf: &[u8], current_log_lck: &RwLock<Wal>| -> Result<()> {
             if buf.is_empty() {
                 return Ok(());
             }
@@ -195,7 +195,7 @@ impl ValueLog {
 
             // expand file size if space is not enough
             // TODO: handle value >= 4GB case
-            let mut current_log = current_log_lck.lock().unwrap();
+            let mut current_log = current_log_lck.write().unwrap();
             if end_offset >= current_log.size() {
                 current_log.set_len(end_offset as u64)?;
             }
@@ -204,18 +204,18 @@ impl ValueLog {
             unsafe {
                 std::ptr::copy_nonoverlapping(buf.as_ptr(), ptr, buf.len());
             }
-            let mut current_log = current_log_lck.lock().unwrap();
+            let mut current_log = current_log_lck.write().unwrap();
             current_log.set_size(end_offset);
             drop(current_log);
             Ok(())
         };
 
-        let to_disk = |current_log: &Mutex<Wal>| -> Result<bool> {
+        let to_disk = |current_log: &RwLock<Wal>| -> Result<bool> {
             let core = self.core.read().unwrap();
             if self.w_offset() as u64 > self.opts.value_log_file_size
                 || core.num_entries_written > self.opts.value_log_max_entries
             {
-                let mut current_log = current_log.lock().unwrap();
+                let mut current_log = current_log.write().unwrap();
                 current_log.done_writing(self.w_offset())?;
                 Ok(true)
             } else {
@@ -270,7 +270,7 @@ impl ValueLog {
         Ok(())
     }
 
-    fn get_file(&self, value_ptr: &ValuePointer) -> Result<Arc<Mutex<Wal>>> {
+    fn get_file(&self, value_ptr: &ValuePointer) -> Result<Arc<RwLock<Wal>>> {
         let core = self.core.read().unwrap();
         let file = core.files_map.get(&value_ptr.file_id).cloned();
         if let Some(file) = file {
@@ -297,7 +297,7 @@ impl ValueLog {
     /// TODO: return header together with k-v pair.
     pub(crate) fn read(&self, value_ptr: ValuePointer) -> Result<Bytes> {
         let log_file = self.get_file(&value_ptr)?;
-        let r = log_file.lock().unwrap();
+        let r = log_file.read().unwrap();
         let mut buf = r.read(&value_ptr)?;
         let original_buf = buf.slice(..);
         drop(r);
