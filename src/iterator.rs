@@ -207,7 +207,6 @@ impl Transaction {
         }
 
         self.agate.lvctl.append_iterators(&mut iters, &opt);
-
         Iterator {
             table_iter: MergeIterator::from_iterators(
                 iters.into_iter().map(Box::new).collect(),
@@ -320,9 +319,9 @@ impl Iterator<'_> {
 
         // TODO: prefix
 
-        if key.len() == 0 {
+        if key.is_empty() {
             self.table_iter.rewind();
-            self.parse_item();
+            self.next();
             return;
         }
 
@@ -330,7 +329,7 @@ impl Iterator<'_> {
         let key = key_with_ts(BytesMut::from(&key[..]), self.txn.read_ts);
 
         self.table_iter.seek(&key);
-        self.parse_item();
+        self.next();
     }
 
     pub fn rewind(&mut self) {
