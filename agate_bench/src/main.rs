@@ -254,8 +254,11 @@ fn main() {
             let key_nums: u64 = sub_matches.value_of("key_nums").unwrap().parse().unwrap();
             let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
             let chunk_size: u64 = sub_matches.value_of("chunk_size").unwrap().parse().unwrap();
+            let mut opts = rocksdb::Options::default();
+            opts.create_if_missing(true);
+            opts.set_compression_type(rocksdb::DBCompressionType::None);
 
-            let db = Arc::new(rocksdb::DB::open_default(directory).unwrap());
+            let db = Arc::new(rocksdb::DB::open(&opts, directory).unwrap());
             let mut expected = 0;
             // let pb = ProgressBar::new(key_nums);
             let pb = ProgressBar::hidden();
@@ -321,8 +324,11 @@ fn main() {
             let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
             let chunk_size: u64 = sub_matches.value_of("chunk_size").unwrap().parse().unwrap();
             let times: u64 = sub_matches.value_of("times").unwrap().parse().unwrap();
+            let mut opts = rocksdb::Options::default();
+            opts.create_if_missing(true);
+            opts.set_compression_type(rocksdb::DBCompressionType::None);
 
-            let db = Arc::new(rocksdb::DB::open_default(directory).unwrap());
+            let db = Arc::new(rocksdb::DB::open(&opts, directory).unwrap());
             let mut expected = 0;
             let pb = ProgressBar::new(key_nums * times);
             pb.set_style(ProgressStyle::default_bar()
