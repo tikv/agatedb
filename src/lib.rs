@@ -25,6 +25,7 @@ mod watermark;
 pub use db::{Agate, AgateOptions};
 pub use error::{Error, Result};
 pub use format::{get_ts, key_with_ts};
+pub use iterator::IteratorOptions;
 pub use iterator_trait::AgateIterator;
 pub use opt::{ChecksumVerificationMode, Options as TableOptions};
 pub use skiplist::Skiplist;

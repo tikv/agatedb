@@ -1,12 +1,12 @@
-use agatedb::AgateOptions;
+use agatedb::{AgateOptions, IteratorOptions};
 use bytes::{Bytes, BytesMut};
 use clap::clap_app;
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::Rng;
 use std::path::PathBuf;
-use std::sync::mpsc::channel;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::{sync::mpsc::channel, time::Duration};
 
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
@@ -87,6 +87,13 @@ fn main() {
             (@arg value_size: --value_size +takes_value default_value("1024") "value size")
             (@arg chunk_size: --chunk_size +takes_value default_value("1000") "pairs in one txn")
         )
+        (@subcommand iterate =>
+            (about: "iterate database")
+            (version: "1.0")
+            (author: "Alex Chi <iskyzh@gmail.com>")
+            (@arg times: --times +takes_value default_value("5") "read how many times")
+            (@arg value_size: --value_size +takes_value default_value("1024") "value size")
+        )
         (@subcommand rocks_populate =>
             (about: "build a database with given keys")
             (version: "1.0")
@@ -104,6 +111,13 @@ fn main() {
             (@arg times: --times +takes_value default_value("5") "read how many times")
             (@arg value_size: --value_size +takes_value default_value("1024") "value size")
             (@arg chunk_size: --chunk_size +takes_value default_value("1000") "pairs in one txn")
+        )
+        (@subcommand rocks_iterate =>
+            (about: "iterate database")
+            (version: "1.0")
+            (author: "Alex Chi <iskyzh@gmail.com>")
+            (@arg times: --times +takes_value default_value("5") "read how many times")
+            (@arg value_size: --value_size +takes_value default_value("1024") "value size")
         )
     )
     .get_matches();
@@ -264,6 +278,56 @@ fn main() {
             }
             pb.finish_with_message("done");
         }
+        ("iterate", Some(sub_matches)) => {
+            let times: u64 = sub_matches.value_of("times").unwrap().parse().unwrap();
+            let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
+
+            let mut options = AgateOptions {
+                create_if_not_exists: true,
+                sync_writes: true,
+                dir: directory.clone(),
+                value_dir: directory,
+                managed_txns: true,
+                ..Default::default()
+            };
+            let agate = Arc::new(options.open().unwrap());
+
+            let begin = std::time::Instant::now();
+            let mut lst_report = std::time::Instant::now();
+            let mut total = Rate::new();
+
+            for _ in 0..times {
+                let agate = agate.clone();
+                let txn = agate.new_transaction_at(unix_time(), false);
+                let opts = IteratorOptions::default();
+                let mut iter = txn.new_iterator(&opts);
+                iter.rewind();
+                while iter.valid() {
+                    let item = iter.item();
+                    assert_eq!(item.value().len(), value_size);
+                    total
+                        .data
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    iter.next();
+                    let now = std::time::Instant::now();
+                    if now.duration_since(lst_report) >= Duration::from_secs(1) {
+                        lst_report = now;
+                        println!(
+                            "{}, rate: {}, total: {}",
+                            now.duration_since(begin).as_secs_f64(),
+                            total.rate(),
+                            total.now()
+                        );
+                    }
+                }
+            }
+            let now = std::time::Instant::now();
+            println!(
+                "read total {} keys in {}",
+                total.now(),
+                now.duration_since(begin).as_secs_f64()
+            )
+        }
         #[cfg(feature = "enable-rocksdb")]
         ("rocks_populate", Some(sub_matches)) => {
             let key_nums: u64 = sub_matches.value_of("key_nums").unwrap().parse().unwrap();
@@ -404,6 +468,46 @@ fn main() {
                 }
             }
             pb.finish_with_message("done");
+        }
+        #[cfg(feature = "enable-rocksdb")]
+        ("rocks_iterate", Some(sub_matches)) => {
+            let times: u64 = sub_matches.value_of("times").unwrap().parse().unwrap();
+            let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
+
+            let mut opts = rocksdb::Options::default();
+            opts.create_if_missing(true);
+            opts.set_compression_type(rocksdb::DBCompressionType::None);
+            let db = Arc::new(rocksdb::DB::open(&opts, directory).unwrap());
+
+            let begin = std::time::Instant::now();
+            let mut lst_report = std::time::Instant::now();
+            let mut total = Rate::new();
+
+            for _ in 0..times {
+                let iter = db.iterator(rocksdb::IteratorMode::Start);
+                for (_, value) in iter {
+                    assert_eq!(value.len(), value_size);
+                    total
+                        .data
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let now = std::time::Instant::now();
+                    if now.duration_since(lst_report) >= Duration::from_secs(1) {
+                        lst_report = now;
+                        println!(
+                            "{}, rate: {}, total: {}",
+                            now.duration_since(begin).as_secs_f64(),
+                            total.rate(),
+                            total.now()
+                        );
+                    }
+                }
+            }
+            let now = std::time::Instant::now();
+            println!(
+                "read total {} keys in {}",
+                total.now(),
+                now.duration_since(begin).as_secs_f64()
+            )
         }
         _ => panic!("unsupported command"),
     }
