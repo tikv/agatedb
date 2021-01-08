@@ -4,12 +4,17 @@ version = "0.1.0"
 authors = ["Alex Chi <iskyzh@gmail.com>"]
 edition = "2018"
 
+[features]
+default = []
+enable-rocksdb = ["rocksdb"]
+
 [dependencies]
 agatedb = { path = "../" }
 bytes = "1.0"
 clap = "2.33"
 indicatif = "0.15"
 rand = "0.7"
+rocksdb = { version = "0.15", optional = true }
 threadpool = "1.8"
 yatp = { git = "https://github.com/tikv/yatp.git" }
 

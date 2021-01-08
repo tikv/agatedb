@@ -87,6 +87,24 @@ fn main() {
             (@arg value_size: --value_size +takes_value default_value("1024") "value size")
             (@arg chunk_size: --chunk_size +takes_value default_value("1000") "pairs in one txn")
         )
+        (@subcommand rocks_populate =>
+            (about: "build a database with given keys")
+            (version: "1.0")
+            (author: "Alex Chi <iskyzh@gmail.com>")
+            (@arg key_nums: --key_nums +takes_value default_value("1024") "key numbers")
+            (@arg seq: --seq +takes_value default_value("true") "write sequentially")
+            (@arg value_size: --value_size +takes_value default_value("1024") "value size")
+            (@arg chunk_size: --chunk_size +takes_value default_value("1000") "pairs in one txn")
+        )
+        (@subcommand rocks_randread =>
+            (about: "randomly read from database")
+            (version: "1.0")
+            (author: "Alex Chi <iskyzh@gmail.com>")
+            (@arg key_nums: --key_nums +takes_value default_value("1024") "key numbers")
+            (@arg times: --times +takes_value default_value("5") "read how many times")
+            (@arg value_size: --value_size +takes_value default_value("1024") "value size")
+            (@arg chunk_size: --chunk_size +takes_value default_value("1000") "pairs in one txn")
+        )
     )
     .get_matches();
 
@@ -217,6 +235,147 @@ fn main() {
                                     } else {
                                         panic!("{:?}", err);
                                     }
+                                }
+                            }
+                        }
+                        tx.send(()).unwrap();
+                    });
+                    expected += 1;
+                }
+            }
+
+            let begin = std::time::Instant::now();
+
+            for _ in rx.iter().take(expected) {
+                let now = std::time::Instant::now();
+                let delta = now.duration_since(last_report);
+                last_report = now;
+                if delta > std::time::Duration::from_secs(1) {
+                    println!(
+                        "{}, rate: {}, found: {}, missing: {}",
+                        now.duration_since(begin).as_secs_f64(),
+                        (found.rate() + missing.rate()) as f64 / delta.as_secs_f64(),
+                        found.now(),
+                        missing.now()
+                    );
+                }
+            }
+            pb.finish_with_message("done");
+        }
+        #[cfg(feature = "enable-rocksdb")]
+        ("rocks_populate", Some(sub_matches)) => {
+            let key_nums: u64 = sub_matches.value_of("key_nums").unwrap().parse().unwrap();
+            let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
+            let chunk_size: u64 = sub_matches.value_of("chunk_size").unwrap().parse().unwrap();
+            let mut opts = rocksdb::Options::default();
+            opts.create_if_missing(true);
+            opts.set_compression_type(rocksdb::DBCompressionType::None);
+
+            let db = Arc::new(rocksdb::DB::open(&opts, directory).unwrap());
+            let mut expected = 0;
+            // let pb = ProgressBar::new(key_nums);
+            let pb = ProgressBar::hidden();
+            pb.set_style(ProgressStyle::default_bar()
+            .template(
+                "{prefix:.bold.dim} [{elapsed_precise}] [{bar:40}] [{per_sec}] ({pos}/{len}) {msg}",
+            )
+            .progress_chars("=> "));
+
+            let mut write = Rate::new();
+            let mut last_report = std::time::Instant::now();
+
+            let seq: bool = sub_matches.value_of("seq").unwrap().parse().unwrap();
+
+            if seq {
+                println!("writing sequentially");
+            }
+
+            for i in 0..key_nums / chunk_size {
+                let db = db.clone();
+                let tx = tx.clone();
+                let write = write.data.clone();
+                pool.execute(move || {
+                    let range = (i * chunk_size)..((i + 1) * chunk_size);
+                    let mut batch = rocksdb::WriteBatch::default();
+                    let mut rng = rand::thread_rng();
+                    for j in range {
+                        let (key, value) = if seq {
+                            gen_kv_pair(j, value_size)
+                        } else {
+                            gen_kv_pair(rng.gen_range(0, key_nums), value_size)
+                        };
+                        batch.put(key, value);
+                        write.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    db.write(batch).unwrap();
+                    tx.send(()).unwrap();
+                });
+                expected += 1;
+            }
+
+            let begin = std::time::Instant::now();
+
+            for _ in rx.iter().take(expected) {
+                pb.inc(chunk_size);
+                let now = std::time::Instant::now();
+                let delta = now.duration_since(last_report);
+                if delta > std::time::Duration::from_secs(1) {
+                    last_report = now;
+                    println!(
+                        "{}, rate: {}, total: {}",
+                        now.duration_since(begin).as_secs_f64(),
+                        write.rate() as f64 / delta.as_secs_f64(),
+                        write.now()
+                    );
+                }
+            }
+            pb.finish_with_message("done");
+        }
+        #[cfg(feature = "enable-rocksdb")]
+        ("rocks_randread", Some(sub_matches)) => {
+            let key_nums: u64 = sub_matches.value_of("key_nums").unwrap().parse().unwrap();
+            let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
+            let chunk_size: u64 = sub_matches.value_of("chunk_size").unwrap().parse().unwrap();
+            let times: u64 = sub_matches.value_of("times").unwrap().parse().unwrap();
+            let mut opts = rocksdb::Options::default();
+            opts.create_if_missing(true);
+            opts.set_compression_type(rocksdb::DBCompressionType::None);
+
+            let db = Arc::new(rocksdb::DB::open(&opts, directory).unwrap());
+            let mut expected = 0;
+            let pb = ProgressBar::new(key_nums * times);
+            pb.set_style(ProgressStyle::default_bar()
+            .template(
+                "{prefix:.bold.dim} [{elapsed_precise}] [{bar:40}] [{per_sec}] ({pos}/{len}) {msg}",
+            )
+            .progress_chars("=> "));
+
+            let mut missing = Rate::new();
+            let mut found = Rate::new();
+            let mut last_report = std::time::Instant::now();
+
+            for _ in 0..times {
+                for i in 0..key_nums / chunk_size {
+                    let db = db.clone();
+                    let tx = tx.clone();
+                    let missing = missing.data.clone();
+                    let found = found.data.clone();
+                    pool.execute(move || {
+                        let range = (i * chunk_size)..((i + 1) * chunk_size);
+                        let mut rng = rand::thread_rng();
+                        for _ in range {
+                            let (key, _) = gen_kv_pair(rng.gen_range(0, key_nums), value_size);
+                            match db.get(&key) {
+                                Ok(Some(value)) => {
+                                    assert_eq!(value.len(), value_size);
+                                    found.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                }
+                                Ok(None) => {
+                                    missing.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                    continue;
+                                }
+                                Err(err) => {
+                                    panic!("{:?}", err);
                                 }
                             }
                         }
