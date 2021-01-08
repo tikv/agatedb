@@ -133,6 +133,7 @@ mod tests {
         })
     }
 
+    #[cfg(not(feature = "sanitizer-test"))]
     #[test]
     fn test_on_disk() {
         let mut options = generate_test_agate_options();
@@ -140,6 +141,7 @@ mod tests {
         test_with_options(options);
     }
 
+    #[cfg(not(feature = "sanitizer-test"))]
     #[test]
     fn test_in_memory() {
         let mut opts = generate_test_agate_options();

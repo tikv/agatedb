@@ -24,7 +24,6 @@ enum_dispatch = "0.3"
 crossbeam-channel = "0.5"
 crc32fast = "1.2"
 yatp = { git = "https://github.com/tikv/yatp.git" }
-syn = { version = "= 1.0.57", features = ["full", "extra-traits"] }
 
 [dev-dependencies]
 criterion = "0.3"
