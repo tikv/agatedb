@@ -250,8 +250,8 @@ fn main() {
             for _ in rx.iter().take(expected) {
                 let now = std::time::Instant::now();
                 let delta = now.duration_since(last_report);
-                last_report = now;
                 if delta > std::time::Duration::from_secs(1) {
+                    last_report = now;
                     println!(
                         "{}, rate: {}, found: {}, missing: {}",
                         now.duration_since(begin).as_secs_f64(),
@@ -436,8 +436,8 @@ fn main() {
             for _ in rx.iter().take(expected) {
                 let now = std::time::Instant::now();
                 let delta = now.duration_since(last_report);
-                last_report = now;
                 if delta > std::time::Duration::from_secs(1) {
+                    last_report = now;
                     println!(
                         "{}, rate: {}, found: {}, missing: {}",
                         now.duration_since(begin).as_secs_f64(),
