@@ -105,7 +105,7 @@ static FAILED: AtomicBool = AtomicBool::new(false);
 
 pub fn no_fail<T>(result: Result<T>, id: &str) {
     if let Err(err) = result {
-        println!("WARN: {}, {:?}", id, err);
+        eprintln!("WARN: {}, {:?}", id, err);
         FAILED.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }

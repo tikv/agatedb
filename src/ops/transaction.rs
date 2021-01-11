@@ -465,23 +465,23 @@ mod tests {
             let key = Bytes::from("233333".to_string());
             let val = Bytes::from("23333333333".to_string());
             let mut txn = agate.new_transaction_at(2333333, true);
-            println!("---started---");
+            eprintln!("---started---");
             txn.set(key.clone(), val.clone()).unwrap();
-            println!("---set---");
+            eprintln!("---set---");
             txn.commit_at(2333334).unwrap();
-            println!("---commit---");
+            eprintln!("---commit---");
             let txn = agate.new_transaction_at(2333335, false);
-            println!("---started---");
+            eprintln!("---started---");
             assert_eq!(txn.get(&key).unwrap().vptr, val);
-            println!("---get---");
+            eprintln!("---get---");
             txn.commit_at(2333336).unwrap();
-            println!("---commit---");
+            eprintln!("---commit---");
             let txn = agate.new_transaction_at(2333332, false);
-            println!("---started---");
+            eprintln!("---started---");
             assert!(txn.get(&key).is_err());
-            println!("---get---");
+            eprintln!("---get---");
             txn.commit_at(2333337).unwrap();
-            println!("---commit---");
+            eprintln!("---commit---");
         });
     }
 }

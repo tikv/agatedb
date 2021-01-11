@@ -515,7 +515,7 @@ impl Core {
 
                 mts.use_new_table(Arc::new(memtable));
 
-                println!(
+                eprintln!(
                     "memtable flushed, total={}, mt.size = {}",
                     mts.nums_of_memtable(),
                     mem_size
@@ -585,7 +585,7 @@ impl Core {
     }
 
     fn flush_memtable(&self) -> Result<()> {
-        println!("start flushing memtables");
+        eprintln!("start flushing memtables");
         for ft in &self.flush_channel.1 {
             if let Some(ft) = ft {
                 let flush_id = ft.mt.id();
@@ -596,7 +596,7 @@ impl Core {
                         mts.pop_imm();
                     }
                     Err(err) => {
-                        println!("error while flushing memtable to disk: {:?}", err);
+                        eprintln!("error while flushing memtable to disk: {:?}", err);
                         std::thread::sleep(std::time::Duration::from_secs(1));
                     }
                 }
@@ -637,13 +637,13 @@ impl Core {
 
                 while let Err(_) = self.ensure_room_for_write() {
                     std::thread::sleep(std::time::Duration::from_millis(10));
-                    // println!("wait for room... {:?}", err)
+                    // eprintln!("wait for room... {:?}", err)
                 }
 
                 self.write_to_lsm(req)?;
             }
 
-            // println!("{} entries written", cnt);
+            // eprintln!("{} entries written", cnt);
 
             Ok(())
         };
@@ -703,7 +703,7 @@ impl Core {
         core: Arc<Self>,
         pool: Arc<yatp::ThreadPool<yatp::task::callback::TaskCell>>,
     ) -> Result<()> {
-        println!("start doing writes");
+        eprintln!("start doing writes");
 
         let (pending_tx, pending_rx) = bounded(1);
 
@@ -755,7 +755,7 @@ impl Core {
                 let core = core.clone();
                 pool.spawn(move |_: &mut Handle<'_>| {
                     if let Err(err) = core.write_requests(reqs) {
-                        println!("failed to write: {:?}", err);
+                        eprintln!("failed to write: {:?}", err);
                     }
                     rx.recv().ok();
                 })
@@ -770,7 +770,7 @@ impl Core {
                     }
                     default => {
                         if let Err(err) = core.write_requests(reqs) {
-                            println!("failed to write: {:?}", err);
+                            eprintln!("failed to write: {:?}", err);
                         }
                         return Ok(());
                     }
@@ -832,7 +832,7 @@ pub(crate) mod tests {
         result.sort();
 
         for path in result {
-            println!("{:?}", path);
+            eprintln!("{:?}", path);
         }
     }
 
@@ -865,11 +865,11 @@ pub(crate) mod tests {
 
             let mut agate = options.open(&tmp_dir).unwrap();
             f(&mut agate);
-            println!("---agate directory---");
+            eprintln!("---agate directory---");
             helper_dump_dir(tmp_dir.path());
             helper_dump_levels(&agate.core.lvctl);
             drop(agate);
-            println!("---after close---");
+            eprintln!("---after close---");
             helper_dump_dir(tmp_dir.path());
             tmp_dir.close().unwrap();
             tx.send(()).expect("failed to complete test");
@@ -967,7 +967,7 @@ pub(crate) mod tests {
             for request in requests.chunks(100) {
                 agate.write_requests(request.to_vec()).unwrap();
             }
-            println!("verifying requests...");
+            eprintln!("verifying requests...");
             verify_requests(10000, &agate);
         });
     }

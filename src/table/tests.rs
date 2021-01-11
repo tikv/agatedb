@@ -408,7 +408,7 @@ fn test_table_checksum() {
         let result = Table::open_in_memory(Bytes::from(table_data), 233, opts.clone());
         assert!(result.is_err());
         if !matches!(result, Err(Error::InvalidChecksum(_))) {
-            println!(
+            eprintln!(
                 "expected invalid checksum error, found {:?}",
                 result.err().unwrap()
             );

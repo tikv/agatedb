@@ -4,9 +4,9 @@ use crate::{db::tests::with_agate_test, table::new_filename, Agate, TableOptions
 pub fn helper_dump_levels(lvctl: &LevelsController) {
     for level in &lvctl.core.levels {
         let level = level.read().unwrap();
-        println!("--- Level {} ---", level.level);
+        eprintln!("--- Level {} ---", level.level);
         for table in &level.tables {
-            println!(
+            eprintln!(
                 "#{} ({:?} - {:?}, {})",
                 table.id(),
                 table.smallest(),
@@ -187,7 +187,7 @@ fn get_all_and_check(agate: &mut Agate, expected: Vec<KeyValVersion>) {
             iter.rewind();
             while iter.valid() {
                 let it = iter.item();
-                println!("key={:?} val={:?}", it.key, it.vptr);
+                eprintln!("key={:?} val={:?}", it.key, it.vptr);
                 iter.next();
             }
             iter.rewind();
@@ -987,7 +987,7 @@ mod miscellaneous {
             result,
         } in cases
         {
-            println!("running {}", name);
+            eprintln!("running {}", name);
             with_agate_test(move |agate| {
                 for (level, data) in levels.into_iter().enumerate() {
                     for val in data {
@@ -997,7 +997,7 @@ mod miscellaneous {
                 for item in result {
                     let key = key_with_ts(BytesMut::from(&item.key[..]), item.version as u64);
                     let vs = agate.get(&key).unwrap();
-                    println!("item={:?}", item);
+                    eprintln!("item={:?}", item);
                     assert_eq!(item.value, vs.value);
                 }
             })
