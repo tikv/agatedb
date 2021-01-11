@@ -198,8 +198,8 @@ impl CompactStatus {
         if !found {
             let this = compact_def.this_range.clone();
             let next = compact_def.next_range.clone();
-            println!("looking for {:?} in this level", this);
-            println!("looking for {:?} in next level", next);
+            eprintln!("looking for {:?} in this level", this);
+            eprintln!("looking for {:?} in next level", next);
             panic!("key range not found");
         }
 

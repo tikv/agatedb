@@ -26,7 +26,7 @@ fn bench_iterator(c: &mut Criterion) {
     let key = |i| Bytes::from(format!("{:06}", i));
     let val = Bytes::from("ok");
 
-    println!("generating tables...");
+    eprintln!("generating tables...");
 
     for chunk in (0..N).collect::<Vec<_>>().chunks(10) {
         let mut txn = db.new_transaction_at(unix_time(), true);
@@ -45,7 +45,7 @@ fn bench_iterator(c: &mut Criterion) {
         .filter(|x| x.ends_with(".sst"))
         .count();
 
-    println!("LSM files: {}", lsm_files);
+    eprintln!("LSM files: {}", lsm_files);
 
     c.bench_function("iterate noprefix single key", |b| {
         b.iter(|| {

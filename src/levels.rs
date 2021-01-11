@@ -66,7 +66,7 @@ impl Core {
         let mut num_opened = 0;
         tables.resize(opts.max_levels, vec![]);
 
-        println!("{:?}", manifest_data);
+        eprintln!("{:?}", manifest_data);
 
         // TODO: parallel open tables
         for (id, table_manifest) in manifest_data.tables {
@@ -82,7 +82,7 @@ impl Core {
             num_opened += 1;
         }
 
-        println!("{} tables opened", num_opened);
+        eprintln!("{} tables opened", num_opened);
 
         for (i, tables) in tables.into_iter().enumerate() {
             let mut level = LevelHandler::new(opts.clone(), i);
@@ -127,7 +127,7 @@ impl Core {
             let duration = current.duration_since(start);
             if duration.as_millis() > 1000 {
                 if current.duration_since(last_log).as_millis() > 1000 {
-                    println!("L0 stalled for {} ms", duration.as_millis());
+                    eprintln!("L0 stalled for {} ms", duration.as_millis());
                     last_log = current;
                 }
             }
@@ -308,7 +308,7 @@ impl Core {
             let (left, right) = next_level.overlapping_tables(&compact_def.this_range);
 
             if right < left {
-                println!("right {} is less than left {} in overlapping_tables for current level {}, next level {}, key_range {:?}",
+                eprintln!("right {} is less than left {} in overlapping_tables for current level {}, next level {}, key_range {:?}",
                     right, left, compact_def.this_level_id,
                     compact_def.next_level_id, compact_def.this_range);
                 continue;
@@ -592,7 +592,7 @@ impl Core {
             tables.push(table);
         }
 
-        println!(
+        eprintln!(
             "compactor {}, sub_compact took {} mills, produce {} tables, added {} keys, skipped {} keys",
             compact_def.compactor_id,
             std::time::Instant::now()
@@ -676,13 +676,13 @@ impl Core {
             self.fill_tables(&mut compact_def)?;
         };
         if let Err(err) = self.run_compact_def(idx, level, &mut compact_def) {
-            println!("failed on compaction {:?}", err);
+            eprintln!("failed on compaction {:?}", err);
             self.cpt_status.write().unwrap().delete(&compact_def);
         }
 
         // TODO: will compact_def be used now?
 
-        println!(
+        eprintln!(
             "compactor #{} on level {} success",
             idx, compact_def.this_level_id
         );
@@ -851,7 +851,7 @@ impl LevelsController {
                     prios = move_l0_to_front(prios);
                 }
 
-                // println!("{:?}", prios);
+                // eprintln!("{:?}", prios);
 
                 for p in prios {
                     if idx == 0 && p.level == 0 {
@@ -862,7 +862,7 @@ impl LevelsController {
 
                     // TODO: handle error
                     if let Err(_err) = core.do_compact(idx, p) {
-                        // println!("error while compaction: {:?}", err);
+                        // eprintln!("error while compaction: {:?}", err);
                     }
                 }
             };
