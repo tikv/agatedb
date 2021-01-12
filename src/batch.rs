@@ -108,9 +108,7 @@ impl WriteBatch {
 #[cfg(test)]
 mod tests {
     use crate::{
-        db::tests::{
-            generate_test_agate_options, with_agate_test, with_agate_test_options, with_payload,
-        },
+        db::tests::{generate_test_agate_options, with_agate_test, with_agate_test_options},
         AgateOptions,
     };
     use bytes::Bytes;

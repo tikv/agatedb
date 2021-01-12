@@ -34,7 +34,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use bytes::{BufMut, Bytes, BytesMut};
-use crossbeam_channel::{select, tick};
+use crossbeam_channel::{select, tick, unbounded};
 use yatp::task::callback::Handle;
 
 pub(crate) struct Core {
@@ -342,10 +342,11 @@ impl Core {
     }
 
     fn run_compact_def(
-        &self,
+        self: &Arc<Self>,
         _idx: usize,
         level: usize,
         compact_def: &mut CompactDef,
+        pool: Arc<yatp::ThreadPool<yatp::task::callback::TaskCell>>,
     ) -> Result<()> {
         if compact_def.targets.file_size.len() == 0 {
             return Err(Error::CustomError("targets not set".to_string()));
@@ -367,7 +368,7 @@ impl Core {
             compact_def.splits.push(KeyRange::default());
         }
 
-        let new_tables = self.compact_build_tables(level, compact_def)?;
+        let new_tables = self.compact_build_tables(level, compact_def, &pool)?;
 
         let change_set = build_change_set(&compact_def, &new_tables);
         self.manifest.add_changes(change_set.changes)?;
@@ -388,7 +389,12 @@ impl Core {
         Ok(())
     }
 
-    fn compact_build_tables(&self, level: usize, compact_def: &CompactDef) -> Result<Vec<Table>> {
+    fn compact_build_tables(
+        self: &Arc<Self>,
+        level: usize,
+        compact_def: &CompactDef,
+        _pool: &yatp::ThreadPool<yatp::task::callback::TaskCell>,
+    ) -> Result<Vec<Table>> {
         // TODO: this implementation is very very trivial
 
         // TODO: check prefix
@@ -400,7 +406,9 @@ impl Core {
             valid.push(table.clone());
         }
 
-        let make_iterator = || {
+        let valid = Arc::new(valid);
+
+        let make_iterator = move |compact_def: &CompactDef, valid: &[Table]| {
             let mut iters = vec![];
 
             if level == 0 {
@@ -415,7 +423,7 @@ impl Core {
                     compact_def.top[0].new_iterator(crate::table::ITERATOR_NOCACHE),
                 )));
             }
-            for table in &valid {
+            for table in valid {
                 iters.push(Box::new(TableIterators::from(
                     table.new_iterator(crate::table::ITERATOR_NOCACHE),
                 )));
@@ -424,20 +432,34 @@ impl Core {
         };
 
         let mut new_tables = vec![];
-
-        // TODO: multi-thread compaction
-
+        let (tx, rx) = unbounded();
+        let compact_def = Arc::new(compact_def.clone());
         for kr in &compact_def.splits {
-            let iters = make_iterator();
-            if iters.is_empty() {
-                // TODO: iters should not be empty
-                continue;
+            let kr = kr.clone();
+            let compact_def = compact_def.clone();
+            let this = self.clone();
+            let valid = valid.clone();
+            let tx = tx.clone();
+            // TODO: currently, the thread will never wake up when using yatp. So we use std::thread instead.
+            std::thread::spawn(move || {
+                let iters = make_iterator(&compact_def, &valid);
+                if iters.is_empty() {
+                    // TODO: iters should not be empty
+                    tx.send(None).ok();
+                }
+                tx.send(Some(this.sub_compact(
+                    MergeIterator::from_iterators(iters, false),
+                    &kr,
+                    &compact_def,
+                )))
+                .ok();
+            });
+        }
+
+        for table in rx.iter().take(compact_def.splits.len()) {
+            if let Some(table) = table {
+                new_tables.append(&mut table?);
             }
-            new_tables.append(&mut self.sub_compact(
-                MergeIterator::from_iterators(iters, false),
-                kr,
-                compact_def,
-            )?);
         }
 
         // TODO: sync dir
@@ -447,7 +469,7 @@ impl Core {
     }
 
     fn sub_compact(
-        &self,
+        self: &Arc<Self>,
         mut iter: Box<TableIterators>,
         kr: &KeyRange,
         compact_def: &CompactDef,
@@ -636,7 +658,12 @@ impl Core {
     }
 
     // pick some tables on that level and compact it to next level
-    fn do_compact(&self, idx: usize, mut cpt_prio: CompactionPriority) -> Result<()> {
+    fn do_compact(
+        self: &Arc<Self>,
+        idx: usize,
+        mut cpt_prio: CompactionPriority,
+        pool: Arc<yatp::ThreadPool<yatp::task::callback::TaskCell>>,
+    ) -> Result<()> {
         let level = cpt_prio.level;
 
         assert!(level + 1 < self.opts.max_levels);
@@ -675,7 +702,7 @@ impl Core {
             );
             self.fill_tables(&mut compact_def)?;
         };
-        if let Err(err) = self.run_compact_def(idx, level, &mut compact_def) {
+        if let Err(err) = self.run_compact_def(idx, level, &mut compact_def, pool) {
             eprintln!("failed on compaction {:?}", err);
             self.cpt_status.write().unwrap().delete(&compact_def);
         }
@@ -828,10 +855,11 @@ impl LevelsController {
         &self,
         idx: usize,
         closer: Closer,
-        pool: &yatp::ThreadPool<yatp::task::callback::TaskCell>,
+        pool: Arc<yatp::ThreadPool<yatp::task::callback::TaskCell>>,
     ) {
         let _max_levels = self.core.opts.max_levels;
         let core = self.core.clone();
+        let pool_c = pool.clone();
         pool.spawn(move |_: &mut Handle<'_>| {
             let move_l0_to_front =
                 |prios: Vec<CompactionPriority>| match prios.iter().position(|x| x.level == 0) {
@@ -861,7 +889,7 @@ impl LevelsController {
                     }
 
                     // TODO: handle error
-                    if let Err(_err) = core.do_compact(idx, p) {
+                    if let Err(_err) = core.do_compact(idx, p, pool_c.clone()) {
                         // eprintln!("error while compaction: {:?}", err);
                     }
                 }
@@ -881,10 +909,10 @@ impl LevelsController {
     pub fn start_compact(
         &self,
         closer: Closer,
-        pool: &yatp::ThreadPool<yatp::task::callback::TaskCell>,
+        pool: Arc<yatp::ThreadPool<yatp::task::callback::TaskCell>>,
     ) {
         for i in 0..self.core.opts.num_compactors {
-            self.run_compactor(i, closer.clone(), pool);
+            self.run_compactor(i, closer.clone(), pool.clone());
         }
     }
 

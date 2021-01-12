@@ -49,7 +49,7 @@ pub struct Core {
 pub struct Agate {
     pub(crate) core: Arc<Core>,
     closer: Closer,
-    pool: Arc<yatp::ThreadPool<yatp::task::callback::TaskCell>>,
+    pub(crate) pool: Arc<yatp::ThreadPool<yatp::task::callback::TaskCell>>,
 }
 
 struct FlushTask {
@@ -86,8 +86,8 @@ impl Agate {
         let closer = Closer::new();
         let pool = Arc::new(
             yatp::Builder::new("agatedb")
-                .max_thread_count(core.opts.num_compactors * 6 + 2)
-                .min_thread_count(core.opts.num_compactors * 3 + 2)
+                .max_thread_count(core.opts.num_compactors * 8 + 2)
+                .min_thread_count(core.opts.num_compactors * 5 + 2)
                 .build_callback_pool(),
         );
 
@@ -112,7 +112,7 @@ impl Agate {
             .core
             .clone()
             .lvctl
-            .start_compact(closer.clone(), &agate.pool);
+            .start_compact(closer.clone(), agate.pool.clone());
 
         // flush all memtables
         let num_of_memtables = agate.core.mts.read().unwrap().nums_of_memtable();
