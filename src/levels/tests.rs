@@ -25,11 +25,12 @@ macro_rules! kv {
 
 macro_rules! run_compact {
     ($agate: expr, $level: expr, $compact_def: expr) => {
+        let pool = $agate.pool.clone();
         $agate
             .core
             .lvctl
             .core
-            .run_compact_def(std::usize::MAX, $level, &mut $compact_def)
+            .run_compact_def(std::usize::MAX, $level, &mut $compact_def, pool)
             .unwrap();
     };
 }
@@ -286,7 +287,7 @@ mod compaction {
                 .core
                 .lvctl
                 .core
-                .run_compact_def(std::usize::MAX, 0, &mut compact_def)
+                .run_compact_def(std::usize::MAX, 0, &mut compact_def, agate.pool.clone())
                 .unwrap();
             get_all_and_check(
                 agate,
@@ -320,7 +321,7 @@ mod compaction {
                 .core
                 .lvctl
                 .core
-                .run_compact_def(std::usize::MAX, 0, &mut compact_def)
+                .run_compact_def(std::usize::MAX, 0, &mut compact_def, agate.pool.clone())
                 .unwrap();
             get_all_and_check(
                 agate,
@@ -359,7 +360,7 @@ mod compaction {
                 .core
                 .lvctl
                 .core
-                .run_compact_def(std::usize::MAX, 0, &mut compact_def)
+                .run_compact_def(std::usize::MAX, 0, &mut compact_def, agate.pool.clone())
                 .unwrap();
 
             get_all_and_check(
@@ -397,7 +398,7 @@ mod compaction {
                 .core
                 .lvctl
                 .core
-                .run_compact_def(std::usize::MAX, 1, &mut compact_def)
+                .run_compact_def(std::usize::MAX, 1, &mut compact_def, agate.pool.clone())
                 .unwrap();
 
             get_all_and_check(
@@ -438,7 +439,7 @@ mod compaction {
                 .core
                 .lvctl
                 .core
-                .run_compact_def(std::usize::MAX, 1, &mut compact_def)
+                .run_compact_def(std::usize::MAX, 1, &mut compact_def, agate.pool.clone())
                 .unwrap();
 
             get_all_and_check(
@@ -479,7 +480,7 @@ mod compaction {
                 .core
                 .lvctl
                 .core
-                .run_compact_def(std::usize::MAX, 1, &mut compact_def)
+                .run_compact_def(std::usize::MAX, 1, &mut compact_def, agate.pool.clone())
                 .unwrap();
 
             get_all_and_check(
@@ -520,7 +521,7 @@ mod compaction {
                 .core
                 .lvctl
                 .core
-                .run_compact_def(std::usize::MAX, 1, &mut compact_def)
+                .run_compact_def(std::usize::MAX, 1, &mut compact_def, agate.pool.clone())
                 .unwrap();
 
             get_all_and_check(agate, vec![kv!("fooo", "barr", 2, 0)]);
@@ -564,7 +565,7 @@ mod compaction {
                 .core
                 .lvctl
                 .core
-                .run_compact_def(std::usize::MAX, 1, &mut compact_def)
+                .run_compact_def(std::usize::MAX, 1, &mut compact_def, agate.pool.clone())
                 .unwrap();
 
             get_all_and_check(
