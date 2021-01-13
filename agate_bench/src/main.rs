@@ -341,6 +341,10 @@ fn main() {
                 let tx = tx.clone();
                 let write = write.data.clone();
                 pool.execute(move || {
+                    let mut write_options = rocksdb::WriteOptions::default();
+                    write_options.set_sync(true);
+                    write_options.disable_wal(false);
+
                     let range = (i * chunk_size)..((i + 1) * chunk_size);
                     let mut batch = rocksdb::WriteBatch::default();
                     let mut rng = rand::thread_rng();
@@ -353,7 +357,7 @@ fn main() {
                         batch.put(key, value);
                         write.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
-                    db.write(batch).unwrap();
+                    db.write_opt(batch, &write_options).unwrap();
                     tx.send(()).unwrap();
                 });
                 expected += 1;
