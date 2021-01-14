@@ -3,6 +3,7 @@ use bytes::{Bytes, BytesMut};
 use clap::clap_app;
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::Rng;
+use rocksdb::Writable;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{sync::mpsc::channel, time::Duration};
@@ -312,9 +313,13 @@ fn main() {
             let key_nums: u64 = sub_matches.value_of("key_nums").unwrap().parse().unwrap();
             let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
             let chunk_size: u64 = sub_matches.value_of("chunk_size").unwrap().parse().unwrap();
-            let mut opts = rocksdb::TitanOptions::default();
+
+            let mut tdb_opts = rocksdb::TitanDBOptions::new();
+            tdb_opts.set_dirname(&directory);
+            let mut opts = rocksdb::DBOptions::default();
             opts.create_if_missing(true);
-            opts.set_compression_type(rocksdb::DBCompressionType::None);
+            opts.set_compression_type(rocksdb::DBCompressionType::No);
+            opts.set_titandb_options(&tdb_opts);
 
             let db = Arc::new(rocksdb::DB::open(&opts, directory).unwrap());
             let mut expected = 0;
@@ -353,10 +358,10 @@ fn main() {
                         } else {
                             gen_kv_pair(rng.gen_range(0, key_nums), value_size)
                         };
-                        batch.put(key, value);
+                        batch.put(&key[..], &value[..]);
                         write.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
-                    db.write_opt(batch, &write_options).unwrap();
+                    db.write_opt(&batch, &write_options).unwrap();
                     tx.send(()).unwrap();
                 });
                 expected += 1;
@@ -385,9 +390,13 @@ fn main() {
             let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
             let chunk_size: u64 = sub_matches.value_of("chunk_size").unwrap().parse().unwrap();
             let times: u64 = sub_matches.value_of("times").unwrap().parse().unwrap();
-            let mut opts = rocksdb::TitanOptions::default();
+
+            let mut tdb_opts = rocksdb::TitanDBOptions::new();
+            tdb_opts.set_dirname(&directory);
+            let mut opts = rocksdb::DBOptions::default();
             opts.create_if_missing(true);
-            opts.set_compression_type(rocksdb::DBCompressionType::None);
+            opts.set_compression_type(rocksdb::DBCompressionType::No);
+            opts.set_titandb_options(&tdb_opts);
 
             let db = Arc::new(rocksdb::DB::open(&opts, directory).unwrap());
             let mut expected = 0;
@@ -455,9 +464,13 @@ fn main() {
             let times: u64 = sub_matches.value_of("times").unwrap().parse().unwrap();
             let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
 
-            let mut opts = rocksdb::TitanOptions::default();
+            let mut tdb_opts = rocksdb::TitanDBOptions::new();
+            tdb_opts.set_dirname(&directory);
+            let mut opts = rocksdb::DBOptions::default();
             opts.create_if_missing(true);
-            opts.set_compression_type(rocksdb::DBCompressionType::None);
+            opts.set_compression_type(rocksdb::DBCompressionType::No);
+            opts.set_titandb_options(&tdb_opts);
+
             let db = Arc::new(rocksdb::DB::open(&opts, directory).unwrap());
 
             let begin = std::time::Instant::now();
@@ -465,9 +478,9 @@ fn main() {
             let mut total = Rate::new();
 
             for _ in 0..times {
-                let iter = db.iterator(rocksdb::IteratorMode::Start);
-                for (key, value) in iter {
-                    assert_eq!(value.len(), value_size);
+                let iter = db.iter();
+                while iter.valid().unwrap() {
+                    assert_eq!(iter.value().len(), value_size);
                     total
                         .data
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -481,6 +494,7 @@ fn main() {
                             total.now()
                         );
                     }
+                    let _ = iter.next();
                 }
             }
             let now = std::time::Instant::now();
