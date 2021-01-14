@@ -6,7 +6,7 @@ edition = "2018"
 
 [features]
 default = []
-enable-rocksdb = ["rocksdb"]
+enable-rocksdb = []
 
 [dependencies]
 agatedb = { path = "../" }
@@ -15,7 +15,9 @@ rand = "0.7"
 bytes = "1.0"
 indicatif = "0.15"
 threadpool = "1.8"
-rocksdb = { version = "0.15", optional = true }
+
+[dependencies.rocksdb]
+git = "https://github.com/tikv/rust-rocksdb.git"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.4.0"

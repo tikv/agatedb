@@ -308,12 +308,11 @@ fn main() {
                 now.duration_since(begin).as_secs_f64()
             )
         }
-        #[cfg(feature = "enable-rocksdb")]
         ("rocks_populate", Some(sub_matches)) => {
             let key_nums: u64 = sub_matches.value_of("key_nums").unwrap().parse().unwrap();
             let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
             let chunk_size: u64 = sub_matches.value_of("chunk_size").unwrap().parse().unwrap();
-            let mut opts = rocksdb::Options::default();
+            let mut opts = rocksdb::TitanOptions::default();
             opts.create_if_missing(true);
             opts.set_compression_type(rocksdb::DBCompressionType::None);
 
@@ -381,13 +380,12 @@ fn main() {
             }
             pb.finish_with_message("done");
         }
-        #[cfg(feature = "enable-rocksdb")]
         ("rocks_randread", Some(sub_matches)) => {
             let key_nums: u64 = sub_matches.value_of("key_nums").unwrap().parse().unwrap();
             let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
             let chunk_size: u64 = sub_matches.value_of("chunk_size").unwrap().parse().unwrap();
             let times: u64 = sub_matches.value_of("times").unwrap().parse().unwrap();
-            let mut opts = rocksdb::Options::default();
+            let mut opts = rocksdb::TitanOptions::default();
             opts.create_if_missing(true);
             opts.set_compression_type(rocksdb::DBCompressionType::None);
 
@@ -453,12 +451,11 @@ fn main() {
             }
             pb.finish_with_message("done");
         }
-        #[cfg(feature = "enable-rocksdb")]
         ("rocks_iterate", Some(sub_matches)) => {
             let times: u64 = sub_matches.value_of("times").unwrap().parse().unwrap();
             let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
 
-            let mut opts = rocksdb::Options::default();
+            let mut opts = rocksdb::TitanOptions::default();
             opts.create_if_missing(true);
             opts.set_compression_type(rocksdb::DBCompressionType::None);
             let db = Arc::new(rocksdb::DB::open(&opts, directory).unwrap());
