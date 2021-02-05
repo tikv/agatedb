@@ -112,7 +112,7 @@ impl TableInner {
             .read(true)
             .write(true)
             .open(path)?;
-        f.write(&data)?;
+        f.write_all(&data)?;
         // TODO: pass file object directly to open and sync write
         drop(f);
         Self::open(path, opts)
@@ -256,10 +256,9 @@ impl TableInner {
         if idx >= self.offsets_length() {
             return Err(Error::TableRead("block out of index".to_string()));
         }
-        let block_offset = self.offsets(idx).ok_or(Error::TableRead(format!(
-            "failed to get offset block {}",
-            idx
-        )))?;
+        let block_offset = self
+            .offsets(idx)
+            .ok_or_else(|| Error::TableRead(format!("failed to get offset block {}", idx)))?;
 
         let offset = block_offset.offset as usize;
         let data = self.read(offset, block_offset.len as usize)?;
