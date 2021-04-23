@@ -299,7 +299,7 @@ impl<C: KeyComparator> Skiplist<C> {
         None
     }
 
-    pub fn iter_ref<'a>(&'a self) -> IterRef<&'a Skiplist<C>, C> {
+    pub fn iter_ref(&self) -> IterRef<&Skiplist<C>, C> {
         IterRef {
             list: self,
             cursor: ptr::null(),
