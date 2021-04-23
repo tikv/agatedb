@@ -12,84 +12,83 @@ use crate::{Error, Result, Table};
 /// Represents a range of keys from `left` to `right`
 /// TODO: use enum for this struct to represent infinite / finite range
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub struct KeyRange {
-    pub left: Bytes,
-    pub right: Bytes,
-    pub inf: bool,
+pub enum KeyRange {
+    Range { left: Bytes, right: Bytes },
+    Inf,
 }
 
 impl KeyRange {
-    pub fn is_empty(&self) -> bool {
-        if self.inf {
-            false
-        } else {
-            self.left.is_empty() && self.right.is_empty()
-        }
-    }
-
     pub fn inf() -> Self {
-        Self {
-            left: Bytes::new(),
-            right: Bytes::new(),
-            inf: true,
-        }
+        Self::Inf
     }
 
     pub fn new(left: Bytes, right: Bytes) -> Self {
-        Self {
-            left,
-            right,
-            inf: false,
-        }
+        assert!(COMPARATOR.compare_key(&left, &right) != std::cmp::Ordering::Greater);
+        Self::Range { left, right }
     }
 
     /// Extend current key range with another
-    pub fn extend(&mut self, range: &Self) {
-        if self.is_empty() {
-            *self = range.clone();
-            return;
-        }
-        if range.left.len() == 0
-            || COMPARATOR.compare_key(&range.left, &self.left) == std::cmp::Ordering::Less
-        {
-            self.left = range.left.clone();
-        }
-        if range.right.len() == 0
-            || COMPARATOR.compare_key(&range.left, &self.left) == std::cmp::Ordering::Greater
-        {
-            self.right = range.right.clone();
-        }
-        if range.inf {
-            self.inf = true;
-            self.left = Bytes::new();
-            self.right = Bytes::new();
+    pub fn extend(&self, other: &Self) -> Self {
+        use KeyRange::{Inf, Range};
+        match (self, other) {
+            (Inf, _) => Inf,
+            (_, Inf) => Inf,
+            (
+                Range {
+                    left: self_left,
+                    right: self_right,
+                },
+                Range {
+                    left: other_left,
+                    right: other_right,
+                },
+            ) => {
+                let left =
+                    if COMPARATOR.compare_key(other_left, self_left) == std::cmp::Ordering::Less {
+                        other_left
+                    } else {
+                        self_left
+                    }
+                    .clone();
+                let right = if COMPARATOR.compare_key(other_right, self_right)
+                    == std::cmp::Ordering::Greater
+                {
+                    other_right
+                } else {
+                    self_right
+                }
+                .clone();
+                Range { left, right }
+            }
         }
     }
 
     /// Check if two key ranges overlap
-    pub fn overlaps_with(&self, dst: &Self) -> bool {
-        if self.is_empty() {
-            return true;
-        }
-        if self.inf || dst.inf {
-            return true;
-        }
-        if COMPARATOR.compare_key(&self.left, &dst.right) == std::cmp::Ordering::Greater {
-            return false;
-        }
-        if COMPARATOR.compare_key(&self.right, &dst.left) == std::cmp::Ordering::Less {
-            return false;
-        }
-        true
-    }
-}
-
-impl Default for KeyRange {
-    fn default() -> Self {
-        Self {
-            left: Bytes::new(),
-            right: Bytes::new(),
-            inf: false,
+    pub fn overlaps_with(&self, other: &Self) -> bool {
+        use KeyRange::{Inf, Range};
+        match (self, other) {
+            (Inf, _) => true,
+            (_, Inf) => true,
+            (
+                Range {
+                    left: self_left,
+                    right: self_right,
+                },
+                Range {
+                    left: other_left,
+                    right: other_right,
+                },
+            ) => {
+                // [other_left, other_right] ... [self_left, self_right]
+                if COMPARATOR.compare_key(other_right, self_left) == std::cmp::Ordering::Less {
+                    return false;
+                }
+                // [self_left, self_right] ... [other_left, other_right]
+                if COMPARATOR.compare_key(self_right, other_right) == std::cmp::Ordering::Less {
+                    return false;
+                }
+                true
+            }
         }
     }
 }
@@ -109,13 +108,17 @@ impl LevelCompactStatus {
         prev_ranges_len != self.ranges.len()
     }
 
-    pub fn overlaps_with(&self, dst: &KeyRange) -> bool {
-        for r in self.ranges.iter() {
-            if r.overlaps_with(dst) {
-                return true;
+    pub fn overlaps_with(&self, dst: &Option<KeyRange>) -> bool {
+        if let Some(dst) = dst {
+            for r in self.ranges.iter() {
+                if r.overlaps_with(dst) {
+                    return true;
+                }
             }
+            false
+        } else {
+            true
         }
-        false
     }
 }
 
@@ -134,8 +137,8 @@ pub struct CompactDef {
     pub targets: Targets,
     pub prios: CompactionPriority,
 
-    pub this_range: KeyRange,
-    pub next_range: KeyRange,
+    pub this_range: Option<KeyRange>,
+    pub next_range: Option<KeyRange>,
     pub splits: Vec<KeyRange>,
 
     pub top: Vec<Table>,
@@ -162,8 +165,8 @@ impl CompactDef {
             next_level,
             this_level_id,
             next_level_id,
-            this_range: KeyRange::default(),
-            next_range: KeyRange::default(),
+            this_range: None,
+            next_range: None,
             splits: vec![],
             this_size: 0,
             drop_prefixes: vec![],
@@ -190,12 +193,12 @@ impl CompactStatus {
         let next_level_id = compact_def.next_level_id;
 
         this_level.del_size -= compact_def.this_size;
-        let mut found = this_level.remove(&compact_def.this_range);
+        let mut found = this_level.remove(compact_def.this_range.as_ref().unwrap());
         drop(this_level);
 
-        if !compact_def.next_range.is_empty() {
+        if let Some(next_range) = &compact_def.next_range {
             let next_level = &mut self.levels[next_level_id];
-            found = next_level.remove(&compact_def.next_range) && found;
+            found = next_level.remove(&next_range) && found;
         }
 
         if !found {
@@ -235,10 +238,10 @@ impl CompactStatus {
 
         self.levels[this_level]
             .ranges
-            .push(compact_def.this_range.clone());
+            .push(compact_def.this_range.clone().unwrap());
         self.levels[next_level]
             .ranges
-            .push(compact_def.next_range.clone());
+            .push(compact_def.next_range.clone().unwrap());
 
         self.levels[this_level].del_size += compact_def.this_size;
 
@@ -253,7 +256,7 @@ impl CompactStatus {
         Ok(())
     }
 
-    pub fn overlaps_with(&self, level: usize, this: &KeyRange) -> bool {
+    pub fn overlaps_with(&self, level: usize, this: &Option<KeyRange>) -> bool {
         let this_level = &self.levels[level];
         this_level.overlaps_with(this)
     }
@@ -285,9 +288,9 @@ impl Targets {
     }
 }
 
-pub fn get_key_range(tables: &[Table]) -> KeyRange {
+pub fn get_key_range(tables: &[Table]) -> Option<KeyRange> {
     if tables.is_empty() {
-        return KeyRange::default();
+        return None;
     }
 
     let mut smallest = tables[0].smallest().clone();
@@ -305,10 +308,10 @@ pub fn get_key_range(tables: &[Table]) -> KeyRange {
     let mut biggest_buf = BytesMut::with_capacity(biggest.len() + 8);
     smallest_buf.extend_from_slice(user_key(&smallest));
     biggest_buf.extend_from_slice(user_key(&biggest));
-    return KeyRange::new(
+    return Some(KeyRange::new(
         key_with_ts(smallest_buf, std::u64::MAX),
         key_with_ts(biggest_buf, 0),
-    );
+    ));
 }
 
 pub fn get_key_range_single(table: &Table) -> KeyRange {
@@ -323,4 +326,77 @@ pub fn get_key_range_single(table: &Table) -> KeyRange {
         key_with_ts(smallest_buf, std::u64::MAX),
         key_with_ts(biggest_buf, 0),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_keyrange_extend_non_overlap() {
+        let k1 = KeyRange::new(
+            Bytes::from_static(b"000000000000"),
+            Bytes::from_static(b"dddd00000000"),
+        );
+        let k2 = KeyRange::new(
+            Bytes::from_static(b"eeee00000000"),
+            Bytes::from_static(b"ffff00000000"),
+        );
+
+        assert_eq!(
+            k1.extend(&k2),
+            KeyRange::new(
+                Bytes::from_static(b"000000000000"),
+                Bytes::from_static(b"ffff00000000")
+            )
+        );
+
+        assert_eq!(
+            k2.extend(&k1),
+            KeyRange::new(
+                Bytes::from_static(b"000000000000"),
+                Bytes::from_static(b"ffff00000000")
+            )
+        );
+    }
+
+    #[test]
+    fn test_keyrange_extend_overlap() {
+        let k1 = KeyRange::new(
+            Bytes::from_static(b"000000000000"),
+            Bytes::from_static(b"eeee00000000"),
+        );
+        let k2 = KeyRange::new(
+            Bytes::from_static(b"dddd00000000"),
+            Bytes::from_static(b"ffff00000000"),
+        );
+
+        assert_eq!(
+            k1.extend(&k2),
+            KeyRange::new(
+                Bytes::from_static(b"000000000000"),
+                Bytes::from_static(b"ffff00000000")
+            )
+        );
+
+        assert_eq!(
+            k2.extend(&k1),
+            KeyRange::new(
+                Bytes::from_static(b"000000000000"),
+                Bytes::from_static(b"ffff00000000")
+            )
+        );
+    }
+
+    #[test]
+    fn test_keyrange_extend_inf() {
+        let k1 = KeyRange::inf();
+        let k2 = KeyRange::new(
+            Bytes::from_static(b"dddd00000000"),
+            Bytes::from_static(b"ffff00000000"),
+        );
+
+        assert_eq!(k1.extend(&k2), KeyRange::inf());
+        assert_eq!(k2.extend(&k1), KeyRange::inf());
+    }
 }
