@@ -10,27 +10,26 @@ use crate::util::{KeyComparator, COMPARATOR};
 use crate::{Error, Result, Table};
 
 /// Represents a range of keys from `left` to `right`
-/// TODO: use enum for this struct to represent infinite / finite range
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum KeyRange {
     Range { left: Bytes, right: Bytes },
     Inf,
+    Empty,
 }
 
 impl KeyRange {
-    pub fn inf() -> Self {
-        Self::Inf
-    }
-
     pub fn new(left: Bytes, right: Bytes) -> Self {
+        // left must <= right
         assert!(COMPARATOR.compare_key(&left, &right) != std::cmp::Ordering::Greater);
         Self::Range { left, right }
     }
 
     /// Extend current key range with another
     pub fn extend(&self, other: &Self) -> Self {
-        use KeyRange::{Inf, Range};
+        use KeyRange::{Empty, Inf, Range};
         match (self, other) {
+            (current, Empty) => current.clone(),
+            (Empty, dest) => dest.clone(),
             (Inf, _) => Inf,
             (_, Inf) => Inf,
             (
@@ -65,8 +64,12 @@ impl KeyRange {
 
     /// Check if two key ranges overlap
     pub fn overlaps_with(&self, other: &Self) -> bool {
-        use KeyRange::{Inf, Range};
+        use KeyRange::{Empty, Inf, Range};
         match (self, other) {
+            // If my range is empty, other ranges always overlap with me
+            (Empty, _) => true,
+            // If my range is not empty, other empty ranges always don't overlap with me
+            (_, Empty) => false,
             (Inf, _) => true,
             (_, Inf) => true,
             (
@@ -84,12 +87,22 @@ impl KeyRange {
                     return false;
                 }
                 // [self_left, self_right] ... [other_left, other_right]
-                if COMPARATOR.compare_key(self_right, other_right) == std::cmp::Ordering::Less {
+                if COMPARATOR.compare_key(self_right, other_left) == std::cmp::Ordering::Less {
                     return false;
                 }
                 true
             }
         }
+    }
+
+    /// Returns `true` if current key range is infinite
+    pub fn is_inf(&self) -> bool {
+        return matches!(self, KeyRange::Inf);
+    }
+
+    /// Returns `true` if current key range is empty
+    pub fn is_empty(&self) -> bool {
+        return matches!(self, KeyRange::Empty);
     }
 }
 
@@ -100,25 +113,20 @@ pub struct LevelCompactStatus {
 }
 
 impl LevelCompactStatus {
+    /// Remove a `KeyRange` from level ranges, return `true` if success.
     pub fn remove(&mut self, dst: &KeyRange) -> bool {
         let prev_ranges_len = self.ranges.len();
-        // TODO: remove in place requires `drain_filter` feature.
-        self.ranges = self.ranges.iter().filter(|x| x != &dst).cloned().collect();
-
+        self.ranges.retain(|r| r != dst);
         prev_ranges_len != self.ranges.len()
     }
 
-    pub fn overlaps_with(&self, dst: &Option<KeyRange>) -> bool {
-        if let Some(dst) = dst {
-            for r in self.ranges.iter() {
-                if r.overlaps_with(dst) {
-                    return true;
-                }
+    pub fn overlaps_with(&self, dst: &KeyRange) -> bool {
+        for r in self.ranges.iter() {
+            if r.overlaps_with(dst) {
+                return true;
             }
-            false
-        } else {
-            true
         }
+        false
     }
 }
 
@@ -137,8 +145,8 @@ pub struct CompactDef {
     pub targets: Targets,
     pub prios: CompactionPriority,
 
-    pub this_range: Option<KeyRange>,
-    pub next_range: Option<KeyRange>,
+    pub this_range: KeyRange,
+    pub next_range: KeyRange,
     pub splits: Vec<KeyRange>,
 
     pub top: Vec<Table>,
@@ -165,8 +173,8 @@ impl CompactDef {
             next_level,
             this_level_id,
             next_level_id,
-            this_range: None,
-            next_range: None,
+            this_range: KeyRange::Empty,
+            next_range: KeyRange::Empty,
             splits: vec![],
             this_size: 0,
             drop_prefixes: vec![],
@@ -193,12 +201,12 @@ impl CompactStatus {
         let next_level_id = compact_def.next_level_id;
 
         this_level.del_size -= compact_def.this_size;
-        let mut found = this_level.remove(compact_def.this_range.as_ref().unwrap());
+        let mut found = this_level.remove(&compact_def.this_range);
         drop(this_level);
 
-        if let Some(next_range) = &compact_def.next_range {
+        if !compact_def.next_range.is_empty() {
             let next_level = &mut self.levels[next_level_id];
-            found = next_level.remove(&next_range) && found;
+            found = next_level.remove(&compact_def.next_range) && found;
         }
 
         if !found {
@@ -238,10 +246,10 @@ impl CompactStatus {
 
         self.levels[this_level]
             .ranges
-            .push(compact_def.this_range.clone().unwrap());
+            .push(compact_def.this_range.clone());
         self.levels[next_level]
             .ranges
-            .push(compact_def.next_range.clone().unwrap());
+            .push(compact_def.next_range.clone());
 
         self.levels[this_level].del_size += compact_def.this_size;
 
@@ -256,7 +264,7 @@ impl CompactStatus {
         Ok(())
     }
 
-    pub fn overlaps_with(&self, level: usize, this: &Option<KeyRange>) -> bool {
+    pub fn overlaps_with(&self, level: usize, this: &KeyRange) -> bool {
         let this_level = &self.levels[level];
         this_level.overlaps_with(this)
     }
@@ -333,7 +341,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_keyrange_extend_non_overlap() {
+    fn test_keyrange_non_overlap() {
         let k1 = KeyRange::new(
             Bytes::from_static(b"000000000000"),
             Bytes::from_static(b"dddd00000000"),
@@ -358,10 +366,13 @@ mod tests {
                 Bytes::from_static(b"ffff00000000")
             )
         );
+
+        assert!(!k1.overlaps_with(&k2));
+        assert!(!k2.overlaps_with(&k1));
     }
 
     #[test]
-    fn test_keyrange_extend_overlap() {
+    fn test_keyrange_overlap() {
         let k1 = KeyRange::new(
             Bytes::from_static(b"000000000000"),
             Bytes::from_static(b"eeee00000000"),
@@ -386,17 +397,25 @@ mod tests {
                 Bytes::from_static(b"ffff00000000")
             )
         );
+
+        assert!(k1.overlaps_with(&k2));
+        assert!(k2.overlaps_with(&k1));
     }
 
     #[test]
-    fn test_keyrange_extend_inf() {
-        let k1 = KeyRange::inf();
+    fn test_keyrange_inf() {
+        let k1 = KeyRange::Inf;
         let k2 = KeyRange::new(
             Bytes::from_static(b"dddd00000000"),
             Bytes::from_static(b"ffff00000000"),
         );
 
-        assert_eq!(k1.extend(&k2), KeyRange::inf());
-        assert_eq!(k2.extend(&k1), KeyRange::inf());
+        assert_eq!(k1.extend(&k2), KeyRange::Inf);
+        assert_eq!(k2.extend(&k1), KeyRange::Inf);
+        assert_eq!(k1.extend(&KeyRange::Empty), k1);
+        assert_eq!(k2.extend(&KeyRange::Empty), k2);
+        assert!(!KeyRange::Inf.overlaps_with(&KeyRange::Empty));
+        assert!(KeyRange::Empty.overlaps_with(&KeyRange::Inf));
+        assert!(KeyRange::Empty.overlaps_with(&KeyRange::Empty));
     }
 }
