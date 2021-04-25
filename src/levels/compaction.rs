@@ -121,12 +121,7 @@ impl LevelCompactStatus {
     }
 
     pub fn overlaps_with(&self, dst: &KeyRange) -> bool {
-        for r in self.ranges.iter() {
-            if r.overlaps_with(dst) {
-                return true;
-            }
-        }
-        false
+        self.ranges.iter().any(|r| r.overlaps_with(dst))
     }
 }
 
