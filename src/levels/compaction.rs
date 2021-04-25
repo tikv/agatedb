@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 use bytes::{Bytes, BytesMut};
 
 use super::LevelHandler;
-use crate::format::{key_with_ts, user_key};
+use crate::format::{key_with_ts, key_with_ts_first, key_with_ts_last, user_key};
 use crate::util::{KeyComparator, COMPARATOR};
 use crate::{Error, Result, Table};
 
@@ -195,7 +195,10 @@ impl CompactDef {
 impl CompactStatus {
     pub fn delete(&mut self, compact_def: &CompactDef) {
         let this_level_id = compact_def.this_level_id;
-        assert!(this_level_id < self.levels.len() - 1);
+        assert!(
+            this_level_id < self.levels.len() - 1,
+            "compaction on invalid level"
+        );
 
         let this_level = &mut self.levels[this_level_id];
         let next_level_id = compact_def.next_level_id;
@@ -228,7 +231,10 @@ impl CompactStatus {
 
     pub fn compare_and_add(&mut self, compact_def: &CompactDef) -> Result<()> {
         let this_level = compact_def.this_level_id;
-        assert!(this_level < self.levels.len() - 1);
+        assert!(
+            this_level < self.levels.len() - 1,
+            "compaction on invalid level"
+        );
 
         let next_level = compact_def.next_level_id;
         if self.levels[this_level].overlaps_with(&compact_def.this_range) {
@@ -244,6 +250,8 @@ impl CompactStatus {
             )));
         }
 
+        // TODO: if we could sort key range by left point, we could use
+        // binary search throughout this module.
         self.levels[this_level]
             .ranges
             .push(compact_def.this_range.clone());
@@ -317,8 +325,9 @@ pub fn get_key_range(tables: &[Table]) -> Option<KeyRange> {
     smallest_buf.extend_from_slice(user_key(&smallest));
     biggest_buf.extend_from_slice(user_key(&biggest));
     return Some(KeyRange::new(
-        key_with_ts(smallest_buf, std::u64::MAX),
-        key_with_ts(biggest_buf, 0),
+        key_with_ts_first(smallest_buf),
+        // the appended key will be `<biggest_key><u64::MAX>`.
+        key_with_ts_last(biggest_buf),
     ));
 }
 
@@ -331,8 +340,8 @@ pub fn get_key_range_single(table: &Table) -> KeyRange {
     smallest_buf.extend_from_slice(user_key(&smallest));
     biggest_buf.extend_from_slice(user_key(&biggest));
     return KeyRange::new(
-        key_with_ts(smallest_buf, std::u64::MAX),
-        key_with_ts(biggest_buf, 0),
+        key_with_ts_first(smallest_buf),
+        key_with_ts_last(biggest_buf),
     );
 }
 

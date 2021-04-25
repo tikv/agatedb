@@ -7,6 +7,16 @@ pub fn key_with_ts(key: impl Into<BytesMut>, ts: u64) -> Bytes {
     key.freeze()
 }
 
+/// Append a ts to make this key be the first one within range.
+pub fn key_with_ts_first(key: impl Into<BytesMut>) -> Bytes {
+    key_with_ts(key, std::u64::MAX)
+}
+
+/// Append a ts to make this key be the last one within range.
+pub fn key_with_ts_last(key: impl Into<BytesMut>) -> Bytes {
+    key_with_ts(key, 0)
+}
+
 pub fn append_ts(key: &mut BytesMut, ts: u64) {
     key.reserve(8);
     let res = (u64::MAX - ts).to_be();
