@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 use bytes::{Bytes, BytesMut};
 
 use super::LevelHandler;
-use crate::format::{key_with_ts, key_with_ts_first, key_with_ts_last, user_key};
+use crate::format::{key_with_ts_first, key_with_ts_last, user_key};
 use crate::util::{KeyComparator, COMPARATOR};
 use crate::{Error, Result, Table};
 
@@ -30,8 +30,7 @@ impl KeyRange {
         match (self, other) {
             (current, Empty) => current.clone(),
             (Empty, dest) => dest.clone(),
-            (Inf, _) => Inf,
-            (_, Inf) => Inf,
+            (Inf, _) | (_, Inf) => Inf,
             (
                 Range {
                     left: self_left,
@@ -70,8 +69,7 @@ impl KeyRange {
             (Empty, _) => true,
             // If my range is not empty, other empty ranges always don't overlap with me
             (_, Empty) => false,
-            (Inf, _) => true,
-            (_, Inf) => true,
+            (Inf, _) | (_, Inf) => true,
             (
                 Range {
                     left: self_left,
@@ -210,9 +208,7 @@ impl CompactStatus {
         if !found {
             let this = compact_def.this_range.clone();
             let next = compact_def.next_range.clone();
-            println!("looking for {:?} in this level", this);
-            println!("looking for {:?} in next level", next);
-            panic!("key range not found");
+            panic!("try looking for {:?} in this level and {:?} in next level, but key range not found", this, next);
         }
 
         for table in compact_def.top.iter() {
@@ -304,15 +300,15 @@ pub fn get_key_range(tables: &[Table]) -> Option<KeyRange> {
         return None;
     }
 
-    let mut smallest = tables[0].smallest().clone();
-    let mut biggest = tables[0].biggest().clone();
+    let mut smallest = tables[0].smallest();
+    let mut biggest = tables[0].biggest();
 
     for i in 1..tables.len() {
         if COMPARATOR.compare_key(tables[i].smallest(), &smallest) == std::cmp::Ordering::Less {
-            smallest = tables[i].smallest().clone();
+            smallest = tables[i].smallest();
         }
         if COMPARATOR.compare_key(tables[i].biggest(), &biggest) == std::cmp::Ordering::Greater {
-            biggest = tables[i].biggest().clone();
+            biggest = tables[i].biggest();
         }
     }
     let mut smallest_buf = BytesMut::with_capacity(smallest.len() + 8);
@@ -327,17 +323,7 @@ pub fn get_key_range(tables: &[Table]) -> Option<KeyRange> {
 }
 
 pub fn get_key_range_single(table: &Table) -> KeyRange {
-    let smallest = table.smallest().clone();
-    let biggest = table.biggest().clone();
-
-    let mut smallest_buf = BytesMut::with_capacity(smallest.len() + 8);
-    let mut biggest_buf = BytesMut::with_capacity(biggest.len() + 8);
-    smallest_buf.extend_from_slice(user_key(&smallest));
-    biggest_buf.extend_from_slice(user_key(&biggest));
-    return KeyRange::new(
-        key_with_ts_first(smallest_buf),
-        key_with_ts_last(biggest_buf),
-    );
+    get_key_range(std::slice::from_ref(table)).unwrap()
 }
 
 #[cfg(test)]

@@ -1,18 +1,12 @@
-use crate::value::Value;
-use crate::Result;
-use crate::{format::user_key, get_ts, iterator_trait::AgateIterator};
-use crate::{iterator::IteratorOptions, table::TableIterators};
-use crate::{
-    table::ConcatIterator,
-    util::{KeyComparator, COMPARATOR},
-};
-use crate::{AgateOptions, Table};
+#![allow(dead_code)]
+#![allow(unused_variables)]
 
 use super::KeyRange;
-
+use crate::value::Value;
+use crate::Result;
+use crate::{iterator::IteratorOptions, table::TableIterators};
+use crate::{AgateOptions, Table};
 use bytes::Bytes;
-
-use std::collections::HashSet;
 
 pub struct LevelHandler {
     opts: AgateOptions,
