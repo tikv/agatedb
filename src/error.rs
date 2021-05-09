@@ -11,7 +11,7 @@ pub enum Error {
     Io(#[source] Box<io::Error>),
     #[error("Empty key")]
     EmptyKey,
-    #[error("{0}")]
+    #[error("Too long: {0}")]
     TooLong(String),
     #[error("Invalid checksum")]
     InvalidChecksum(String),
@@ -21,12 +21,14 @@ pub enum Error {
     Decode(#[source] Box<prost::DecodeError>),
     #[error("Invalid data: {0}")]
     VarDecode(&'static str),
-    #[error("{0}")]
+    #[error("Error when reading table: {0}")]
     TableRead(String),
     #[error("Database Closed")]
     DBClosed,
-    #[error("{0}")]
+    #[error("Error when reading from log: {0}")]
     LogRead(String),
+    #[error("Error when compaction: {0}")]
+    CompactionError(String),
 }
 
 impl From<io::Error> for Error {

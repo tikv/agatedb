@@ -1,6 +1,7 @@
 pub use skiplist::FixedLengthSuffixComparator as Comparator;
 pub use skiplist::{FixedLengthSuffixComparator, KeyComparator};
 
+use crate::format::user_key;
 use crate::Result;
 
 use std::fs::File;
@@ -68,4 +69,11 @@ where
 pub fn sync_dir(path: &impl AsRef<Path>) -> Result<()> {
     File::open(path.as_ref())?.sync_all()?;
     Ok(())
+}
+
+pub fn same_key(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    return user_key(a) == user_key(b);
 }
