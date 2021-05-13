@@ -55,7 +55,6 @@ impl AgateIterator for ConcatIterator {
         if cur_iter.valid() {
             return;
         }
-        drop(cur_iter);
         loop {
             if self.opt & ITERATOR_REVERSED == 0 {
                 self.set_idx(cur + 1);

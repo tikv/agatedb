@@ -108,7 +108,7 @@ impl Agate {
 
         // TODO: open or create manifest
         Ok(Agate {
-            core: Arc::new(Core::new(opts.clone())?),
+            core: Arc::new(Core::new(opts)?),
         })
     }
 }
