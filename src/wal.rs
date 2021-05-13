@@ -186,7 +186,7 @@ impl Wal {
 
         // TODO: add CRC32 check
 
-        return buf.len();
+        buf.len()
     }
 
     /// Decode entry from buffer

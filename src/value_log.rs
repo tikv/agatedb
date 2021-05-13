@@ -84,7 +84,7 @@ impl ValueLog {
                     })?;
                     let wal = Wal::open(file.path(), self.opts.clone())?;
                     let wal = Arc::new(Mutex::new(wal));
-                    if let Some(_) = core.files_map.insert(fid, wal) {
+                    if core.files_map.insert(fid, wal).is_some() {
                         return Err(Error::InvalidFilename(format!(
                             "duplicated vlog found {}",
                             fid
@@ -128,7 +128,8 @@ impl ValueLog {
                 result.push(*fid);
             }
         }
-        result.sort();
+        // clippy suggests using sort_unstable
+        result.sort_unstable();
         result
     }
 
@@ -216,10 +217,11 @@ impl ValueLog {
                     continue;
                 }
 
-                let mut p = ValuePointer::default();
-
-                p.file_id = current_log_id;
-                p.offset = self.w_offset();
+                let mut p = ValuePointer {
+                    file_id: current_log_id,
+                    offset: self.w_offset(),
+                    ..Default::default()
+                };
 
                 let orig_meta = entry.meta;
                 entry.meta &= !value::VALUE_FIN_TXN | value::VALUE_TXN;
@@ -264,7 +266,7 @@ impl ValueLog {
 
             Ok(file)
         } else {
-            return Err(Error::VlogNotFound(value_ptr.file_id));
+            Err(Error::VlogNotFound(value_ptr.file_id))
         }
     }
 
