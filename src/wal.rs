@@ -425,3 +425,9 @@ mod tests {
         }
     }
 }
+
+impl Drop for Wal {
+    fn drop(&mut self) {
+        self.file.sync_all().expect("failed to sync WAL");
+    }
+}
