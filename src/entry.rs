@@ -1,4 +1,4 @@
-use crate::value::VALUE_DELETE;
+use crate::value::{ValuePointer, VALUE_DELETE};
 use bytes::Bytes;
 
 #[derive(Clone)]
@@ -43,10 +43,15 @@ impl Entry {
     }
 
     pub fn estimate_size(&self, threshold: usize) -> usize {
+        // The estimated size of an entry will be key length + value length +
+        // two bytes of metadata.
+        const METADATA_SIZE: usize = 2;
         if self.value.len() < threshold {
-            self.key.len() + self.value.len() + 2
+            // For those values < threshold, key and value will be directly stored in LSM tree.
+            self.key.len() + self.value.len() + METADATA_SIZE
         } else {
-            self.key.len() + 12 + 2
+            // For those values >= threshold, only key will be stored in LSM tree.
+            self.key.len() + ValuePointer::encoded_size() + METADATA_SIZE
         }
     }
 
