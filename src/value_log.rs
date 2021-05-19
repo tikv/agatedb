@@ -1,3 +1,4 @@
+use crate::error::InvalidValuePointerError;
 use crate::value::{self, Request, ValuePointer};
 use crate::wal::{Header, Wal};
 use crate::AgateOptions;
@@ -305,11 +306,12 @@ impl ValueLog {
         let kv = buf;
 
         if (kv.len() as u32) < header.key_len + header.value_len {
-            return Err(Error::InvalidValuePointer {
+            return Err(InvalidValuePointerError {
                 vptr: value_ptr,
                 kvlen: kv.len(),
                 range: header.key_len..header.key_len + header.value_len,
-            });
+            }
+            .into());
         }
         Ok(original_buf)
     }

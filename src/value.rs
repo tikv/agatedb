@@ -156,15 +156,15 @@ pub struct ValuePointer {
 
 impl ValuePointer {
     pub fn decode(&mut self, mut bytes: &[u8]) {
-        self.file_id = bytes.get_u32();
-        self.len = bytes.get_u32();
-        self.offset = bytes.get_u32();
+        self.file_id = bytes.get_u32_le();
+        self.len = bytes.get_u32_le();
+        self.offset = bytes.get_u32_le();
     }
 
     pub fn encode(&self, buf: &mut BytesMut) {
-        buf.put_u32(self.file_id);
-        buf.put_u32(self.len);
-        buf.put_u32(self.offset);
+        buf.put_u32_le(self.file_id);
+        buf.put_u32_le(self.len);
+        buf.put_u32_le(self.offset);
     }
 }
 

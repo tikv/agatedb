@@ -5,6 +5,13 @@ use thiserror::Error;
 
 use crate::value::ValuePointer;
 
+#[derive(Debug)]
+pub struct InvalidValuePointerError {
+    pub vptr: ValuePointer,
+    pub kvlen: usize,
+    pub range: Range<u32>,
+}
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("Invalid Configuration: {0}")]
@@ -29,12 +36,8 @@ pub enum Error {
     DBClosed,
     #[error("Error when reading from log: {0}")]
     LogRead(String),
-    #[error("Invalid VP: {vptr:?}, kvlen {kvlen}, {range:?}")]
-    InvalidValuePointer {
-        vptr: ValuePointer,
-        kvlen: usize,
-        range: Range<u32>,
-    },
+    #[error("Invalid VP: {0:?}")]
+    InvalidValuePointer(Box<InvalidValuePointerError>),
     #[error("Invalid Log Offset: {0} > {1}")]
     InvalidLogOffset(u32, u32),
     #[error("VLog Not Found: id={0}")]
@@ -47,6 +50,13 @@ impl From<io::Error> for Error {
     #[inline]
     fn from(e: io::Error) -> Error {
         Error::Io(Box::new(e))
+    }
+}
+
+impl From<InvalidValuePointerError> for Error {
+    #[inline]
+    fn from(e: InvalidValuePointerError) -> Error {
+        Error::InvalidValuePointer(Box::new(e))
     }
 }
 
