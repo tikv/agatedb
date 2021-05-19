@@ -167,7 +167,7 @@ impl ValuePointer {
         buf.put_u32_le(self.offset);
     }
 
-    pub fn encoded_size()  -> usize{
+    pub fn encoded_size() -> usize {
         return std::mem::size_of::<u32>() * 3;
     }
 }
