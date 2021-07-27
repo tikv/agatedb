@@ -6,7 +6,7 @@ use crate::value::Value;
 use builder::Builder;
 use iterator::IteratorError;
 use rand::prelude::*;
-use tempdir::TempDir;
+use tempfile::{tempdir, TempDir};
 
 fn key(prefix: &[u8], i: usize) -> Bytes {
     Bytes::from([prefix, format!("{:04}", i).as_bytes()].concat())
@@ -79,7 +79,7 @@ impl DerefMut for TableGuard {
 }
 
 fn build_table(kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> TableGuard {
-    let tmp_dir = TempDir::new("agatedb").unwrap();
+    let tmp_dir = tempdir().unwrap();
     let filename = tmp_dir.path().join("1.sst".to_string());
 
     let data = build_table_data(kv_pairs, opts.clone());
@@ -362,7 +362,7 @@ fn test_table_big_values() {
         builder.add(&key, vs, 0);
     }
 
-    let tmp_dir = TempDir::new("agatedb").unwrap();
+    let tmp_dir = tempdir().unwrap();
     let filename = tmp_dir.path().join("1.sst".to_string());
 
     let table = Table::create(&filename, builder.finish(), opts).unwrap();

@@ -9,7 +9,7 @@ use bytes::Bytes;
 use common::rand_value;
 use criterion::{criterion_group, criterion_main, Criterion};
 use rand::Rng;
-use tempdir::TempDir;
+use tempfile::{tempdir, TempDir};
 
 fn bench_table_builder(c: &mut Criterion) {
     c.bench_function("table builder", |b| {
@@ -65,7 +65,7 @@ impl DerefMut for TableGuard {
 }
 
 fn get_table_for_benchmark(count: usize) -> TableGuard {
-    let tmp_dir = TempDir::new("agatedb").unwrap();
+    let tmp_dir = tempdir().unwrap();
 
     let opts = TableOptions {
         // TODO: add compression parameter
