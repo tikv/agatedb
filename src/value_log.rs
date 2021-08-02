@@ -80,22 +80,30 @@ impl ValueLog {
         let mut core = self.core.write().unwrap();
         for file in dir {
             let file = file?;
-            if let Ok(filename) = file.file_name().into_string() {
-                if filename.ends_with(".vlog") {
-                    let fid: u32 = filename[..filename.len() - 5].parse().map_err(|err| {
-                        Error::InvalidFilename(format!("failed to parse file ID {:?}", err))
-                    })?;
-                    let wal = Wal::open(file.path(), self.opts.clone())?;
-                    let wal = Arc::new(RwLock::new(wal));
-                    if core.files_map.insert(fid, wal).is_some() {
-                        return Err(Error::InvalidFilename(format!(
-                            "duplicated vlog found {}",
-                            fid
-                        )));
+            match file.file_name().into_string() {
+                Ok(filename) => {
+                    if filename.ends_with(".vlog") {
+                        let fid: u32 = filename[..filename.len() - 5].parse().map_err(|err| {
+                            Error::InvalidFilename(format!("failed to parse file ID {:?}", err))
+                        })?;
+                        let wal = Wal::open(file.path(), self.opts.clone())?;
+                        let wal = Arc::new(RwLock::new(wal));
+                        if core.files_map.insert(fid, wal).is_some() {
+                            return Err(Error::InvalidFilename(format!(
+                                "duplicated vlog found {}",
+                                fid
+                            )));
+                        }
+                        if core.max_fid < fid {
+                            core.max_fid = fid;
+                        }
                     }
-                    if core.max_fid < fid {
-                        core.max_fid = fid;
-                    }
+                }
+                Err(filename) => {
+                    return Err(Error::InvalidFilename(format!(
+                        "Unrecognized filename {:?}",
+                        filename
+                    )))
                 }
             }
         }
@@ -321,13 +329,13 @@ impl ValueLog {
 mod tests {
     use super::*;
     use crate::entry::Entry;
-    use tempdir::TempDir;
+    use tempfile::tempdir;
     use value::VALUE_POINTER;
 
     #[test]
     fn test_value_basic() {
         let mut opts = AgateOptions::default();
-        let tmp_dir = TempDir::new("agatedb").unwrap();
+        let tmp_dir = tempdir().unwrap();
         opts.value_dir = tmp_dir.path().to_path_buf();
         opts.value_threshold = 32;
         opts.value_log_file_size = 1024;

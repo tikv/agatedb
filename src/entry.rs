@@ -44,8 +44,8 @@ impl Entry {
 
     pub fn estimate_size(&self, threshold: usize) -> usize {
         // The estimated size of an entry will be key length + value length +
-        // two bytes of metadata + expires_at.
-        const METADATA_SIZE: usize = std::mem::size_of::<u8>() * 2 + std::mem::size_of::<u64>();
+        // two bytes of metadata.
+        const METADATA_SIZE: usize = std::mem::size_of::<u8>() * 2;
         if self.value.len() < threshold {
             // For those values < threshold, key and value will be directly stored in LSM tree.
             self.key.len() + self.value.len() + METADATA_SIZE
