@@ -213,7 +213,7 @@ mod tests {
     use crate::table::Table;
     use crate::AgateIterator;
     use crate::{format::key_with_ts, ChecksumVerificationMode};
-    use tempdir::TempDir;
+    use tempfile::tempdir;
 
     const TEST_KEYS_COUNT: usize = 100000;
 
@@ -228,7 +228,7 @@ mod tests {
         };
 
         let mut builder = Builder::new(opts.clone());
-        let tmp_dir = TempDir::new("agatedb").unwrap();
+        let tmp_dir = tempdir().unwrap();
         let filename = tmp_dir.path().join("1.sst".to_string());
 
         let mut block_first_keys = vec![];

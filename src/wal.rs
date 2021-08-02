@@ -5,7 +5,7 @@ use crate::AgateOptions;
 use crate::Error;
 use crate::Result;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use memmap::{MmapMut, MmapOptions};
+use memmap2::{MmapMut, MmapOptions};
 use prost::{decode_length_delimiter, encode_length_delimiter, length_delimiter_len};
 use std::fs::{File, OpenOptions};
 use std::io::Cursor;
@@ -336,10 +336,11 @@ impl<'a> WalIterator<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempdir::TempDir;
+    use tempfile::tempdir;
+
     #[test]
     fn test_wal_create() {
-        let tmp_dir = TempDir::new("agatedb").unwrap();
+        let tmp_dir = tempdir().unwrap();
         let mut opts = AgateOptions::default();
         opts.value_log_file_size = 4096;
         Wal::open(tmp_dir.path().join("1.wal"), opts).unwrap();
@@ -366,7 +367,7 @@ mod tests {
 
     #[test]
     fn test_wal_iterator() {
-        let tmp_dir = TempDir::new("agatedb").unwrap();
+        let tmp_dir = tempdir().unwrap();
         let mut opts = AgateOptions::default();
         opts.value_log_file_size = 4096;
         let wal_path = tmp_dir.path().join("1.wal");
@@ -391,7 +392,7 @@ mod tests {
 
     #[test]
     fn test_wal_iterator_trunc() {
-        let tmp_dir = TempDir::new("agatedb").unwrap();
+        let tmp_dir = tempdir().unwrap();
         let mut opts = AgateOptions::default();
         opts.value_log_file_size = 4096;
         let wal_path = tmp_dir.path().join("1.wal");

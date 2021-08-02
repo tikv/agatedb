@@ -17,7 +17,7 @@ use crate::Result;
 use iterator::{TableRefIterator, ITERATOR_NOCACHE, ITERATOR_REVERSED};
 
 use bytes::{Buf, Bytes};
-use memmap::{Mmap, MmapOptions};
+use memmap2::{Mmap, MmapOptions};
 use prost::Message;
 use proto::meta::{BlockOffset, Checksum, TableIndex};
 use std::fs;

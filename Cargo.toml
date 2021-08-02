@@ -11,15 +11,15 @@ crc = "1.8"
 rand = "0.7"
 proto = { path = "proto" }
 skiplist = { path = "skiplist" }
-memmap = "0.7"
+memmap2 = "0.3"
 farmhash = "1.1"
-prost = "0.7"
+prost = "0.8"
 enum_dispatch = "0.3"
 crossbeam-channel = "0.5"
 
 [dev-dependencies]
 criterion = "0.3"
-tempdir = "0.3"
+tempfile = "3"
 
 [target.'cfg(not(target_env = "msvc"))'.dev-dependencies]
 tikv-jemallocator = "0.4.0"
