@@ -15,6 +15,8 @@ memmap2 = "0.3"
 farmhash = "1.1"
 prost = "0.8"
 enum_dispatch = "0.3"
+crossbeam-channel = "0.5"
+parking_lot = "0.11"
 
 [dev-dependencies]
 criterion = "0.3"
