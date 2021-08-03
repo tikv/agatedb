@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
-use std::sync::{Arc, RwLock};
-
 use bytes::{Bytes, BytesMut};
+use parking_lot::RwLock;
+use std::sync::Arc;
 
 use super::LevelHandler;
 use crate::format::{key_with_ts_first, key_with_ts_last, user_key};

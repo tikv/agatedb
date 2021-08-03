@@ -5,10 +5,11 @@ use crate::AgateOptions;
 use crate::{Error, Result};
 
 use bytes::{Bytes, BytesMut};
+use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU32;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 fn vlog_file_path(dir: impl AsRef<Path>, fid: u32) -> PathBuf {
     dir.as_ref().join(format!("{:06}.vlog", fid))
@@ -77,7 +78,7 @@ impl ValueLog {
 
     fn populate_files_map(&self) -> Result<()> {
         let dir = std::fs::read_dir(&self.dir_path)?;
-        let mut core = self.core.write().unwrap();
+        let mut core = self.core.write();
         for file in dir {
             let file = file?;
             match file.file_name().into_string() {
@@ -111,7 +112,7 @@ impl ValueLog {
     }
 
     fn create_vlog_file(&self) -> Result<(u32, Arc<RwLock<Wal>>)> {
-        let mut core = self.core.write().unwrap();
+        let mut core = self.core.write();
         let fid = core.max_fid + 1;
         let path = self.file_path(fid);
         let wal = Wal::open(path, self.opts.clone())?;
@@ -128,7 +129,7 @@ impl ValueLog {
     }
 
     fn sorted_fids(&self) -> Vec<u32> {
-        let core = self.core.read().unwrap();
+        let core = self.core.read();
         let mut to_be_deleted = HashSet::new();
         for fid in &core.files_to_delete {
             to_be_deleted.insert(*fid);
@@ -162,10 +163,10 @@ impl ValueLog {
     pub fn write(&self, requests: &mut [Request]) -> Result<()> {
         let result = self.write_inner(requests);
         if self.opts.sync_writes {
-            let core = self.core.read().unwrap();
+            let core = self.core.read();
             let current_log_id = core.max_fid;
             let current_log_ptr = core.files_map.get(&current_log_id).unwrap().clone();
-            let mut current_log = current_log_ptr.write().unwrap();
+            let mut current_log = current_log_ptr.write();
             drop(core);
             current_log.sync()?;
         }
@@ -173,7 +174,7 @@ impl ValueLog {
     }
 
     pub fn write_inner(&self, requests: &mut [Request]) -> Result<()> {
-        let core = self.core.read().unwrap();
+        let core = self.core.read();
         let mut current_log_id = core.max_fid;
         let mut current_log = core.files_map.get(&current_log_id).unwrap().clone();
         drop(core);
@@ -193,7 +194,7 @@ impl ValueLog {
 
             // expand file size if space is not enough
             // TODO: handle value >= 4GB case
-            let mut current_log = current_log_lck.write().unwrap();
+            let mut current_log = current_log_lck.write();
             if end_offset >= current_log.size() {
                 current_log.set_len(end_offset as u64)?;
             }
@@ -207,7 +208,7 @@ impl ValueLog {
             // ensure data are flushed to main memory
             std::sync::atomic::fence(std::sync::atomic::Ordering::SeqCst);
 
-            let mut current_log = current_log_lck.write().unwrap();
+            let mut current_log = current_log_lck.write();
             current_log.set_size(end_offset);
             drop(current_log);
             Ok(())
@@ -215,11 +216,11 @@ impl ValueLog {
 
         // `to_disk` returns `true` if we need a new vLog.
         let to_disk = |current_log: &RwLock<Wal>| -> Result<bool> {
-            let core = self.core.read().unwrap();
+            let core = self.core.read();
             if self.w_offset() as u64 > self.opts.value_log_file_size
                 || core.num_entries_written > self.opts.value_log_max_entries
             {
-                let mut current_log = current_log.write().unwrap();
+                let mut current_log = current_log.write();
                 current_log.done_writing(self.w_offset())?;
                 Ok(true)
             } else {
@@ -265,7 +266,7 @@ impl ValueLog {
                 current_log = log;
             }
 
-            let mut core = self.core.write().unwrap();
+            let mut core = self.core.write();
             core.num_entries_written += written;
         }
 
@@ -276,7 +277,7 @@ impl ValueLog {
     }
 
     fn get_file(&self, value_ptr: &ValuePointer) -> Result<Arc<RwLock<Wal>>> {
-        let core = self.core.read().unwrap();
+        let core = self.core.read();
         let file = core.files_map.get(&value_ptr.file_id).cloned();
         if let Some(file) = file {
             let max_fid = core.max_fid;
@@ -302,7 +303,7 @@ impl ValueLog {
     /// TODO: return header together with k-v pair.
     pub(crate) fn read(&self, value_ptr: ValuePointer) -> Result<Bytes> {
         let log_file = self.get_file(&value_ptr)?;
-        let r = log_file.read().unwrap();
+        let r = log_file.read();
         let mut buf = r.read(&value_ptr)?;
         let original_buf = buf.slice(..);
         drop(r);
