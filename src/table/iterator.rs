@@ -164,9 +164,9 @@ impl BlockIterator {
                 return false;
             }
             self.set_idx(idx);
-            !matches!(
+            matches!(
                 COMPARATOR.compare_key(&self.key, key),
-                std::cmp::Ordering::Less
+                std::cmp::Ordering::Greater | std::cmp::Ordering::Equal
             )
         });
 
