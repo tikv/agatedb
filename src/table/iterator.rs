@@ -160,15 +160,14 @@ impl BlockIterator {
         };
 
         let found_entry_idx = util::search(self.entry_offsets().len(), |idx| {
-            use std::cmp::Ordering::*;
             if idx < start_index {
                 return false;
             }
             self.set_idx(idx);
-            match COMPARATOR.compare_key(&self.key, &key) {
-                Less => false,
-                _ => true,
-            }
+            matches!(
+                COMPARATOR.compare_key(&self.key, key),
+                std::cmp::Ordering::Greater | std::cmp::Ordering::Equal
+            )
         });
 
         self.set_idx(found_entry_idx);
@@ -182,7 +181,6 @@ impl BlockIterator {
         if self.entry_offsets().is_empty() {
             self.idx = std::usize::MAX;
             self.err = Some(IteratorError::EOF);
-            return;
         } else {
             self.set_idx(self.entry_offsets().len() - 1);
         }
@@ -196,7 +194,6 @@ impl BlockIterator {
         if self.idx == 0 {
             self.idx = std::usize::MAX;
             self.err = Some(IteratorError::EOF);
-            return;
         } else {
             self.set_idx(self.idx - 1);
         }
@@ -317,12 +314,11 @@ impl<T: AsRef<TableInner>> TableRefIterator<T> {
         }
 
         let idx = util::search(self.table.as_ref().offsets_length(), |idx| {
-            use std::cmp::Ordering::*;
             let block_offset = self.table.as_ref().offsets(idx).unwrap();
-            match COMPARATOR.compare_key(&block_offset.key, &key) {
-                Greater => true,
-                _ => false,
-            }
+            matches!(
+                COMPARATOR.compare_key(&block_offset.key, key),
+                std::cmp::Ordering::Greater
+            )
         });
 
         if idx == 0 {

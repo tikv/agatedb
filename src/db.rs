@@ -99,10 +99,8 @@ impl Agate {
 
         opts.dir = path.as_ref().to_path_buf();
 
-        if !opts.in_memory {
-            if !opts.dir.exists() {
-                fs::create_dir_all(&opts.dir)?;
-            }
+        if !opts.in_memory && !opts.dir.exists() {
+            fs::create_dir_all(&opts.dir)?;
             // TODO: create wal path, acquire database path lock
         }
 

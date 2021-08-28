@@ -21,7 +21,6 @@ impl IteratorOptions {
 
     /// Remove unnecessary tables
     pub fn pick_tables(&self, _tables: &mut Vec<Table>) {
-        return;
         // TODO: implement table selection logic
     }
 }

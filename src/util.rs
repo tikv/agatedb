@@ -33,10 +33,8 @@ pub fn bytes_diff<'a, 'b>(base: &'a [u8], target: &'b [u8]) -> &'b [u8] {
             }
             i += 8;
         }
-        if i + 4 <= end {
-            if u32(base.as_ptr().add(i)) == u32(target.as_ptr().add(i)) {
-                i += 4;
-            }
+        if i + 4 <= end && u32(base.as_ptr().add(i)) == u32(target.as_ptr().add(i)) {
+            i += 4;
         }
         while i < end {
             if base.get_unchecked(i) != target.get_unchecked(i) {
