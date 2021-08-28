@@ -8,6 +8,8 @@ pub struct AgateOptions {
     pub in_memory: bool,
     pub sync_writes: bool,
 
+    pub create_if_not_exists: bool,
+
     // Memtable options
     pub mem_table_size: u64,
     pub base_table_size: u64,
@@ -32,6 +34,7 @@ pub struct AgateOptions {
 impl Default for AgateOptions {
     fn default() -> Self {
         Self {
+            create_if_not_exists: false,
             dir: PathBuf::new(),
             value_dir: PathBuf::new(),
             // memtable options
@@ -71,8 +74,43 @@ impl AgateOptions {
         entry.value.len() < self.value_threshold
     }
 
-    fn arena_size(&self) -> u64 {
+    pub fn arena_size(&self) -> u64 {
         // TODO: take other options into account
         self.mem_table_size as u64
+    }
+
+    pub fn create(&mut self) -> &mut AgateOptions {
+        self.create_if_not_exists = true;
+        self
+    }
+
+    pub fn path<P: Into<PathBuf>>(&mut self, p: P) -> &mut AgateOptions {
+        self.dir = p.into();
+        self
+    }
+
+    pub fn num_memtables(&mut self, num_memtables: usize) -> &mut AgateOptions {
+        self.num_memtables = num_memtables;
+        self
+    }
+
+    pub fn in_memory(&mut self, in_memory: bool) -> &mut AgateOptions {
+        self.in_memory = in_memory;
+        self
+    }
+
+    pub fn sync_writes(&mut self, sync_writes: bool) -> &mut AgateOptions {
+        self.sync_writes = sync_writes;
+        self
+    }
+
+    pub fn value_log_file_size(&mut self, value_log_file_size: u64) -> &mut AgateOptions {
+        self.value_log_file_size = value_log_file_size;
+        self
+    }
+
+    pub fn value_log_max_entries(&mut self, value_log_max_entries: u32) -> &mut AgateOptions {
+        self.value_log_max_entries = value_log_max_entries;
+        self
     }
 }
