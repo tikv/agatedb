@@ -141,7 +141,7 @@ impl Builder {
 
     /// Add key-value pair to table
     pub fn add(&mut self, key: &Bytes, value: Value, vlog_len: u32) {
-        if self.should_finish_block(&key, &value) {
+        if self.should_finish_block(key, &value) {
             self.finish_block();
             self.base_key.clear();
             assert!(self.buf.len() < u32::MAX as usize);

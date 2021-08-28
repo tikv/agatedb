@@ -58,13 +58,12 @@ impl AgateIterator for ConcatIterator {
         loop {
             if self.opt & ITERATOR_REVERSED == 0 {
                 self.set_idx(cur + 1);
+            } else if cur == 0 {
+                self.cur = None;
             } else {
-                if cur == 0 {
-                    self.cur = None;
-                } else {
-                    self.set_idx(cur - 1);
-                }
+                self.set_idx(cur - 1);
             }
+
             if self.cur.is_some() {
                 self.iter_mut().rewind();
                 if self.iter_ref().valid() {
