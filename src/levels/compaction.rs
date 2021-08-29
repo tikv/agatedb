@@ -303,22 +303,22 @@ pub fn get_key_range(tables: &[Table]) -> Option<KeyRange> {
     let mut biggest = tables[0].biggest();
 
     for item in tables.iter().skip(1) {
-        if COMPARATOR.compare_key(item.smallest(), &smallest) == std::cmp::Ordering::Less {
+        if COMPARATOR.compare_key(item.smallest(), smallest) == std::cmp::Ordering::Less {
             smallest = item.smallest();
         }
-        if COMPARATOR.compare_key(item.biggest(), &biggest) == std::cmp::Ordering::Greater {
+        if COMPARATOR.compare_key(item.biggest(), biggest) == std::cmp::Ordering::Greater {
             biggest = item.biggest();
         }
     }
     let mut smallest_buf = BytesMut::with_capacity(smallest.len() + 8);
     let mut biggest_buf = BytesMut::with_capacity(biggest.len() + 8);
-    smallest_buf.extend_from_slice(user_key(&smallest));
-    biggest_buf.extend_from_slice(user_key(&biggest));
-    return Some(KeyRange::new(
+    smallest_buf.extend_from_slice(user_key(smallest));
+    biggest_buf.extend_from_slice(user_key(biggest));
+    Some(KeyRange::new(
         key_with_ts_first(smallest_buf),
         // the appended key will be `<biggest_key><u64::MAX>`.
         key_with_ts_last(biggest_buf),
-    ));
+    ))
 }
 
 pub fn get_key_range_single(table: &Table) -> KeyRange {

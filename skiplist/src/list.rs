@@ -156,7 +156,7 @@ impl<C: KeyComparator> Skiplist<C> {
             }
             let next_ptr: *mut Node = self.core.arena.get_mut(next_offset);
             let next_node = &*next_ptr;
-            match self.c.compare_key(&key, &next_node.key) {
+            match self.c.compare_key(key, &next_node.key) {
                 std::cmp::Ordering::Equal => return (next_ptr, next_ptr),
                 std::cmp::Ordering::Less => return (before, next_ptr),
                 _ => before = next_ptr,

@@ -168,7 +168,7 @@ impl ValuePointer {
     }
 
     pub fn encoded_size() -> usize {
-        return std::mem::size_of::<u32>() * 3;
+        std::mem::size_of::<u32>() * 3
     }
 }
 

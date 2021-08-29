@@ -49,7 +49,7 @@ impl Default for AgateOptions {
             in_memory: false,
             sync_writes: false,
             value_threshold: 1 << 10,
-            value_log_file_size: 1 << 30 - 1,
+            value_log_file_size: 1 << (30 - 1),
             value_log_max_entries: 1000000,
             block_size: 4 << 10,
             bloom_false_positive: 0.01,
