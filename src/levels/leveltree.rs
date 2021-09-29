@@ -1,10 +1,10 @@
 use bytes::Bytes;
 use std::collections::HashSet;
-use std::collections::LinkedList;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 const MAX_TREE_NODE_SIZE: usize = 512;
 const MIN_TREE_NODE_SIZE: usize = 64;
+const SPLIT_NODE_SIZE: usize = 384;
 const MIN_MERGE_TREE_NODE_SIZE: usize = 256;
 
 pub enum LevelOperation<T: ComparableNode> {
@@ -31,20 +31,9 @@ pub struct LeafNodeBuilder<T: ComparableNode> {
     key: Bytes,
 }
 
-#[derive(Clone)]
-pub struct TreeNode<T: ComparableNode> {
-    data: Vec<NodeType<T>>,
-    key: Bytes,
-}
-
-
 impl<T: ComparableNode> LeafNode<T> {
     pub fn size(&self) -> usize {
         self.data.len()
-    }
-
-    pub fn insert(&mut self, v: T) {
-        self.data.push(v);
     }
 
     pub fn merge(&self, other: Arc<LeafNode<T>>) -> Arc<LeafNode<T>> {
@@ -54,7 +43,7 @@ impl<T: ComparableNode> LeafNode<T> {
         }
         Arc::new(LeafNode {
             data,
-            key: self.key.clone()
+            key: self.key.clone(),
         })
     }
 
@@ -68,6 +57,28 @@ impl<T: ComparableNode> LeafNode<T> {
 }
 
 impl<T: ComparableNode> LeafNodeBuilder<T> {
+    fn split_node(mut data: Vec<T>, left: Bytes) -> Vec<Arc<LeafNode<T>>> {
+        let split_count = (data.len() + SPLIT_NODE_SIZE - 1) / SPLIT_NODE_SIZE;
+        let split_size = data.len() / split_count;
+        let mut last_idx = data.len() - split_size;
+        let mut end_idx = data.len();
+        let mut nodes = Vec::with_capacity(split_count);
+        while last_idx >= split_size {
+            let new_data = data[last_idx..end_idx].to_vec();
+            let key = data[last_idx].smallest().clone();
+            nodes.push(Arc::new(LeafNode {
+                data: new_data,
+                key,
+            }));
+            end_idx = last_idx;
+            last_idx -= split_size;
+        }
+        data.truncate(end_idx);
+        nodes.push(Arc::new(LeafNode { data, key: left }));
+        nodes.reverse();
+        nodes
+    }
+
     pub fn build(mut self) -> Vec<Arc<LeafNode<T>>> {
         if self.delMap.is_empty() {
             self.data.sort_by(|a, b| a.smallest().cmp(b.smallest()));
@@ -77,20 +88,7 @@ impl<T: ComparableNode> LeafNodeBuilder<T> {
                     key: self.key,
                 })];
             } else {
-                let mid = self.data.len() / 2;
-                let right_data = self.data[mid..].to_vec();
-                let right_key = self.data[mid].smallest().clone();
-                self.data.truncate(mid);
-                return vec![
-                    Arc::new(LeafNode {
-                        data: self.data,
-                        key: self.key,
-                    }),
-                    Arc::new(LeafNode {
-                        data: right_data,
-                        key: right_key,
-                    }),
-                ];
+                return Self::split_node(self.data, self.key);
             }
         }
         let mut data = Vec::with_capacity(self.data.len());
@@ -101,28 +99,18 @@ impl<T: ComparableNode> LeafNodeBuilder<T> {
             data.push(d);
         }
         data.sort_by(|a, b| a.smallest().cmp(b.smallest()));
-
-        if data.len() > MAX_TREE_NODE_SIZE {
+        if data.len() <= MAX_TREE_NODE_SIZE {
             vec![Arc::new(LeafNode {
                 data,
                 key: self.key,
             })]
         } else {
-            let mid = data.len() / 2;
-            let right_data = data[mid..].to_vec();
-            let right_key = data[mid].smallest().clone();
-            data.truncate(mid);
-            vec![
-                Arc::new(LeafNode {
-                    data,
-                    key: self.key,
-                }),
-                Arc::new(LeafNode {
-                    data: right_data,
-                    key: right_key,
-                }),
-            ];
+            Self::split_node(data, self.key)
         }
+    }
+
+    pub fn insert(&mut self, v: T) {
+        self.data.push(v);
     }
 
     pub fn delete(&mut self, id: u64) {
@@ -133,6 +121,12 @@ impl<T: ComparableNode> LeafNodeBuilder<T> {
 #[derive(Clone)]
 pub struct LevelTree<T: ComparableNode> {
     nodes: Vec<Arc<LeafNode<T>>>,
+    prefix_sum: Vec<usize>,
+}
+
+pub struct LevelTreeIterator<T: ComparableNode> {
+    tree: Arc<LevelTree<T>>,
+    cursor_node: usize,
 }
 
 impl<T: ComparableNode> LevelTree<T> {
@@ -142,6 +136,7 @@ impl<T: ComparableNode> LevelTree<T> {
                 data: vec![],
                 key: Bytes::new(),
             })],
+            prefix_sum: vec![0],
         }
     }
 
@@ -149,15 +144,37 @@ impl<T: ComparableNode> LevelTree<T> {
         self.nodes.len()
     }
 
+    pub fn at(&self, idx: usize) -> Option<T> {
+        match self.prefix_sum.binary_search_by(|x| x.cmp(&idx)) {
+            Ok(found) => {
+                if found + 1 == self.prefix_sum.len() {
+                    None
+                } else {
+                    Some(self.nodes[found + 1].data[idx - self.prefix_sum[found]].clone())
+                }
+            }
+            Err(upper) => {
+                if upper >= self.prefix_sum.len() {
+                    None
+                } else {
+                    Some(self.nodes[upper].data[idx - self.prefix_sum[upper - 1]].clone())
+                }
+            }
+        }
+    }
+
     pub fn get(&self, key: &Bytes) -> Option<T> {
         let mut leaf_idx = match self.nodes.binary_search_by(|node| node.key.cmp(key)) {
             Ok(idx) => idx,
             Err(upper) => upper - 1,
         };
-        match self.nodes[leaf_idx].data.binary_search_by(|t| t.smallest().cmp(key)) {
+        match self.nodes[leaf_idx]
+            .data
+            .binary_search_by(|t| t.smallest().cmp(key))
+        {
             Ok(idx) => Some(self.nodes[leaf_idx].data[idx].clone()),
             Err(upper) => {
-                if self.nodes[leaf_idx].data[upper - 1].largest() >= key {
+                if upper > 0 && self.nodes[leaf_idx].data[upper - 1].largest() >= key {
                     Some(self.nodes[leaf_idx].data[upper - 1].clone())
                 } else {
                     None
@@ -167,26 +184,34 @@ impl<T: ComparableNode> LevelTree<T> {
     }
 
     pub fn update(&self, mut changes: Vec<LevelOperation<T>>) -> Self {
-        changes.sort_by_key(|op| match op {
-            LevelOperation::Insert(t) => t.smallest(),
-            LevelOperation::Delete { key, id } => key,
+        changes.sort_by(|a, b| {
+            let x = match a {
+                LevelOperation::Insert(t) => t.smallest(),
+                LevelOperation::Delete { key, .. } => key,
+            };
+            let y = match b {
+                LevelOperation::Insert(t) => t.smallest(),
+                LevelOperation::Delete { key, .. } => key,
+            };
+            x.cmp(y)
         });
         let change = changes.first().unwrap();
         let key = match change {
             LevelOperation::Insert(t) => t.smallest(),
-            LevelOperation::Delete { key, id } => key,
+            LevelOperation::Delete { key, .. } => key,
         };
         let mut idx = match self.nodes.binary_search_by(|node| node.key.cmp(key)) {
             Ok(idx) => idx,
             Err(upper) => upper - 1,
         };
-        let mut nodes = self.nodes[0..idx].to_vec();
+        let mut nodes = self.nodes.clone();
+        nodes.truncate(idx);
         let mut leaf = self.nodes[idx].create_builder();
         let mut start = idx;
         for operation in changes {
             match operation {
                 LevelOperation::Delete { key, id } => {
-                    while idx + 1 < self.nodes.len() && key.ge(&self.nodes[cur + 1].key) {
+                    while idx + 1 < self.nodes.len() && key.ge(&self.nodes[idx + 1].key) {
                         nodes.append(&mut leaf.build());
                         leaf = self.nodes[idx + 1].create_builder();
                         idx += 1;
@@ -194,7 +219,9 @@ impl<T: ComparableNode> LevelTree<T> {
                     leaf.delete(id);
                 }
                 LevelOperation::Insert(table) => {
-                    while idx + 1 < self.nodes.len() && table.smallest().ge(&self.nodes[cur + 1].key) {
+                    while idx + 1 < self.nodes.len()
+                        && table.smallest().ge(&self.nodes[idx + 1].key)
+                    {
                         nodes.append(&mut leaf.build());
                         leaf = self.nodes[idx + 1].create_builder();
                         idx += 1;
@@ -204,21 +231,25 @@ impl<T: ComparableNode> LevelTree<T> {
             }
         }
         nodes.append(&mut leaf.build());
-        for i in idx+1..self.nodes.len() {
+        for i in idx + 1..self.nodes.len() {
             nodes.push(self.nodes[i].clone());
         }
-        for i in start..=idx {
-            Self::try_merge_tree_node(&mut nodes, i);
+        while start <= idx && start < nodes.len() {
+            Self::try_merge_tree_node(&mut nodes, start);
+            start += 1;
         }
-        LevelTree {
-            nodes,
+        let mut prefix_sum = vec![0; nodes.len()];
+        prefix_sum[0] = nodes[0].size();
+        for i in 1..prefix_sum.len() {
+            prefix_sum[i] = prefix_sum[i - 1] + nodes[i].size();
         }
+        LevelTree { nodes, prefix_sum }
     }
 
     fn try_merge_tree_node(nodes: &mut Vec<Arc<LeafNode<T>>>, mut idx: usize) {
         let node_size = nodes[idx].size();
         if idx > 0
-            && ((node_size < MIN_MERGE_TREE_NODE_SIZE
+            && ((node_size < MIN_TREE_NODE_SIZE
                 && nodes[idx - 1].size() + node_size < MAX_TREE_NODE_SIZE)
                 || nodes[idx - 1].size() + node_size < MIN_MERGE_TREE_NODE_SIZE)
         {
@@ -229,7 +260,7 @@ impl<T: ComparableNode> LevelTree<T> {
             nodes[idx] = cur.merge(nodes[idx].clone());
             nodes.pop();
         } else if idx + 1 < nodes.len()
-            && ((node_size < MIN_MERGE_TREE_NODE_SIZE
+            && ((node_size < MIN_TREE_NODE_SIZE
                 && nodes[idx + 1].size() + node_size < MAX_TREE_NODE_SIZE)
                 || nodes[idx + 1].size() + node_size < MIN_MERGE_TREE_NODE_SIZE)
         {
@@ -242,6 +273,7 @@ impl<T: ComparableNode> LevelTree<T> {
         }
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,38 +299,60 @@ mod tests {
         }
     }
 
+    fn insert_to_tree(
+        tree: LevelTree<FakeTable>,
+        left: u64,
+        right: u64,
+        gap: u64,
+    ) -> LevelTree<FakeTable> {
+        let mut ops = vec![];
+        for i in left..right {
+            let smallest = i * gap;
+            let largest = (i + 1) * gap;
+            ops.push(LevelOperation::Insert(FakeTable {
+                id: i,
+                smallest: Bytes::from(smallest.to_string()),
+                largest: Bytes::from(largest.to_string()),
+            }));
+        }
+        tree.update(ops)
+    }
+
     #[test]
-    fn test_manifest_recover() {
-        let mut tree = LevelTree::<FakeTable>::new();
-        let mut ops = vec![];
-        for i in 0..128 {
-            let left = i * 100;
-            let right = (i + 1) * 100;
-            ops.push(LevelOperation::Insert(FakeTable {
-                id: i,
-                smallest: Bytes::from(left.to_string()),
-                largest: Bytes::from(right.to_string()),
-            }));
-        }
-        let tree = tree.update(ops);
-        let t = tree.get(&Bytes::from("200"));
+    fn test_leveltree() {
+        let tree = LevelTree::<FakeTable>::new();
+        let tree = insert_to_tree(tree, 100, 228, 100);
+        let t = tree.get(&Bytes::from("20000"));
         assert!(t.is_some());
-        assert_eq!(t.unwrap().id, 2);
-        let t = tree.get(&Bytes::from("299"));
+        assert_eq!(t.unwrap().id, 200);
+        let t = tree.get(&Bytes::from("20099"));
         assert!(t.is_some());
-        assert_eq!(t.unwrap().id, 2);
-        let mut ops = vec![];
-        for i in 128..600 {
-            let left = i * 100;
-            let right = (i + 1) * 100;
-            ops.push(LevelOperation::Insert(FakeTable {
-                id: i,
-                smallest: Bytes::from(left.to_string()),
-                largest: Bytes::from(right.to_string()),
-            }));
-        }
-        let tree = tree.update(ops);
+        assert_eq!(t.unwrap().id, 200);
+
+        let tree = insert_to_tree(tree, 228, 700, 100);
         assert_eq!(tree.nodes.len(), 2);
+        let t = tree.get(&Bytes::from("69999"));
+        assert!(t.is_some());
+        assert_eq!(t.unwrap().id, 699);
+
+        let mut ops = vec![];
+        for i in 100..=400 {
+            let left = i * 100;
+            ops.push(LevelOperation::Delete {
+                id: i,
+                key: Bytes::from(left.to_string()),
+            });
+        }
+        let mut tree = tree.update(ops);
+        let t = tree.get(&Bytes::from("20000"));
+        assert!(t.is_none());
+
+        let mut start = 1000;
+        while start < 3000 {
+            tree = insert_to_tree(tree, start, start + 400, 10);
+            start += 400;
+        }
+        let t = tree.get(&Bytes::from("20000"));
+        assert!(t.is_some());
     }
 }
-
