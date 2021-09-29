@@ -1,4 +1,5 @@
-use crate::format::user_key;
+mod leveltree;
+pub use leveltree::{LevelTree, LevelTreeIterator, ComparableNode};
 
 use bytes::Bytes;
 pub use skiplist::FixedLengthSuffixComparator as Comparator;
@@ -12,6 +13,7 @@ use std::{cmp, ptr};
 use std::{collections::hash_map::DefaultHasher, sync::atomic::AtomicBool};
 
 use crate::Result;
+use crate::format::user_key;
 
 pub static COMPARATOR: FixedLengthSuffixComparator = make_comparator();
 

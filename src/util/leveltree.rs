@@ -21,14 +21,15 @@ pub trait ComparableNode: Clone {
 #[derive(Clone, Default)]
 pub struct LeafNode<T: ComparableNode> {
     data: Vec<T>,
-    key: Bytes,
+    left: Bytes,
+    right: Bytes,
 }
 
 #[derive(Clone, Default)]
 pub struct LeafNodeBuilder<T: ComparableNode> {
     data: Vec<T>,
     delMap: HashSet<u64>,
-    key: Bytes,
+    left: Bytes,
 }
 
 impl<T: ComparableNode> LeafNode<T> {
@@ -43,14 +44,15 @@ impl<T: ComparableNode> LeafNode<T> {
         }
         Arc::new(LeafNode {
             data,
-            key: self.key.clone(),
+            left: self.left.clone(),
+            right: other.right.clone(),
         })
     }
 
     pub fn create_builder(&self) -> LeafNodeBuilder<T> {
         LeafNodeBuilder {
             data: self.data.clone(),
-            key: self.key.clone(),
+            left: self.left.clone(),
             delMap: HashSet::default(),
         }
     }
@@ -68,13 +70,15 @@ impl<T: ComparableNode> LeafNodeBuilder<T> {
             let key = data[last_idx].smallest().clone();
             nodes.push(Arc::new(LeafNode {
                 data: new_data,
-                key,
+                left: key,
+                right: data[end_idx - 1].largest().clone(),
             }));
             end_idx = last_idx;
             last_idx -= split_size;
         }
+        let right = data[end_idx-1].largest().clone();
         data.truncate(end_idx);
-        nodes.push(Arc::new(LeafNode { data, key: left }));
+        nodes.push(Arc::new(LeafNode { data, left, right }));
         nodes.reverse();
         nodes
     }
@@ -83,12 +87,15 @@ impl<T: ComparableNode> LeafNodeBuilder<T> {
         if self.delMap.is_empty() {
             self.data.sort_by(|a, b| a.smallest().cmp(b.smallest()));
             if self.data.len() <= MAX_TREE_NODE_SIZE {
+                let right = self.data.last().unwrap().largest().clone();
+                let left = std::cmp::min(self.left, self.data.first().unwrap().smallest().clone());
                 return vec![Arc::new(LeafNode {
                     data: self.data,
-                    key: self.key,
+                    left,
+                    right,
                 })];
             } else {
-                return Self::split_node(self.data, self.key);
+                return Self::split_node(self.data, self.left);
             }
         }
         let mut data = Vec::with_capacity(self.data.len());
@@ -100,12 +107,15 @@ impl<T: ComparableNode> LeafNodeBuilder<T> {
         }
         data.sort_by(|a, b| a.smallest().cmp(b.smallest()));
         if data.len() <= MAX_TREE_NODE_SIZE {
+            let left = std::cmp::min(self.left, self.data.first().unwrap().smallest().clone());
+            let right = data.last().unwrap().largest().clone();
             vec![Arc::new(LeafNode {
                 data,
-                key: self.key,
+                left,
+                right,
             })]
         } else {
-            Self::split_node(data, self.key)
+            Self::split_node(data, self.left)
         }
     }
 
@@ -121,12 +131,12 @@ impl<T: ComparableNode> LeafNodeBuilder<T> {
 #[derive(Clone)]
 pub struct LevelTree<T: ComparableNode> {
     nodes: Vec<Arc<LeafNode<T>>>,
-    prefix_sum: Vec<usize>,
 }
 
 pub struct LevelTreeIterator<T: ComparableNode> {
     tree: Arc<LevelTree<T>>,
-    cursor_node: usize,
+    node_cursor: usize,
+    leaf_cursor: usize,
 }
 
 impl<T: ComparableNode> LevelTree<T> {
@@ -134,9 +144,17 @@ impl<T: ComparableNode> LevelTree<T> {
         LevelTree::<T> {
             nodes: vec![Arc::new(LeafNode {
                 data: vec![],
-                key: Bytes::new(),
+                left: Bytes::new(),
+                right: Bytes::new(),
             })],
-            prefix_sum: vec![0],
+        }
+    }
+
+    pub fn new_iterator(tree: Arc<Self>) -> LevelTreeIterator<T> {
+        LevelTreeIterator {
+            tree,
+            node_cursor: 0,
+            leaf_cursor: 0,
         }
     }
 
@@ -144,27 +162,8 @@ impl<T: ComparableNode> LevelTree<T> {
         self.nodes.len()
     }
 
-    pub fn at(&self, idx: usize) -> Option<T> {
-        match self.prefix_sum.binary_search_by(|x| x.cmp(&idx)) {
-            Ok(found) => {
-                if found + 1 == self.prefix_sum.len() {
-                    None
-                } else {
-                    Some(self.nodes[found + 1].data[idx - self.prefix_sum[found]].clone())
-                }
-            }
-            Err(upper) => {
-                if upper >= self.prefix_sum.len() {
-                    None
-                } else {
-                    Some(self.nodes[upper].data[idx - self.prefix_sum[upper - 1]].clone())
-                }
-            }
-        }
-    }
-
     pub fn get(&self, key: &Bytes) -> Option<T> {
-        let mut leaf_idx = match self.nodes.binary_search_by(|node| node.key.cmp(key)) {
+        let mut leaf_idx = match self.nodes.binary_search_by(|node| node.left.cmp(key)) {
             Ok(idx) => idx,
             Err(upper) => upper - 1,
         };
@@ -200,7 +199,7 @@ impl<T: ComparableNode> LevelTree<T> {
             LevelOperation::Insert(t) => t.smallest(),
             LevelOperation::Delete { key, .. } => key,
         };
-        let mut idx = match self.nodes.binary_search_by(|node| node.key.cmp(key)) {
+        let mut idx = match self.nodes.binary_search_by(|node| node.left.cmp(key)) {
             Ok(idx) => idx,
             Err(upper) => upper - 1,
         };
@@ -211,7 +210,7 @@ impl<T: ComparableNode> LevelTree<T> {
         for operation in changes {
             match operation {
                 LevelOperation::Delete { key, id } => {
-                    while idx + 1 < self.nodes.len() && key.ge(&self.nodes[idx + 1].key) {
+                    while idx + 1 < self.nodes.len() && key.ge(&self.nodes[idx + 1].left) {
                         nodes.append(&mut leaf.build());
                         leaf = self.nodes[idx + 1].create_builder();
                         idx += 1;
@@ -220,7 +219,7 @@ impl<T: ComparableNode> LevelTree<T> {
                 }
                 LevelOperation::Insert(table) => {
                     while idx + 1 < self.nodes.len()
-                        && table.smallest().ge(&self.nodes[idx + 1].key)
+                        && table.smallest().ge(&self.nodes[idx + 1].left)
                     {
                         nodes.append(&mut leaf.build());
                         leaf = self.nodes[idx + 1].create_builder();
@@ -238,12 +237,7 @@ impl<T: ComparableNode> LevelTree<T> {
             Self::try_merge_tree_node(&mut nodes, start);
             start += 1;
         }
-        let mut prefix_sum = vec![0; nodes.len()];
-        prefix_sum[0] = nodes[0].size();
-        for i in 1..prefix_sum.len() {
-            prefix_sum[i] = prefix_sum[i - 1] + nodes[i].size();
-        }
-        LevelTree { nodes, prefix_sum }
+        LevelTree { nodes }
     }
 
     fn try_merge_tree_node(nodes: &mut Vec<Arc<LeafNode<T>>>, mut idx: usize) {
@@ -271,6 +265,108 @@ impl<T: ComparableNode> LevelTree<T> {
             }
             nodes.pop();
         }
+    }
+}
+
+impl<T: ComparableNode> LevelTreeIterator<T> {
+    pub fn seek_previous_postion(&mut self, key: &Bytes) {
+        self.leaf_cursor = match self.tree.nodes.binary_search_by(|node| node.left.cmp(key)) {
+            Ok(idx) => idx,
+            Err(upper) => upper - 1,
+        };
+        match self.tree.nodes[self.leaf_cursor]
+            .data
+            .binary_search_by(|t| t.smallest().cmp(key))
+        {
+            Ok(idx) => {
+                self.node_cursor = idx;
+            }
+            Err(upper) => {
+                if upper == 0 {
+                    self.node_cursor = self.tree.nodes[self.leaf_cursor].data.len();
+                } else {
+                    self.node_cursor = upper - 1;
+                }
+            }
+        }
+    }
+
+    pub fn seek_latest_postition(&mut self, key: &Bytes) {
+        self.leaf_cursor = match self.tree.nodes.binary_search_by(|node| node.right.cmp(key)) {
+            Ok(idx) => idx,
+            Err(upper) => upper,
+        };
+        if self.leaf_cursor == self.tree.nodes.len() {
+            return;
+        }
+        match self.tree.nodes[self.leaf_cursor]
+            .data
+            .binary_search_by(|t| t.largest().cmp(key))
+        {
+            Ok(idx) => {
+                self.node_cursor = idx;
+            }
+            Err(upper) => {
+                self.node_cursor = upper;
+            }
+        }
+    }
+
+    pub fn seek_first(&mut self) {
+        self.leaf_cursor = 0;
+        self.node_cursor = 0;
+    }
+
+    pub fn seek_last(&mut self) {
+        self.leaf_cursor = self.tree.nodes.len() - 1;
+        self.node_cursor = self.tree.nodes[self.leaf_cursor].data.len() - 1;
+    }
+
+    pub fn prev(&mut self) {
+        if self.leaf_cursor == self.tree.nodes.len() {
+            return;
+        }
+        if self.node_cursor == 0 {
+            if self.leaf_cursor == 0 {
+                self.leaf_cursor = self.tree.nodes.len();
+                return;
+            }
+            self.leaf_cursor -= 1;
+            self.node_cursor = self.tree.nodes[self.leaf_cursor].data.len() - 1;
+        } else {
+            self.node_cursor -= 1;
+        }
+    }
+
+    pub fn next(&mut self) {
+        if self.leaf_cursor == self.tree.nodes.len() {
+            return;
+        }
+        self.node_cursor += 1;
+        if self.node_cursor == self.tree.nodes[self.leaf_cursor].data.len() {
+            self.leaf_cursor += 1;
+            self.node_cursor = 0;
+        }
+    }
+
+    pub fn node(&self) -> Option<T> {
+        if self.leaf_cursor < self.tree.nodes.len() {
+            let node = self.tree.nodes[self.leaf_cursor].as_ref();
+            if self.node_cursor < node.data.len() {
+                return Some(node.data[self.node_cursor].clone())
+            }
+        }
+        None
+    }
+
+    pub fn valid(&self) -> bool {
+        if self.leaf_cursor < self.tree.nodes.len() {
+            let node = self.tree.nodes[self.leaf_cursor].as_ref();
+            if self.node_cursor < node.data.len() {
+                return true;
+            }
+        }
+        false
     }
 }
 
