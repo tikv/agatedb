@@ -86,17 +86,15 @@ impl Core {
         eprintln!("{} tables opened", num_opened);
 
         for (i, tables) in tables.into_iter().enumerate() {
-            if i == 0 {
-                let level: Box<dyn LevelHandler> =
-                    Box::new(HandlerLevel0::new(tables, opts.clone(), i));
-                levels.push(Arc::new(RwLock::new(level)));
-                continue;
-            }
-            let level: Box<dyn LevelHandler> = Box::new(HandlerBaseLevel::<VecTableAccessor>::new(
-                tables,
-                opts.clone(),
-                i,
-            ));
+            let level: Box<dyn LevelHandler> = if i == 0 {
+                Box::new(HandlerLevel0::new(tables, opts.clone(), i))
+            } else {
+                Box::new(HandlerBaseLevel::<VecTableAccessor>::new(
+                    tables,
+                    opts.clone(),
+                    i,
+                ))
+            };
             levels.push(Arc::new(RwLock::new(level)));
 
             cpt_status_levels.push(LevelCompactStatus::default());
