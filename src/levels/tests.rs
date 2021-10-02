@@ -5,15 +5,16 @@ pub fn helper_dump_levels(lvctl: &LevelsController) {
     for level in &lvctl.core.levels {
         let level = level.read().unwrap();
         eprintln!("--- Level {} ---", level.level);
-        for table in &level.tables {
+        level.iterate(|table| {
             eprintln!(
                 "#{} ({:?} - {:?}, {})",
                 table.id(),
                 table.smallest(),
-                table.biggest(),
+                table.largest(),
                 table.size()
             );
-        }
+            return true;
+        });
     }
 }
 
@@ -72,7 +73,7 @@ fn create_and_open(agate: &mut Agate, td: Vec<KeyValVersion>, level: usize) {
         .add_changes(vec![new_create_change(table.id(), level, 0)])
         .unwrap();
     let mut lv = agate.core.lvctl.core.levels[level].write().unwrap();
-    lv.tables.push(table);
+    lv.table_acessor.push(table);
 }
 
 mod overlap {
@@ -89,12 +90,12 @@ mod overlap {
             let l0_tables = agate.core.lvctl.core.levels[0]
                 .read()
                 .unwrap()
-                .tables
+                .table_acessor
                 .clone();
             let l1_tables = agate.core.lvctl.core.levels[1]
                 .read()
                 .unwrap()
-                .tables
+                .table_acessor
                 .clone();
 
             // lv0 should overlap with lv0 tables
@@ -124,12 +125,12 @@ mod overlap {
             let l0_tables = agate.core.lvctl.core.levels[0]
                 .read()
                 .unwrap()
-                .tables
+                .table_acessor
                 .clone();
             let l1_tables = agate.core.lvctl.core.levels[1]
                 .read()
                 .unwrap()
-                .tables
+                .table_acessor
                 .clone();
 
             // lv0 should overlap with lv0 tables
@@ -158,7 +159,7 @@ mod overlap {
             let l0_tables = agate.core.lvctl.core.levels[0]
                 .read()
                 .unwrap()
-                .tables
+                .table_acessor
                 .clone();
 
             // lv1 should not overlap with lv0 tables
@@ -234,12 +235,12 @@ fn generate_test_compect_def(
     compact_def.top = agate.core.lvctl.core.levels[this_level_id]
         .read()
         .unwrap()
-        .tables
+        .table_acessor
         .clone();
     compact_def.bot = agate.core.lvctl.core.levels[next_level_id]
         .read()
         .unwrap()
-        .tables
+        .table_acessor
         .clone();
     compact_def.targets.base_level = next_level_id;
     compact_def

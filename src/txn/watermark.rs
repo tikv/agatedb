@@ -74,11 +74,11 @@ impl Core {
             }
 
             if until != done_until {
-                assert_eq!(
-                    self.done_until
-                        .compare_and_swap(done_until, until, Ordering::SeqCst),
-                    done_until
-                );
+                let ret = self
+                    .done_until
+                    .compare_exchange(done_until, until, Ordering::SeqCst, Ordering::SeqCst)
+                    .unwrap_or_else(|x| x);
+                assert_eq!(ret, done_until);
             }
 
             if until - done_until <= waiters.len() as u64 {

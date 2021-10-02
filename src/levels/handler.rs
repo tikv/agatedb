@@ -1,5 +1,8 @@
+use std::collections::HashSet;
+use std::sync::Arc;
+
+use crate::table::{get_key_range_single, TableAccessor, TableAccessorIterator};
 use crate::value::Value;
-use crate::Result;
 use crate::{format::user_key, get_ts, iterator_trait::AgateIterator};
 use crate::{iterator::IteratorOptions, table::TableIterators};
 use crate::{
@@ -7,84 +10,200 @@ use crate::{
     util::{KeyComparator, COMPARATOR},
 };
 use crate::{AgateOptions, Table};
+use crate::{Error, Result};
 
 use super::KeyRange;
 
+use super::compaction::{get_key_range, CompactDef, CompactStatus};
+use crate::table::merge_iterator::Iterators;
 use bytes::Bytes;
 
-use std::collections::HashSet;
+pub trait LevelHandler: Send + Sync {
+    fn level(&self) -> usize;
+    fn num_tables(&self) -> usize;
+    fn total_size(&self) -> u64;
 
-pub struct LevelHandler {
-    opts: AgateOptions,
-    pub level: usize,
-    pub tables: Vec<Table>,
-    pub total_size: u64,
+    fn get(&self, key: &Bytes) -> Result<Value>;
+
+    fn append_iterators(&self, iters: &mut Vec<TableIterators>, opts: &IteratorOptions);
+    fn delete_tables(&mut self, to_del: &[Table]) -> Result<()>;
+    fn overlapping_tables(&self, kr: &KeyRange) -> Vec<Table>;
+    fn replace_tables(&mut self, to_del: &[Table], to_add: &[Table]) -> bool;
+    fn select_table_range(
+        &self,
+        other: &dyn LevelHandler,
+        compact_def: &mut CompactDef,
+        status: &mut CompactStatus,
+    ) -> Result<()>;
+
+    fn pick_all_tables(&self, max_file_size: u64, exists: &HashSet<u64>) -> Vec<Table>;
 }
 
-impl Drop for LevelHandler {
+pub struct HandlerBaseLevel<T: TableAccessor> {
+    opts: AgateOptions,
+    level: usize,
+    table_acessor: Arc<T>,
+}
+
+impl<T: TableAccessor> Drop for HandlerBaseLevel<T> {
     fn drop(&mut self) {
-        for table in self.tables.drain(..) {
-            // TODO: simply forget table instance would cause memory leak. Should find
-            // a better way to handle this. For example, `table.close_and_save()`, which
-            // consumes table instance without deleting the files.
-            table.mark_save();
+        let mut iter = T::new_iterator(self.table_acessor.clone());
+        iter.seek_first();
+        while iter.valid() {
+            iter.table().unwrap().mark_save();
+            iter.next();
         }
     }
 }
 
-impl LevelHandler {
-    pub fn new(opts: AgateOptions, level: usize) -> Self {
+impl<T: TableAccessor> HandlerBaseLevel<T> {
+    pub fn new(tables: Vec<Table>, opts: AgateOptions, level: usize) -> Self {
+        let table_acessor = T::create(tables);
         Self {
             opts,
             level,
-            tables: vec![],
-            total_size: 0,
+            table_acessor,
         }
     }
+}
 
-    pub fn try_add_l0_table(&mut self, table: Table) -> bool {
-        assert_eq!(self.level, 0);
-        if self.tables.len() >= self.opts.num_level_zero_tables_stall {
-            return false;
-        }
-
-        self.total_size += table.size();
-        self.tables.push(table);
-
-        true
+impl<T: 'static + TableAccessor> LevelHandler for HandlerBaseLevel<T> {
+    fn level(&self) -> usize {
+        self.level
     }
 
-    pub fn num_tables(&self) -> usize {
-        self.tables.len()
+    fn num_tables(&self) -> usize {
+        self.table_acessor.len()
     }
 
-    pub fn get_table_for_key(&self, key: &Bytes) -> Vec<Table> {
-        if self.level == 0 {
-            // for level 0, we need to iterate every table.
-
-            let mut out = self.tables.clone();
-            out.reverse();
-
-            out
-        } else {
-            let idx = crate::util::search(self.tables.len(), |idx| {
-                COMPARATOR.compare_key(self.tables[idx].biggest(), key) != std::cmp::Ordering::Less
-            });
-            if idx >= self.tables.len() {
-                vec![]
-            } else {
-                vec![self.tables[idx].clone()]
-            }
-        }
+    fn total_size(&self) -> u64 {
+        self.table_acessor.total_size()
     }
 
-    pub fn get(&self, key: &Bytes) -> Result<Value> {
-        let tables = self.get_table_for_key(key);
+    fn get(&self, key: &Bytes) -> Result<Value> {
         let key_no_ts = user_key(key);
         let hash = farmhash::fingerprint32(key_no_ts);
         let mut max_vs = Value::default();
 
-        for table in tables {
+        if let Some(table) = self.table_acessor.get(key) {
+            if !table.does_not_have(hash) {
+                let mut it = table.new_iterator(0);
+                it.seek(key);
+                if it.valid() {
+                    if crate::util::same_key(key, it.key()) {
+                        let version = get_ts(it.key());
+                        max_vs = it.value();
+                        max_vs.version = version;
+                    }
+                }
+            }
+        }
+        Ok(max_vs)
+    }
+
+    fn append_iterators(&self, iters: &mut Vec<TableIterators>, _: &IteratorOptions) {
+        if !self.table_acessor.is_empty() {
+            let acessor = self.table_acessor.clone();
+            let iter = ConcatIterator::from_tables(Box::new(T::new_iterator(acessor)), 0);
+            iters.push(TableIterators::from(iter));
+        }
+    }
+
+    fn delete_tables(&mut self, to_del: &[Table]) -> Result<()> {
+        let acessor = self.table_acessor.delete_tables(to_del);
+        self.table_acessor = acessor;
+        Ok(())
+    }
+
+    fn overlapping_tables(&self, kr: &KeyRange) -> Vec<Table> {
+        use std::cmp::Ordering::*;
+
+        if kr.left.is_empty() || kr.right.is_empty() {
+            return vec![];
+        }
+        let mut ret = vec![];
+        let mut iter = T::new_iterator(self.table_acessor.clone());
+        iter.seek(&kr.left);
+        while let Some(table) = iter.table() {
+            if COMPARATOR.compare_key(&kr.right, table.smallest()) == Less {
+                break;
+            }
+            ret.push(table);
+            iter.next();
+        }
+        ret
+    }
+
+    fn replace_tables(&mut self, to_del: &[Table], to_add: &[Table]) -> bool {
+        let acessor = self.table_acessor.replace_tables(to_del, to_add);
+        self.table_acessor = acessor;
+        true
+    }
+
+    fn select_table_range(
+        &self,
+        next_level: &dyn LevelHandler,
+        compact_def: &mut CompactDef,
+        status: &mut CompactStatus,
+    ) -> Result<()> {
+        let mut it = T::new_iterator(self.table_acessor.clone());
+        it.seek_first();
+        while let Some(table) = it.table() {
+            if select_table_range(&table, next_level, compact_def, status) {
+                return Ok(());
+            }
+            it.next();
+        }
+        Err(Error::CustomError("no table to fill".to_string()))
+    }
+
+    fn pick_all_tables(&self, _: u64, _: &HashSet<u64>) -> Vec<Table> {
+        vec![]
+    }
+}
+
+pub struct HandlerLevel0 {
+    tables: Vec<Table>,
+    opts: AgateOptions,
+    level: usize,
+    total_size: u64,
+}
+
+impl HandlerLevel0 {
+    pub fn new(mut tables: Vec<Table>, opts: AgateOptions, level: usize) -> Self {
+        tables.sort_by(|x, y| x.id().cmp(&y.id()));
+        let mut total_size = 0;
+        for table in &tables {
+            total_size += table.size();
+        }
+        Self {
+            opts,
+            level,
+            tables,
+            total_size,
+        }
+    }
+}
+
+impl LevelHandler for HandlerLevel0 {
+    fn level(&self) -> usize {
+        self.level
+    }
+
+    fn num_tables(&self) -> usize {
+        self.tables.len()
+    }
+
+    fn total_size(&self) -> u64 {
+        self.total_size
+    }
+
+    fn get(&self, key: &Bytes) -> Result<Value> {
+        let key_no_ts = user_key(key);
+        let hash = farmhash::fingerprint32(key_no_ts);
+        let mut max_vs = Value::default();
+
+        for table in self.tables.iter() {
             if table.does_not_have(hash) {
                 continue;
             }
@@ -104,33 +223,18 @@ impl LevelHandler {
                 }
             }
         }
-
         Ok(max_vs)
     }
 
-    pub fn overlapping_tables(&self, kr: &KeyRange) -> (usize, usize) {
-        use std::cmp::Ordering::*;
-
-        if kr.left.is_empty() || kr.right.is_empty() {
-            return (0, 0);
+    fn append_iterators(&self, iters: &mut Vec<Iterators>, opts: &IteratorOptions) {
+        for table in self.tables.iter().rev() {
+            if opts.pick_table(table) {
+                iters.push(TableIterators::from(table.new_iterator(0)));
+            }
         }
-        let left = crate::util::search(self.tables.len(), |i| {
-            match COMPARATOR.compare_key(&kr.left, self.tables[i].biggest()) {
-                Less | Equal => true,
-                _ => false,
-            }
-        });
-        let right = crate::util::search(self.tables.len(), |i| {
-            match COMPARATOR.compare_key(&kr.right, self.tables[i].smallest()) {
-                Less => true,
-                _ => false,
-            }
-        });
-        (left, right)
     }
 
-    pub fn replace_tables(&mut self, to_del: &[Table], to_add: &[Table]) -> Result<()> {
-        // TODO: handle deletion
+    fn delete_tables(&mut self, to_del: &[Table]) -> Result<()> {
         let mut to_del_map = HashSet::new();
 
         for table in to_del {
@@ -146,72 +250,101 @@ impl LevelHandler {
             }
             self.total_size = self.total_size.saturating_sub(table.size());
         }
-
-        for table in to_add {
-            self.total_size += table.size();
-            new_tables.push(table.clone());
-        }
-
-        new_tables.sort_by(|x, y| COMPARATOR.compare_key(x.smallest(), y.smallest()));
-
         self.tables = new_tables;
-
         Ok(())
     }
 
-    pub fn delete_tables(&mut self, to_del: &[Table]) -> Result<()> {
-        let mut to_del_map = HashSet::new();
+    fn overlapping_tables(&self, _: &KeyRange) -> Vec<Table> {
+        let mut out = vec![];
+        let mut kr = KeyRange::default();
+        for table in self.tables.iter() {
+            let dkr = get_key_range_single(table);
+            if kr.overlaps_with(&dkr) {
+                out.push(table.clone());
+                kr.extend(&dkr);
+            } else {
+                break;
+            }
+        }
+        out
+    }
 
-        for table in to_del {
-            to_del_map.insert(table.id());
+    fn replace_tables(&mut self, _: &[Table], to_add: &[Table]) -> bool {
+        assert_eq!(self.level, 0);
+        if self.tables.len() >= self.opts.num_level_zero_tables_stall {
+            return false;
         }
 
-        let mut new_tables = vec![];
+        for t in to_add {
+            self.total_size += t.size();
+            self.tables.push(t.clone());
+        }
+        true
+    }
 
-        for table in &self.tables {
-            if !to_del_map.contains(&table.id()) {
-                new_tables.push(table.clone());
+    fn select_table_range(
+        &self,
+        next_level: &dyn LevelHandler,
+        compact_def: &mut CompactDef,
+        status: &mut CompactStatus,
+    ) -> Result<()> {
+        for table in self.tables.iter() {
+            if select_table_range(&table, next_level, compact_def, status) {
+                return Ok(());
+            }
+        }
+        Err(Error::CustomError("no table to fill".to_string()))
+    }
+
+    fn pick_all_tables(&self, max_file_size: u64, tables: &HashSet<u64>) -> Vec<Table> {
+        let mut out = vec![];
+        for table in self.tables.iter() {
+            if table.size() > max_file_size {
+                // file already big, don't include it
                 continue;
             }
-            self.total_size = self.total_size.saturating_sub(table.size());
-        }
-
-        self.tables = new_tables;
-
-        Ok(())
-    }
-
-    pub fn init_tables(&mut self, tables: Vec<Table>) {
-        self.tables = tables;
-        self.total_size = 0;
-        for table in &self.tables {
-            self.total_size += table.size();
-        }
-
-        if self.level == 0 {
-            self.tables.sort_by(|x, y| x.id().cmp(&y.id()));
-        } else {
-            self.tables
-                .sort_by(|x, y| COMPARATOR.compare_key(x.smallest(), y.smallest()));
-        }
-    }
-
-    pub(crate) fn append_iterators(&self, iters: &mut Vec<TableIterators>, opts: &IteratorOptions) {
-        if self.level == 0 {
-            for table in self.tables.iter().rev() {
-                if opts.pick_table(table) {
-                    iters.push(TableIterators::from(table.new_iterator(0)));
-                }
+            // TODO: created at logic
+            if tables.contains(&table.id()) {
+                continue;
             }
-            return;
+            out.push(table.clone());
         }
-
-        let mut tables = self.tables.clone();
-        opts.pick_tables(&mut tables);
-        if !tables.is_empty() {
-            let iter = ConcatIterator::from_tables(tables, 0);
-            iters.push(TableIterators::from(iter));
-        }
-        return;
+        out
     }
+}
+
+fn select_table_range(
+    table: &Table,
+    next_level: &dyn LevelHandler,
+    compact_def: &mut CompactDef,
+    cpt_status: &mut CompactStatus,
+) -> bool {
+    compact_def.this_size = table.size();
+    compact_def.this_range = get_key_range_single(table);
+    // if we're already compacting this range, don't do anything
+    if cpt_status.overlaps_with(compact_def.this_level_id, &compact_def.this_range) {
+        return false;
+    }
+    compact_def.top = vec![table.clone()];
+    compact_def.bot = next_level.overlapping_tables(&compact_def.this_range);
+
+    if compact_def.bot.is_empty() {
+        compact_def.bot = vec![];
+        compact_def.next_range = compact_def.this_range.clone();
+        if let Err(_) = cpt_status.compare_and_add(compact_def) {
+            return false;
+        }
+        return true;
+    }
+
+    compact_def.next_range = get_key_range(&compact_def.bot);
+
+    if cpt_status.overlaps_with(compact_def.next_level_id, &compact_def.next_range) {
+        return false;
+    }
+
+    if let Err(_) = cpt_status.compare_and_add(compact_def) {
+        return false;
+    }
+    return true;
 }

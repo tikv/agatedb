@@ -1,119 +1,92 @@
 use super::iterator::ITERATOR_REVERSED;
-use super::{AgateIterator, Table, TableIterator};
-use crate::util::{KeyComparator, COMPARATOR};
+use super::{AgateIterator, TableIterator};
+use crate::table::table_accessor::TableAccessorIterator;
 use crate::value::Value;
 
 use bytes::Bytes;
 
 /// ConcatIterator iterates on SSTs with no overlap keys.
 pub struct ConcatIterator {
-    cur: Option<usize>,
-    iters: Vec<Option<TableIterator>>,
-    tables: Vec<Table>,
+    cur_iter: Option<TableIterator>,
+    accessor: Box<dyn TableAccessorIterator>,
     opt: usize,
 }
 
 impl ConcatIterator {
     /// Create `ConcatIterator` from a list of tables. Tables must have been sorted
     /// and have no overlap keys.
-    pub fn from_tables(tables: Vec<Table>, opt: usize) -> Self {
-        let iters = tables.iter().map(|_| None).collect();
-
+    pub fn from_tables(accessor: Box<dyn TableAccessorIterator>, opt: usize) -> Self {
         ConcatIterator {
-            cur: None,
-            iters,
-            tables,
+            cur_iter: None,
+            accessor,
             opt,
         }
     }
 
-    fn set_idx(&mut self, idx: usize) {
-        if idx >= self.iters.len() {
-            self.cur = None;
-            return;
-        }
-        if self.iters[idx].is_none() {
-            self.iters[idx] = Some(self.tables[idx].new_iterator(self.opt));
-        }
-        self.cur = Some(idx);
-    }
-
     fn iter_mut(&mut self) -> &mut TableIterator {
-        self.iters[self.cur.unwrap()].as_mut().unwrap()
+        self.cur_iter.as_mut().unwrap()
     }
 
     fn iter_ref(&self) -> &TableIterator {
-        self.iters[self.cur.unwrap()].as_ref().unwrap()
+        self.cur_iter.as_ref().unwrap()
     }
 }
 
 impl AgateIterator for ConcatIterator {
     fn next(&mut self) {
-        let cur = self.cur.unwrap();
         let cur_iter = self.iter_mut();
         cur_iter.next();
         if cur_iter.valid() {
             return;
         }
         drop(cur_iter);
+        self.cur_iter = None;
         loop {
             if self.opt & ITERATOR_REVERSED == 0 {
-                self.set_idx(cur + 1);
+                self.accessor.next();
             } else {
-                if cur == 0 {
-                    self.cur = None;
-                } else {
-                    self.set_idx(cur - 1);
-                }
+                self.accessor.prev();
             }
-            if self.cur.is_some() {
-                self.iter_mut().rewind();
-                if self.iter_ref().valid() {
-                    return;
-                }
-            } else {
+            if !self.accessor.valid() {
                 return;
             }
+            self.cur_iter = self.accessor.table().map(|t| t.new_iterator(self.opt));
+            self.iter_mut().rewind();
+            if self.iter_ref().valid() {
+                return;
+            }
+            self.cur_iter = None;
         }
     }
 
     fn rewind(&mut self) {
-        if self.iters.is_empty() {
+        if self.opt & ITERATOR_REVERSED == 0 {
+            self.accessor.seek_first();
+        } else {
+            self.accessor.seek_last();
+        }
+        self.cur_iter = self.accessor.table().map(|t| t.new_iterator(self.opt));
+        if self.cur_iter.is_none() {
             return;
         }
-        if self.opt & ITERATOR_REVERSED == 0 {
-            self.set_idx(0);
-        } else {
-            self.set_idx(self.iters.len() - 1);
-        }
-
         self.iter_mut().rewind();
     }
 
     fn seek(&mut self, key: &Bytes) {
-        use std::cmp::Ordering::*;
-        let idx;
+        self.cur_iter = None;
         if self.opt & ITERATOR_REVERSED == 0 {
-            idx = crate::util::search(self.tables.len(), |idx| {
-                COMPARATOR.compare_key(self.tables[idx].biggest(), key) != Less
-            });
-            if idx >= self.tables.len() {
-                self.cur = None;
+            self.accessor.seek(key);
+            if !self.accessor.valid() {
                 return;
             }
+            self.cur_iter = self.accessor.table().map(|t| t.new_iterator(self.opt));
         } else {
-            let n = self.tables.len();
-            let ridx = crate::util::search(self.tables.len(), |idx| {
-                COMPARATOR.compare_key(self.tables[n - 1 - idx].smallest(), key) != Greater
-            });
-            if ridx >= self.tables.len() {
-                self.cur = None;
+            self.accessor.seek_for_previous(key);
+            if !self.accessor.valid() {
                 return;
             }
-            idx = n - 1 - ridx;
+            self.cur_iter = self.accessor.table().map(|t| t.new_iterator(self.opt));
         }
-
-        self.set_idx(idx);
         self.iter_mut().seek(key);
     }
 
@@ -126,7 +99,7 @@ impl AgateIterator for ConcatIterator {
     }
 
     fn valid(&self) -> bool {
-        if self.cur.is_some() {
+        if self.cur_iter.is_some() {
             self.iter_ref().valid()
         } else {
             false
