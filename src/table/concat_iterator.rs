@@ -111,7 +111,7 @@ impl AgateIterator for ConcatIterator {
 mod tests {
     use super::*;
 
-    use crate::table::Table;
+    use crate::table::{Table, TableAccessor, VecTableAccessor};
     use crate::{
         format::{key_with_ts, user_key},
         table::tests::{build_table_data, get_test_table_options},
@@ -146,7 +146,9 @@ mod tests {
     #[test]
     fn test_concat_iterator() {
         let (tables, cnt) = build_test_tables();
-        let mut iter = ConcatIterator::from_tables(tables, 0);
+        let accessor = VecTableAccessor::create(tables);
+        let mut iter =
+            ConcatIterator::from_tables(Box::new(VecTableAccessor::new_iterator(accessor)), 0);
 
         iter.rewind();
 

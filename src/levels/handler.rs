@@ -157,8 +157,17 @@ impl<T: 'static + TableAccessor> LevelHandler for HandlerBaseLevel<T> {
         Err(Error::CustomError("no table to fill".to_string()))
     }
 
-    fn pick_all_tables(&self, _: u64, _: &HashSet<u64>) -> Vec<Table> {
-        vec![]
+    fn pick_all_tables(&self, max_file_size: u64, tables: &HashSet<u64>) -> Vec<Table> {
+        let mut ret = vec![];
+        let mut it = T::new_iterator(self.table_acessor.clone());
+        it.seek_first();
+        while let Some(table) = it.table() {
+            if table.size() <= max_file_size && !tables.contains(&table.id()) {
+                ret.push(table);
+            }
+            it.next();
+        }
+        ret
     }
 }
 

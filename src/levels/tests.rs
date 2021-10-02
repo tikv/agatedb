@@ -1,11 +1,14 @@
 use super::*;
 use crate::{db::tests::with_agate_test, table::new_filename, Agate, TableOptions};
 
+#[cfg(test)]
 pub fn helper_dump_levels(lvctl: &LevelsController) {
     for level in &lvctl.core.levels {
         let level = level.read().unwrap();
-        eprintln!("--- Level {} ---", level.level);
-        level.iterate(|table| {
+        eprintln!("--- Level {} ---", level.level());
+        let exists = HashSet::new();
+        let tables = level.pick_all_tables(u64::MAX, &exists);
+        for table in tables {
             eprintln!(
                 "#{} ({:?} - {:?}, {})",
                 table.id(),
@@ -13,8 +16,7 @@ pub fn helper_dump_levels(lvctl: &LevelsController) {
                 table.largest(),
                 table.size()
             );
-            return true;
-        });
+        }
     }
 }
 
@@ -73,7 +75,7 @@ fn create_and_open(agate: &mut Agate, td: Vec<KeyValVersion>, level: usize) {
         .add_changes(vec![new_create_change(table.id(), level, 0)])
         .unwrap();
     let mut lv = agate.core.lvctl.core.levels[level].write().unwrap();
-    lv.table_acessor.push(table);
+    lv.replace_tables(&[], &[table]);
 }
 
 mod overlap {
@@ -90,13 +92,11 @@ mod overlap {
             let l0_tables = agate.core.lvctl.core.levels[0]
                 .read()
                 .unwrap()
-                .table_acessor
-                .clone();
+                .pick_all_tables(u64::MAX, &HashSet::default());
             let l1_tables = agate.core.lvctl.core.levels[1]
                 .read()
                 .unwrap()
-                .table_acessor
-                .clone();
+                .pick_all_tables(u64::MAX, &HashSet::default());
 
             // lv0 should overlap with lv0 tables
             assert!(agate.core.lvctl.core.check_overlap(&l0_tables, 0));
@@ -125,13 +125,11 @@ mod overlap {
             let l0_tables = agate.core.lvctl.core.levels[0]
                 .read()
                 .unwrap()
-                .table_acessor
-                .clone();
+                .pick_all_tables(u64::MAX, &HashSet::default());
             let l1_tables = agate.core.lvctl.core.levels[1]
                 .read()
                 .unwrap()
-                .table_acessor
-                .clone();
+                .pick_all_tables(u64::MAX, &HashSet::default());
 
             // lv0 should overlap with lv0 tables
             assert!(agate.core.lvctl.core.check_overlap(&l0_tables, 0));
@@ -159,8 +157,7 @@ mod overlap {
             let l0_tables = agate.core.lvctl.core.levels[0]
                 .read()
                 .unwrap()
-                .table_acessor
-                .clone();
+                .pick_all_tables(u64::MAX, &HashSet::default());
 
             // lv1 should not overlap with lv0 tables
             assert!(!agate.core.lvctl.core.check_overlap(&l0_tables, 1));
@@ -223,6 +220,7 @@ fn generate_test_compect_def(
         adjusted: 0.0,
         drop_prefixes: vec![],
     };
+    let exists = HashSet::new();
     let mut compact_def = CompactDef::new(
         0,
         agate.core.lvctl.core.levels[this_level_id].clone(),
@@ -235,13 +233,11 @@ fn generate_test_compect_def(
     compact_def.top = agate.core.lvctl.core.levels[this_level_id]
         .read()
         .unwrap()
-        .table_acessor
-        .clone();
+        .pick_all_tables(u64::MAX, &exists);
     compact_def.bot = agate.core.lvctl.core.levels[next_level_id]
         .read()
         .unwrap()
-        .table_acessor
-        .clone();
+        .pick_all_tables(u64::MAX, &exists);
     compact_def.targets.base_level = next_level_id;
     compact_def
 }
