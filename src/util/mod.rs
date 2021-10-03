@@ -1,5 +1,5 @@
 mod leveltree;
-pub use leveltree::{LevelTree, LevelTreeIterator, ComparableNode};
+pub use leveltree::{LevelTree, ComparableRecord};
 
 use bytes::Bytes;
 pub use skiplist::FixedLengthSuffixComparator as Comparator;

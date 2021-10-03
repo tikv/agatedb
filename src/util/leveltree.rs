@@ -1,374 +1,428 @@
 use bytes::Bytes;
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::marker::PhantomData;
 
-const MAX_TREE_NODE_SIZE: usize = 512;
-const MIN_TREE_NODE_SIZE: usize = 64;
-const SPLIT_NODE_SIZE: usize = 384;
-const MIN_MERGE_TREE_NODE_SIZE: usize = 256;
+const MAX_LEAF_NODE_SIZE: usize = 256;
+const MIN_LEAF_NODE_SIZE: usize = 32;
+const SPLIT_LEAF_SIZE: usize = 192;
+const MIN_MERGE_LEAF_NODE_SIZE: usize = 256;
 
-pub enum LevelOperation<T: ComparableNode> {
-    Insert(T),
-    Delete { key: Bytes, id: u64 },
-}
-
-pub trait ComparableNode: Clone {
+pub trait ComparableRecord: Clone {
     fn smallest(&self) -> &Bytes;
     fn largest(&self) -> &Bytes;
     fn id(&self) -> u64;
 }
 
-#[derive(Clone, Default)]
-pub struct LeafNode<T: ComparableNode> {
-    data: Vec<T>,
-    left: Bytes,
-    right: Bytes,
+pub trait TreePage<T: ComparableRecord>: Clone {
+    fn seek(&self, key: &Bytes) -> Option<T>;
+    fn smallest(&self) -> &Bytes;
+    fn largest(&self) -> &Bytes;
+    fn split(&self) -> Vec<Arc<Self>>;
+    fn merge(&self, other: &Self) -> Arc<Self>;
+    fn size(&self) -> usize;
+    fn record_number(&self) -> usize;
+    fn insert(&mut self, records: Vec<T>);
+    fn delete(&mut self, records: Vec<T>);
+    fn max_split_size(&self) -> usize;
+    fn min_merge_size(&self) -> usize;
 }
 
 #[derive(Clone, Default)]
-pub struct LeafNodeBuilder<T: ComparableNode> {
+pub struct LeafNode<T: ComparableRecord> {
     data: Vec<T>,
-    delMap: HashSet<u64>,
-    left: Bytes,
+    smallest: Bytes,
+    largest: Bytes,
+    max_page_size: usize,
 }
 
-impl<T: ComparableNode> LeafNode<T> {
-    pub fn size(&self) -> usize {
-        self.data.len()
+impl<T: ComparableRecord> TreePage<T> for LeafNode<T> {
+    fn seek(&self, key: &Bytes) -> Option<T> {
+        if self.data.is_empty() {
+            return None;
+        }
+        let idx = match self.data.binary_search_by(|node| node.largest().cmp(key)) {
+            Ok(idx) => idx,
+            Err(upper) => upper,
+        };
+        if idx >= self.data.len() {
+            None
+        } else {
+            Some(self.data[idx].clone())
+        }
     }
 
-    pub fn merge(&self, other: Arc<LeafNode<T>>) -> Arc<LeafNode<T>> {
+    fn smallest(&self) -> &Bytes {
+        &self.smallest
+    }
+
+    fn largest(&self) -> &Bytes {
+        &self.largest
+    }
+
+    fn split(&self) -> Vec<Arc<LeafNode<T>>> {
+        let split_count = (self.data.len() + self.max_page_size - 1) / self.max_page_size;
+        let split_size = self.data.len() / split_count;
+        let mut start_idx = 0;
+        let mut end_idx = split_size;
+        let mut nodes = vec![];
+        while start_idx < self.data.len() {
+            let new_data = self.data[start_idx..end_idx].to_vec();
+            let key = if start_idx == 0 {
+                self.smallest.clone()
+            } else {
+                self.data[start_idx].smallest().clone()
+            };
+            nodes.push(Arc::new(Self {
+                data: new_data,
+                smallest: key,
+                largest: self.data[end_idx - 1].largest().clone(),
+                max_page_size: self.max_page_size,
+            }));
+            start_idx += split_size;
+            end_idx += split_size;
+            if end_idx > self.data.len() {
+                end_idx = self.data.len();
+            }
+        }
+        nodes
+    }
+
+    fn merge(&self, other: &LeafNode<T>) -> Arc<LeafNode<T>> {
         let mut data = self.data.clone();
         for d in other.data.iter() {
             data.push(d.clone());
         }
         Arc::new(LeafNode {
             data,
-            left: self.left.clone(),
-            right: other.right.clone(),
+            smallest: self.smallest.clone(),
+            largest: other.largest.clone(),
+            max_page_size: self.max_page_size,
         })
     }
 
-    pub fn create_builder(&self) -> LeafNodeBuilder<T> {
-        LeafNodeBuilder {
-            data: self.data.clone(),
-            left: self.left.clone(),
-            delMap: HashSet::default(),
+    fn size(&self) -> usize {
+        self.data.len()
+    }
+
+    fn record_number(&self) -> usize {
+        self.data.len()
+    }
+
+    fn insert(&mut self, mut tables: Vec<T>) {
+        self.data.append(&mut tables);
+        self.data.sort_by(|a, b| a.smallest().cmp(b.smallest()));
+        self.largest = self.data.last().unwrap().largest().clone();
+    }
+
+    fn delete(&mut self, tables: Vec<T>) {
+        let mut del_map = HashSet::with_capacity(tables.len());
+        for t in tables {
+            del_map.insert(t.id());
         }
+        let mut new_idx = 0;
+        for cur in 0..self.data.len() {
+            if del_map.contains(&self.data[cur].id()) {
+                continue;
+            }
+            self.data[new_idx] = self.data[cur].clone();
+            new_idx += 1;
+        }
+        self.data.truncate(new_idx);
+    }
+
+    fn max_split_size(&self) -> usize {
+        self.max_page_size
+    }
+
+    fn min_merge_size(&self) -> usize {
+        self.max_page_size / 2
     }
 }
 
-impl<T: ComparableNode> LeafNodeBuilder<T> {
-    fn split_node(mut data: Vec<T>, left: Bytes) -> Vec<Arc<LeafNode<T>>> {
-        let split_count = (data.len() + SPLIT_NODE_SIZE - 1) / SPLIT_NODE_SIZE;
-        let split_size = data.len() / split_count;
-        let mut last_idx = data.len() - split_size;
-        let mut end_idx = data.len();
-        let mut nodes = Vec::with_capacity(split_count);
-        while last_idx >= split_size {
-            let new_data = data[last_idx..end_idx].to_vec();
-            let key = data[last_idx].smallest().clone();
-            nodes.push(Arc::new(LeafNode {
-                data: new_data,
-                left: key,
-                right: data[end_idx - 1].largest().clone(),
-            }));
-            end_idx = last_idx;
-            last_idx -= split_size;
+
+#[derive(Clone)]
+pub struct LevelTreePage<R: ComparableRecord, P: TreePage<R>> {
+    son: Vec<Arc<P>>,
+    smallest: Bytes,
+    largest: Bytes,
+    record_number: usize,
+    max_page_size: usize,
+    _phantom: PhantomData<R>,
+}
+
+impl<R,P> TreePage<R> for LevelTreePage<R, P> where R: ComparableRecord, P: TreePage<R> {
+    fn seek(&self, key: &Bytes) -> Option<R> {
+        if self.son.is_empty() {
+            return None;
         }
-        let right = data[end_idx-1].largest().clone();
-        data.truncate(end_idx);
-        nodes.push(Arc::new(LeafNode { data, left, right }));
-        nodes.reverse();
+        let mut idx = match self.son.binary_search_by(|node| node.smallest().cmp(key)) {
+            Ok(idx) => idx,
+            Err(upper) => {
+                if upper > 0 {
+                    upper - 1
+                } else {
+                    upper
+                }
+            }
+        };
+        if let Some(t) = self.son[idx].seek(key) {
+            return Some(t);
+        }
+        self.son[idx + 1].seek(key)
+    }
+
+    fn smallest(&self) -> &Bytes {
+        &self.smallest
+    }
+    fn largest(&self) -> &Bytes {
+        &self.largest
+    }
+
+    fn split(&self) -> Vec<Arc<Self>> {
+        let split_count = (self.son.len() + self.max_page_size - 1) / self.max_page_size;
+        let split_size = self.son.len() / split_count;
+        let mut start_idx = 0;
+        let mut end_idx = split_size;
+        let mut nodes = vec![];
+        while start_idx < self.son.len() {
+            let new_data = self.son[start_idx..end_idx].to_vec();
+            let mut record_number = 0;
+            for page in &new_data {
+                record_number += page.record_number();
+            }
+            let key = if start_idx == 0 {
+                self.smallest.clone()
+            } else {
+                self.son[start_idx].smallest().clone()
+            };
+            nodes.push(Arc::new(LevelTreePage {
+                son: new_data,
+                smallest: key,
+                largest: self.son[end_idx - 1].largest().clone(),
+                max_page_size: self.max_page_size,
+                record_number,
+                _phantom: Default::default()
+            }));
+            start_idx += split_size;
+            end_idx += split_size;
+            if end_idx > self.son.len() {
+                end_idx = self.son.len();
+            }
+        }
         nodes
     }
 
-    pub fn build(mut self) -> Vec<Arc<LeafNode<T>>> {
-        if self.delMap.is_empty() {
-            self.data.sort_by(|a, b| a.smallest().cmp(b.smallest()));
-            if self.data.len() <= MAX_TREE_NODE_SIZE {
-                let right = self.data.last().unwrap().largest().clone();
-                let left = std::cmp::min(self.left, self.data.first().unwrap().smallest().clone());
-                return vec![Arc::new(LeafNode {
-                    data: self.data,
-                    left,
-                    right,
-                })];
+    fn merge(&self, other: &Self) -> Arc<Self> {
+        let mut son = self.son.clone();
+        for d in other.son.iter() {
+            son.push(d.clone());
+        }
+        Arc::new(Self {
+            son,
+            smallest: self.smallest.clone(),
+            largest: other.largest.clone(),
+            record_number: self.record_number + other.record_number,
+            max_page_size: self.max_page_size,
+            _phantom: Default::default(),
+        })
+    }
+
+    fn size(&self) -> usize {
+        self.son.len()
+    }
+
+    fn record_number(&self) -> usize {
+        self.record_number
+    }
+
+    fn insert(&mut self, records: Vec<R>)  {
+        if records.is_empty() {
+            return;
+        }
+        let key = records.first().unwrap().smallest();
+        let mut idx = match self.son.binary_search_by(|node| node.smallest().cmp(key)) {
+            Ok(idx) => idx,
+            Err(upper) => upper - 1,
+        };
+        let mut cur_page = self.son[idx].as_ref().clone();
+        let mut cur_records = Vec::with_capacity(records.len());
+        let mut processed_count = records.len();
+        for r  in records {
+            if idx + 1 < self.son.len()
+                && r.smallest().ge(self.son[idx + 1].smallest())
+            {
+                if !cur_records.is_empty() {
+                    self.record_number -= cur_page.record_number();
+                    cur_page.insert(cur_records);
+                    self.record_number += cur_page.record_number();
+                    cur_records = Vec::with_capacity(processed_count);
+                    self.son[idx] = Arc::new(cur_page);
+                    while idx + 1 < self.son.len()
+                        && r.smallest().ge(self.son[idx + 1].smallest()) {
+                        idx += 1;
+                    }
+                    cur_page = self.son[idx].as_ref().clone();
+                }
+            }
+            cur_records.push(r);
+            processed_count -= 1;
+        }
+        if !cur_records.is_empty() {
+            self.record_number -= cur_page.record_number();
+            cur_page.insert(cur_records);
+            self.record_number += cur_page.record_number();
+            self.son[idx] = Arc::new(cur_page);
+        }
+        let mut idx = 0;
+        let mut unsorted = false;
+        let size = self.son.len();
+        while idx < size {
+            if self.son[idx].size() > self.son[idx].max_split_size() {
+                let mut new_pages = self.son[idx].split();
+                assert!(new_pages.len() > 1);
+                self.son.append(&mut new_pages);
+                let p = self.son.pop().unwrap();
+                self.son[idx] = p;
+                unsorted = true;
+            }
+            idx += 1;
+        }
+        if unsorted {
+            self.son.sort_by(|a,b|a.smallest().cmp(b.smallest()));
+            if self.son.first().unwrap().smallest().cmp(self.smallest()) == std::cmp::Ordering::Less {
+                self.smallest = self.son.first().unwrap().smallest().clone();
+            }
+            self.largest = self.son.last().unwrap().largest().clone();
+        }
+    }
+
+    fn delete(&mut self, records: Vec<R>)  {
+        if records.is_empty() {
+            return;
+        }
+        let key = records.first().unwrap().smallest();
+        let mut idx = match self.son.binary_search_by(|node| node.smallest().cmp(key)) {
+            Ok(idx) => idx,
+            Err(upper) => upper - 1,
+        };
+        let mut cur_page = self.son[idx].as_ref().clone();
+        let mut cur_records = Vec::with_capacity(records.len());
+        let mut processed_count = records.len();
+        for r  in records {
+            if idx + 1 < self.son.len()
+                && r.smallest().ge(self.son[idx + 1].smallest())
+            {
+                if !cur_records.is_empty() {
+                    self.record_number -= cur_page.record_number();
+                    cur_page.delete(cur_records);
+                    self.record_number += cur_page.record_number();
+                    cur_records = Vec::with_capacity(processed_count);
+                    self.son[idx] = Arc::new(cur_page);
+                    while idx + 1 < self.son.len()
+                        && r.smallest().ge(self.son[idx + 1].smallest()) {
+                        idx += 1;
+                    }
+                    cur_page = self.son[idx].as_ref().clone();
+                }
+            }
+            cur_records.push(r);
+            processed_count -= 1;
+        }
+        if !cur_records.is_empty() {
+            self.record_number -= cur_page.record_number();
+            cur_page.delete(cur_records);
+            self.record_number += cur_page.record_number();
+            self.son[idx] = Arc::new(cur_page);
+        }
+        let mut new_idx = 1;
+        let mut cur_idx = 1;
+        let size = self.son.len();
+        while cur_idx < size {
+            if self.son[new_idx - 1].size() + self.son[cur_idx].size() < self.son[cur_idx].min_merge_size() ||
+                self.son[new_idx - 1].size() == 0 || self.son[cur_idx].size() == 0
+                {
+                self.son[new_idx - 1] = self.son[new_idx - 1].merge(self.son[cur_idx].as_ref());
+                cur_idx += 1;
             } else {
-                return Self::split_node(self.data, self.left);
+                self.son[new_idx] = self.son[cur_idx].clone();
+                new_idx += 1;
+                cur_idx += 1;
             }
         }
-        let mut data = Vec::with_capacity(self.data.len());
-        for d in self.data {
-            if self.delMap.contains(&d.id()) {
-                continue;
-            }
-            data.push(d);
+        if new_idx < self.son.len() {
+            self.son.truncate(new_idx);
         }
-        data.sort_by(|a, b| a.smallest().cmp(b.smallest()));
-        if data.len() <= MAX_TREE_NODE_SIZE {
-            let left = std::cmp::min(self.left, self.data.first().unwrap().smallest().clone());
-            let right = data.last().unwrap().largest().clone();
-            vec![Arc::new(LeafNode {
-                data,
-                left,
-                right,
-            })]
-        } else {
-            Self::split_node(data, self.left)
-        }
+        self.largest = self.son.last().unwrap().largest().clone();
     }
 
-    pub fn insert(&mut self, v: T) {
-        self.data.push(v);
+    fn max_split_size(&self) -> usize {
+        self.max_page_size * 3 / 4
     }
 
-    pub fn delete(&mut self, id: u64) {
-        self.delMap.insert(id);
+    fn min_merge_size(&self) -> usize {
+        self.max_page_size / 2
     }
 }
 
 #[derive(Clone)]
-pub struct LevelTree<T: ComparableNode> {
-    nodes: Vec<Arc<LeafNode<T>>>,
+pub struct LevelTree<T: ComparableRecord> {
+    node: LevelTreePage<T, LevelTreePage<T, LeafNode<T>>>,
 }
 
-pub struct LevelTreeIterator<T: ComparableNode> {
-    tree: Arc<LevelTree<T>>,
-    node_cursor: usize,
-    leaf_cursor: usize,
-}
-
-impl<T: ComparableNode> LevelTree<T> {
+impl<T: ComparableRecord> LevelTree<T> {
     pub fn new() -> Self {
-        LevelTree::<T> {
-            nodes: vec![Arc::new(LeafNode {
-                data: vec![],
-                left: Bytes::new(),
-                right: Bytes::new(),
-            })],
+        Self {
+            node: LevelTreePage::<T, LevelTreePage<T, LeafNode<T>>> {
+                son: vec![
+                    Arc::new(LevelTreePage::<T, LeafNode<T>> {
+                        son: vec![
+                            Arc::new(LeafNode::<T> {
+                                data: vec![],
+                                smallest: Bytes::new(),
+                                largest: Bytes::new(),
+                                max_page_size: 128,
+                            }),
+                        ],
+                        smallest: Bytes::new(),
+                        largest: Bytes::new(),
+                        record_number: 0,
+                        max_page_size: 64,
+                        _phantom: Default::default()
+                    })
+                ],
+                largest: Bytes::new(),
+                smallest: Bytes::new(),
+                max_page_size: 32,
+                record_number: 0,
+                _phantom: Default::default()
+            }
         }
     }
 
-    pub fn new_iterator(tree: Arc<Self>) -> LevelTreeIterator<T> {
-        LevelTreeIterator {
-            tree,
-            node_cursor: 0,
-            leaf_cursor: 0,
-        }
-    }
 
     pub fn size(&self) -> usize {
-        self.nodes.len()
+        self.node.record_number()
     }
 
     pub fn get(&self, key: &Bytes) -> Option<T> {
-        let mut leaf_idx = match self.nodes.binary_search_by(|node| node.left.cmp(key)) {
-            Ok(idx) => idx,
-            Err(upper) => upper - 1,
-        };
-        match self.nodes[leaf_idx]
-            .data
-            .binary_search_by(|t| t.smallest().cmp(key))
-        {
-            Ok(idx) => Some(self.nodes[leaf_idx].data[idx].clone()),
-            Err(upper) => {
-                if upper > 0 && self.nodes[leaf_idx].data[upper - 1].largest() >= key {
-                    Some(self.nodes[leaf_idx].data[upper - 1].clone())
-                } else {
-                    None
-                }
-            }
-        }
+        self.node.seek(key)
     }
 
-    pub fn update(&self, mut changes: Vec<LevelOperation<T>>) -> Self {
-        changes.sort_by(|a, b| {
-            let x = match a {
-                LevelOperation::Insert(t) => t.smallest(),
-                LevelOperation::Delete { key, .. } => key,
-            };
-            let y = match b {
-                LevelOperation::Insert(t) => t.smallest(),
-                LevelOperation::Delete { key, .. } => key,
-            };
-            x.cmp(y)
-        });
-        let change = changes.first().unwrap();
-        let key = match change {
-            LevelOperation::Insert(t) => t.smallest(),
-            LevelOperation::Delete { key, .. } => key,
-        };
-        let mut idx = match self.nodes.binary_search_by(|node| node.left.cmp(key)) {
-            Ok(idx) => idx,
-            Err(upper) => upper - 1,
-        };
-        let mut nodes = self.nodes.clone();
-        nodes.truncate(idx);
-        let mut leaf = self.nodes[idx].create_builder();
-        let mut start = idx;
-        for operation in changes {
-            match operation {
-                LevelOperation::Delete { key, id } => {
-                    while idx + 1 < self.nodes.len() && key.ge(&self.nodes[idx + 1].left) {
-                        nodes.append(&mut leaf.build());
-                        leaf = self.nodes[idx + 1].create_builder();
-                        idx += 1;
-                    }
-                    leaf.delete(id);
-                }
-                LevelOperation::Insert(table) => {
-                    while idx + 1 < self.nodes.len()
-                        && table.smallest().ge(&self.nodes[idx + 1].left)
-                    {
-                        nodes.append(&mut leaf.build());
-                        leaf = self.nodes[idx + 1].create_builder();
-                        idx += 1;
-                    }
-                    leaf.insert(table);
-                }
-            }
+    pub fn replace(&self, mut to_del: Vec<T>, mut to_add: Vec<T>) -> Self {
+        let mut node = self.node.clone();
+        if !to_del.is_empty() {
+            to_del.sort_by(|a, b| a.smallest().cmp(b.smallest()));
+            node.delete(to_del);
         }
-        nodes.append(&mut leaf.build());
-        for i in idx + 1..self.nodes.len() {
-            nodes.push(self.nodes[i].clone());
+        if !to_add.is_empty() {
+            to_add.sort_by(|a, b| a.smallest().cmp(b.smallest()));
+            node.insert(to_add);
         }
-        while start <= idx && start < nodes.len() {
-            Self::try_merge_tree_node(&mut nodes, start);
-            start += 1;
-        }
-        LevelTree { nodes }
-    }
-
-    fn try_merge_tree_node(nodes: &mut Vec<Arc<LeafNode<T>>>, mut idx: usize) {
-        let node_size = nodes[idx].size();
-        if idx > 0
-            && ((node_size < MIN_TREE_NODE_SIZE
-                && nodes[idx - 1].size() + node_size < MAX_TREE_NODE_SIZE)
-                || nodes[idx - 1].size() + node_size < MIN_MERGE_TREE_NODE_SIZE)
-        {
-            let cur = nodes[idx].clone();
-            for i in idx + 1..nodes.len() {
-                nodes[i - 1] = nodes[i].clone();
-            }
-            nodes[idx] = cur.merge(nodes[idx].clone());
-            nodes.pop();
-        } else if idx + 1 < nodes.len()
-            && ((node_size < MIN_TREE_NODE_SIZE
-                && nodes[idx + 1].size() + node_size < MAX_TREE_NODE_SIZE)
-                || nodes[idx + 1].size() + node_size < MIN_MERGE_TREE_NODE_SIZE)
-        {
-            nodes[idx] = nodes[idx].merge(nodes[idx + 1].clone());
-            idx += 1;
-            for i in idx + 1..nodes.len() {
-                nodes[i - 1] = nodes[i].clone();
-            }
-            nodes.pop();
-        }
+        LevelTree { node }
     }
 }
 
-impl<T: ComparableNode> LevelTreeIterator<T> {
-    pub fn seek_previous_postion(&mut self, key: &Bytes) {
-        self.leaf_cursor = match self.tree.nodes.binary_search_by(|node| node.left.cmp(key)) {
-            Ok(idx) => idx,
-            Err(upper) => upper - 1,
-        };
-        match self.tree.nodes[self.leaf_cursor]
-            .data
-            .binary_search_by(|t| t.smallest().cmp(key))
-        {
-            Ok(idx) => {
-                self.node_cursor = idx;
-            }
-            Err(upper) => {
-                if upper == 0 {
-                    self.node_cursor = self.tree.nodes[self.leaf_cursor].data.len();
-                } else {
-                    self.node_cursor = upper - 1;
-                }
-            }
-        }
-    }
-
-    pub fn seek_latest_postition(&mut self, key: &Bytes) {
-        self.leaf_cursor = match self.tree.nodes.binary_search_by(|node| node.right.cmp(key)) {
-            Ok(idx) => idx,
-            Err(upper) => upper,
-        };
-        if self.leaf_cursor == self.tree.nodes.len() {
-            return;
-        }
-        match self.tree.nodes[self.leaf_cursor]
-            .data
-            .binary_search_by(|t| t.largest().cmp(key))
-        {
-            Ok(idx) => {
-                self.node_cursor = idx;
-            }
-            Err(upper) => {
-                self.node_cursor = upper;
-            }
-        }
-    }
-
-    pub fn seek_first(&mut self) {
-        self.leaf_cursor = 0;
-        self.node_cursor = 0;
-    }
-
-    pub fn seek_last(&mut self) {
-        self.leaf_cursor = self.tree.nodes.len() - 1;
-        self.node_cursor = self.tree.nodes[self.leaf_cursor].data.len() - 1;
-    }
-
-    pub fn prev(&mut self) {
-        if self.leaf_cursor == self.tree.nodes.len() {
-            return;
-        }
-        if self.node_cursor == 0 {
-            if self.leaf_cursor == 0 {
-                self.leaf_cursor = self.tree.nodes.len();
-                return;
-            }
-            self.leaf_cursor -= 1;
-            self.node_cursor = self.tree.nodes[self.leaf_cursor].data.len() - 1;
-        } else {
-            self.node_cursor -= 1;
-        }
-    }
-
-    pub fn next(&mut self) {
-        if self.leaf_cursor == self.tree.nodes.len() {
-            return;
-        }
-        self.node_cursor += 1;
-        if self.node_cursor == self.tree.nodes[self.leaf_cursor].data.len() {
-            self.leaf_cursor += 1;
-            self.node_cursor = 0;
-        }
-    }
-
-    pub fn node(&self) -> Option<T> {
-        if self.leaf_cursor < self.tree.nodes.len() {
-            let node = self.tree.nodes[self.leaf_cursor].as_ref();
-            if self.node_cursor < node.data.len() {
-                return Some(node.data[self.node_cursor].clone())
-            }
-        }
-        None
-    }
-
-    pub fn valid(&self) -> bool {
-        if self.leaf_cursor < self.tree.nodes.len() {
-            let node = self.tree.nodes[self.leaf_cursor].as_ref();
-            if self.node_cursor < node.data.len() {
-                return true;
-            }
-        }
-        false
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -381,7 +435,7 @@ mod tests {
         largest: Bytes,
     }
 
-    impl ComparableNode for FakeTable {
+    impl ComparableRecord for FakeTable {
         fn smallest(&self) -> &Bytes {
             &self.smallest
         }

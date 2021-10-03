@@ -1,6 +1,5 @@
 mod compaction;
 mod handler;
-mod leveltree;
 
 #[cfg(test)]
 pub(crate) mod tests;
