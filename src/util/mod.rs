@@ -55,7 +55,8 @@ pub fn bytes_diff<'a, 'b>(base: &'a [u8], target: &'b [u8]) -> &'b [u8] {
     }
 }
 
-/// simple rewrite of golang sort.Search
+/// simple rewrite of golang sort.Search. It will return the first one match `f`. If this
+/// does not exsit, it will return the size of array.
 pub fn search<F>(n: usize, mut f: F) -> usize
 where
     F: FnMut(usize) -> bool,
@@ -115,5 +116,87 @@ pub fn no_fail<T>(result: Result<T>, id: &str) {
 pub fn panic_if_fail() {
     if FAILED.load(std::sync::atomic::Ordering::SeqCst) {
         panic!("failed");
+    }
+}
+
+// TODO: use enum for this struct
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct KeyRange {
+    pub left: Bytes,
+    pub right: Bytes,
+    pub inf: bool,
+}
+
+impl KeyRange {
+    pub fn is_empty(&self) -> bool {
+        if self.inf {
+            false
+        } else {
+            self.left.is_empty() && self.right.is_empty()
+        }
+    }
+
+    pub fn inf() -> Self {
+        Self {
+            left: Bytes::new(),
+            right: Bytes::new(),
+            inf: true,
+        }
+    }
+
+    pub fn new(left: Bytes, right: Bytes) -> Self {
+        Self {
+            left,
+            right,
+            inf: false,
+        }
+    }
+
+    pub fn extend(&mut self, range: &Self) {
+        if self.is_empty() {
+            *self = range.clone();
+            return;
+        }
+        if range.left.len() == 0
+            || COMPARATOR.compare_key(&range.left, &self.left) == std::cmp::Ordering::Less
+        {
+            self.left = range.left.clone();
+        }
+        if range.right.len() == 0
+            || COMPARATOR.compare_key(&range.left, &self.left) == std::cmp::Ordering::Greater
+        {
+            self.right = range.right.clone();
+        }
+        if range.inf {
+            self.inf = true;
+            self.left = Bytes::new();
+            self.right = Bytes::new();
+        }
+    }
+
+    pub fn overlaps_with(&self, dst: &Self) -> bool {
+        if self.is_empty() {
+            return true;
+        }
+        if self.inf || dst.inf {
+            return true;
+        }
+        if COMPARATOR.compare_key(&self.left, &dst.right) == std::cmp::Ordering::Greater {
+            return false;
+        }
+        if COMPARATOR.compare_key(&self.right, &dst.left) == std::cmp::Ordering::Less {
+            return false;
+        }
+        true
+    }
+}
+
+impl Default for KeyRange {
+    fn default() -> Self {
+        Self {
+            left: Bytes::new(),
+            right: Bytes::new(),
+            inf: false,
+        }
     }
 }
