@@ -1,5 +1,5 @@
 mod leveltree;
-pub use leveltree::{LevelTree, ComparableRecord};
+pub use leveltree::{ComparableRecord, LevelTree};
 
 use bytes::Bytes;
 pub use skiplist::FixedLengthSuffixComparator as Comparator;
@@ -12,8 +12,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::{cmp, ptr};
 use std::{collections::hash_map::DefaultHasher, sync::atomic::AtomicBool};
 
-use crate::Result;
 use crate::format::user_key;
+use crate::Result;
 
 pub static COMPARATOR: FixedLengthSuffixComparator = make_comparator();
 
