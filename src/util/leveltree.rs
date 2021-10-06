@@ -156,26 +156,22 @@ where
         if self.son.is_empty() {
             return None;
         }
-        let idx = match self.son.binary_search_by(|node| node.smallest().cmp(key)) {
-            Ok(idx) => idx,
+        match self.son.binary_search_by(|node| node.smallest().cmp(key)) {
+            Ok(idx) => self.son[idx].seek(key),
             Err(upper) => {
                 if upper > 0 {
-                    upper - 1
+                    if self.son[upper - 1].largest().ge(key) {
+                        self.son[upper - 1].seek(key)
+                    } else if upper < self.son.len() {
+                        self.son[upper].seek(key)
+                    } else {
+                        None
+                    }
                 } else {
-                    upper
+                    self.son[upper].seek(key)
                 }
             }
-        };
-        println!(
-            "{},[{}, {}]",
-            idx,
-            String::from_utf8(self.son[idx].smallest().as_ref().to_vec()).unwrap(),
-            String::from_utf8(self.son[idx].largest().as_ref().to_vec()).unwrap()
-        );
-        if let Some(t) = self.son[idx].seek(key) {
-            return Some(t);
         }
-        self.son[idx + 1].seek(key)
     }
 
     fn smallest(&self) -> &Bytes {

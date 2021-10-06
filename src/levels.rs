@@ -1,6 +1,7 @@
 mod compaction;
 mod handler;
 
+#[cfg(test)]
 pub(crate) mod tests;
 
 use crate::table::VecTableAccessor;

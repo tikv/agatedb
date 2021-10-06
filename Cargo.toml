@@ -51,6 +51,10 @@ harness = false
 name = "bench_iterator"
 harness = false
 
+[[bench]]
+name = "bench_manifest"
+harness = false
+
 [profile.bench]
 opt-level = 3
 debug = false
