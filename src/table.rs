@@ -5,12 +5,14 @@ pub mod merge_iterator;
 
 use crate::bloom::Bloom;
 use crate::checksum;
+use crate::format::{key_with_ts, user_key};
 use crate::iterator_trait::AgateIterator;
 use crate::opt::{ChecksumVerificationMode, Options};
+use crate::util::KeyRange;
 use crate::Error;
 use crate::Result;
 
-use bytes::{Buf, Bytes};
+use bytes::{Buf, Bytes, BytesMut};
 use iterator::TableRefIterator;
 use memmap::{Mmap, MmapOptions};
 use prost::Message;
@@ -25,8 +27,12 @@ pub use iterator::{ITERATOR_NOCACHE, ITERATOR_REVERSED};
 pub use merge_iterator::{Iterators as TableIterators, MergeIterator};
 pub type TableIterator = TableRefIterator<Arc<TableInner>>;
 
+mod table_accessor;
 #[cfg(test)]
 mod tests;
+mod vec_table_acessor;
+pub use table_accessor::{TableAccessor, TableAccessorIterator};
+pub use vec_table_acessor::{VecTableAccessor, VecTableAccessorIterator};
 
 /// MmapFile stores SST data. `File` refers to a file on disk,
 /// and `Memory` refers to data in memory.
@@ -587,8 +593,7 @@ impl Table {
     pub fn id(&self) -> u64 {
         self.inner.id()
     }
-
-    pub fn biggest(&self) -> &Bytes {
+    pub fn largest(&self) -> &Bytes {
         self.inner.biggest()
     }
 
@@ -613,4 +618,18 @@ fn id_to_filename(id: u64) -> String {
 
 pub fn new_filename<P: AsRef<Path>>(id: u64, dir: P) -> PathBuf {
     dir.as_ref().join(id_to_filename(id))
+}
+
+pub fn get_key_range_single(table: &Table) -> KeyRange {
+    let smallest = table.smallest().clone();
+    let biggest = table.largest().clone();
+
+    let mut smallest_buf = BytesMut::with_capacity(smallest.len() + 8);
+    let mut biggest_buf = BytesMut::with_capacity(biggest.len() + 8);
+    smallest_buf.extend_from_slice(user_key(&smallest));
+    biggest_buf.extend_from_slice(user_key(&biggest));
+    return KeyRange::new(
+        key_with_ts(smallest_buf, std::u64::MAX),
+        key_with_ts(biggest_buf, 0),
+    );
 }
