@@ -10,6 +10,9 @@ pub trait ComparableRecord: Clone {
 }
 
 pub trait TreePage<T: ComparableRecord>: Clone {
+    type Iter: TreePageIterator<T>;
+
+    fn new_iterator(self: &Arc<Self>) -> Self::Iter;
     fn seek(&self, key: &Bytes) -> Option<T>;
     fn smallest(&self) -> &Bytes;
     fn largest(&self) -> &Bytes;
@@ -28,6 +31,71 @@ pub trait TreePage<T: ComparableRecord>: Clone {
     }
 }
 
+pub trait TreePageIterator<T: ComparableRecord>: Clone {
+    fn seek(&mut self, key: &Bytes);
+    fn next(&mut self);
+    fn prev(&mut self);
+    fn idx(&self) -> usize;
+    fn valid(&self) -> bool;
+    fn size(&self) -> usize;
+    fn record(&self) -> Option<T>;
+}
+
+#[derive(Clone, Default)]
+pub struct LeafNodeIterator<T: ComparableRecord> {
+    page: Arc<LeafNode<T>>,
+    cursor: usize,
+}
+
+impl<T: ComparableRecord> TreePageIterator<T> for LeafNodeIterator<T> {
+    fn seek(&mut self, key: &Bytes) {
+        if self.page.data.is_empty() {
+            self.cursor = 0;
+            return;
+        }
+        self.cursor = match self
+            .page
+            .data
+            .binary_search_by(|node| node.largest().cmp(key))
+        {
+            Ok(idx) => idx,
+            Err(upper) => upper,
+        };
+    }
+
+    fn next(&mut self) {
+        self.cursor += 1;
+    }
+
+    fn prev(&mut self) {
+        if self.cursor > 0 {
+            self.cursor -= 1;
+        } else {
+            self.cursor = self.page.data.len();
+        }
+    }
+
+    fn idx(&self) -> usize {
+        self.cursor
+    }
+
+    fn valid(&self) -> bool {
+        self.cursor < self.page.data.len()
+    }
+
+    fn size(&self) -> usize {
+        self.page.data.len()
+    }
+
+    fn record(&self) -> Option<T> {
+        if self.valid() {
+            Some(self.page.data[self.cursor].clone())
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct LeafNode<T: ComparableRecord> {
     data: Vec<T>,
@@ -37,6 +105,15 @@ pub struct LeafNode<T: ComparableRecord> {
 }
 
 impl<T: ComparableRecord> TreePage<T> for LeafNode<T> {
+    type Iter = LeafNodeIterator<T>;
+
+    fn new_iterator(self: &Arc<Self>) -> Self::Iter {
+        LeafNodeIterator::<T> {
+            page: self.clone(),
+            cursor: 0,
+        }
+    }
+
     fn seek(&self, key: &Bytes) -> Option<T> {
         if self.data.is_empty() {
             return None;
@@ -147,11 +224,114 @@ pub struct LevelTreePage<R: ComparableRecord, P: TreePage<R>> {
     _phantom: PhantomData<R>,
 }
 
+#[derive(Clone)]
+pub struct LevelTreePageIterator<R: ComparableRecord, P: TreePage<R>> {
+    page: Arc<LevelTreePage<R, P>>,
+    cursor: usize,
+    iter: Option<P::Iter>,
+}
+
+impl<R, P> TreePageIterator<R> for LevelTreePageIterator<R, P>
+where
+    R: ComparableRecord,
+    P: TreePage<R>,
+{
+    fn seek(&mut self, key: &Bytes) {
+        if self.page.son.is_empty() {
+            self.cursor = 0;
+            return;
+        }
+        self.cursor = match self
+            .page
+            .son
+            .binary_search_by(|node| node.smallest().cmp(key))
+        {
+            Ok(idx) => idx,
+            Err(upper) => {
+                if upper > 0 {
+                    if self.page.son[upper - 1].largest().ge(key) {
+                        upper - 1
+                    } else {
+                        upper
+                    }
+                } else {
+                    upper
+                }
+            }
+        };
+        if self.cursor >= self.page.son.len() {
+            self.iter = None;
+            return;
+        }
+        let mut iter = self.page.son[self.cursor].new_iterator();
+        iter.seek(key);
+        while !iter.valid() && self.cursor < self.page.son.len() {
+            self.cursor += 1;
+            iter = self.page.son[self.cursor].new_iterator();
+            iter.seek(key);
+        }
+        if iter.valid() {
+            self.iter = Some(iter);
+        } else {
+            self.iter = None;
+        }
+    }
+
+    fn next(&mut self) {
+        if let Some(iter) = self.iter.as_mut() {
+            iter.next();
+            if iter.valid() {
+                return;
+            }
+        }
+        if self.cursor + 1 < self.page.son.len() {
+            self.cursor += 1;
+            self.iter = Some(self.page.son[self.cursor].new_iterator());
+        } else {
+            self.cursor = self.page.son.len();
+            self.iter = None;
+        }
+    }
+
+    fn prev(&mut self) {
+        unimplemented!()
+    }
+
+    fn idx(&self) -> usize {
+        self.cursor
+    }
+
+    fn valid(&self) -> bool {
+        self.cursor < self.page.son.len() && self.iter.as_ref().map_or(false, |iter| iter.valid())
+    }
+
+    fn size(&self) -> usize {
+        self.page.son.len()
+    }
+
+    fn record(&self) -> Option<R> {
+        if let Some(iter) = self.iter.as_ref() {
+            return iter.record();
+        }
+        None
+    }
+}
+
 impl<R, P> TreePage<R> for LevelTreePage<R, P>
 where
     R: ComparableRecord,
     P: TreePage<R>,
 {
+    type Iter = LevelTreePageIterator<R, P>;
+
+    fn new_iterator(self: &Arc<Self>) -> Self::Iter {
+        LevelTreePageIterator::<R, P> {
+            page: self.clone(),
+            cursor: 0,
+            iter: None,
+        }
+    }
+
     fn seek(&self, key: &Bytes) -> Option<R> {
         if self.son.is_empty() {
             return None;
@@ -364,13 +544,13 @@ where
 
 #[derive(Clone)]
 pub struct LevelTree<T: ComparableRecord> {
-    node: LevelTreePage<T, LevelTreePage<T, LeafNode<T>>>,
+    node: Arc<LevelTreePage<T, LevelTreePage<T, LeafNode<T>>>>,
 }
 
 impl<T: ComparableRecord> LevelTree<T> {
     pub fn new(max_page_size: usize, leaf_max_page_size: usize) -> Self {
         Self {
-            node: LevelTreePage::<T, LevelTreePage<T, LeafNode<T>>> {
+            node: Arc::new(LevelTreePage::<T, LevelTreePage<T, LeafNode<T>>> {
                 son: vec![Arc::new(LevelTreePage::<T, LeafNode<T>> {
                     son: vec![Arc::new(LeafNode::<T> {
                         data: vec![],
@@ -389,7 +569,7 @@ impl<T: ComparableRecord> LevelTree<T> {
                 max_page_size: 32,
                 record_number: 0,
                 _phantom: Default::default(),
-            },
+            }),
         }
     }
 
@@ -402,7 +582,7 @@ impl<T: ComparableRecord> LevelTree<T> {
     }
 
     pub fn replace(&self, mut to_del: Vec<T>, mut to_add: Vec<T>) -> Self {
-        let mut node = self.node.clone();
+        let mut node = self.node.as_ref().clone();
         if !to_del.is_empty() {
             to_del.sort_by(|a, b| a.smallest().cmp(b.smallest()));
             node.delete(to_del);
@@ -411,7 +591,15 @@ impl<T: ComparableRecord> LevelTree<T> {
             to_add.sort_by(|a, b| a.smallest().cmp(b.smallest()));
             node.insert(to_add);
         }
-        LevelTree { node }
+        LevelTree {
+            node: Arc::new(node),
+        }
+    }
+
+    pub fn new_iterator(
+        self: Arc<Self>,
+    ) -> LevelTreePageIterator<T, LevelTreePage<T, LeafNode<T>>> {
+        self.node.new_iterator()
     }
 }
 
