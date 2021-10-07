@@ -1,5 +1,5 @@
-mod leveltree;
-pub use leveltree::{ComparableRecord, LevelTree};
+mod btree;
+pub use btree::{BTree, BTreeIterator, BTreePageIterator, ComparableRecord, Page, PageIterator};
 
 use bytes::Bytes;
 pub use skiplist::FixedLengthSuffixComparator as Comparator;

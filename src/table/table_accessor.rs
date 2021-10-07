@@ -23,5 +23,4 @@ pub trait TableAccessor: Send + Sync {
     fn total_size(&self) -> u64;
     fn new_iterator(acessor: Arc<Self>) -> Self::Iter;
     fn replace_tables(&self, to_del: &[Table], to_add: &[Table]) -> Arc<Self>;
-    fn delete_tables(&self, to_del: &[Table]) -> Arc<Self>;
 }

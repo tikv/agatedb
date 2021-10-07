@@ -1,6 +1,6 @@
 mod common;
 
-use agatedb::util::{ComparableRecord, LevelTree};
+use agatedb::util::{BTree, ComparableRecord};
 use rand::Rng;
 use std::sync::Arc;
 

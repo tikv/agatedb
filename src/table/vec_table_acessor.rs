@@ -6,7 +6,7 @@ use std::sync::Arc;
 use super::table_accessor::{TableAccessor, TableAccessorIterator};
 use super::Table;
 
-use crate::util::{KeyComparator, COMPARATOR};
+use crate::util::{ComparableRecord, KeyComparator, COMPARATOR};
 
 pub struct VecTableAccessor {
     tables: Vec<Table>,
@@ -153,27 +153,6 @@ impl TableAccessor for VecTableAccessor {
         }
 
         tables.sort_by(|x, y| COMPARATOR.compare_key(x.smallest(), y.smallest()));
-        Arc::new(VecTableAccessor { tables, total_size })
-    }
-
-    fn delete_tables(&self, to_del: &[Table]) -> Arc<Self> {
-        let mut to_del_map = HashSet::new();
-
-        for table in to_del {
-            to_del_map.insert(table.id());
-        }
-
-        let mut tables = Vec::with_capacity(self.tables.len());
-        let mut total_size = self.total_size;
-
-        for table in &self.tables {
-            if !to_del_map.contains(&table.id()) {
-                tables.push(table.clone());
-                continue;
-            }
-            total_size = total_size.saturating_sub(table.size());
-        }
-
         Arc::new(VecTableAccessor { tables, total_size })
     }
 }

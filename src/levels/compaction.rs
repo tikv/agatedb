@@ -6,7 +6,7 @@ use bytes::{Bytes, BytesMut};
 
 use crate::format::{key_with_ts, user_key};
 use crate::levels::handler::LevelHandler;
-use crate::util::{KeyComparator, KeyRange, COMPARATOR};
+use crate::util::{ComparableRecord, KeyComparator, KeyRange, COMPARATOR};
 use crate::{Error, Result, Table};
 
 #[derive(Default)]

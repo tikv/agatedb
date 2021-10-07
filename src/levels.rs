@@ -17,7 +17,9 @@ use crate::manifest::{new_create_change, new_delete_change, ManifestFile};
 use crate::ops::oracle::Oracle;
 use crate::opt::build_table_options;
 use crate::table::{MergeIterator, TableIterators};
-use crate::util::{has_any_prefixes, same_key, KeyComparator, KeyRange, COMPARATOR};
+use crate::util::{
+    has_any_prefixes, same_key, ComparableRecord, KeyComparator, KeyRange, COMPARATOR,
+};
 use crate::value::{Value, ValuePointer};
 use crate::AgateIterator;
 use crate::TableBuilder;
@@ -325,11 +327,11 @@ impl Core {
         if this_level_id != next_level_id {
             let mut this_level = this_level.write().unwrap();
             let mut next_level = next_level.write().unwrap();
-            this_level.delete_tables(&compact_def.top)?;
+            this_level.replace_tables(&compact_def.top, &[]);
             next_level.replace_tables(&compact_def.bot, &new_tables);
         } else {
             let mut this_level = this_level.write().unwrap();
-            this_level.delete_tables(&compact_def.top)?;
+            this_level.replace_tables(&compact_def.top, &[]);
             this_level.replace_tables(&compact_def.bot, &new_tables);
         }
 

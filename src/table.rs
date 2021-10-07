@@ -8,7 +8,7 @@ use crate::checksum;
 use crate::format::{key_with_ts, user_key};
 use crate::iterator_trait::AgateIterator;
 use crate::opt::{ChecksumVerificationMode, Options};
-use crate::util::KeyRange;
+use crate::util::{ComparableRecord, KeyRange};
 use crate::Error;
 use crate::Result;
 
@@ -27,10 +27,12 @@ pub use iterator::{ITERATOR_NOCACHE, ITERATOR_REVERSED};
 pub use merge_iterator::{Iterators as TableIterators, MergeIterator};
 pub type TableIterator = TableRefIterator<Arc<TableInner>>;
 
+mod btree_table_accessor;
 mod table_accessor;
 #[cfg(test)]
 mod tests;
 mod vec_table_acessor;
+
 pub use table_accessor::{TableAccessor, TableAccessorIterator};
 pub use vec_table_acessor::{VecTableAccessor, VecTableAccessorIterator};
 
@@ -589,18 +591,6 @@ impl Table {
         self.inner.size()
     }
 
-    /// Get ID of SST
-    pub fn id(&self) -> u64 {
-        self.inner.id()
-    }
-    pub fn largest(&self) -> &Bytes {
-        self.inner.biggest()
-    }
-
-    pub fn smallest(&self) -> &Bytes {
-        self.inner.smallest()
-    }
-
     pub fn is_in_memory(&self) -> bool {
         self.inner.is_in_memory()
     }
@@ -609,6 +599,20 @@ impl Table {
         self.inner
             .save_after_close
             .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl ComparableRecord for Table {
+    fn smallest(&self) -> &Bytes {
+        self.inner.smallest()
+    }
+    fn largest(&self) -> &Bytes {
+        self.inner.biggest()
+    }
+
+    /// Get ID of SST
+    fn id(&self) -> u64 {
+        self.inner.id()
     }
 }
 

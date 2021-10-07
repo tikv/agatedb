@@ -9,8 +9,8 @@ pub trait ComparableRecord: Clone {
     fn id(&self) -> u64;
 }
 
-pub trait TreePage<T: ComparableRecord>: Clone {
-    type Iter: TreePageIterator<T>;
+pub trait Page<T: ComparableRecord>: Clone {
+    type Iter: PageIterator<T>;
 
     fn new_iterator(self: &Arc<Self>) -> Self::Iter;
     fn seek(&self, key: &Bytes) -> Option<T>;
@@ -31,7 +31,7 @@ pub trait TreePage<T: ComparableRecord>: Clone {
     }
 }
 
-pub trait TreePageIterator<T: ComparableRecord>: Clone {
+pub trait PageIterator<T: ComparableRecord>: Clone {
     fn seek(&mut self, key: &Bytes);
     fn next(&mut self);
     fn prev(&mut self);
@@ -43,11 +43,11 @@ pub trait TreePageIterator<T: ComparableRecord>: Clone {
 
 #[derive(Clone, Default)]
 pub struct LeafNodeIterator<T: ComparableRecord> {
-    page: Arc<LeafNode<T>>,
+    page: Arc<LeafPage<T>>,
     cursor: usize,
 }
 
-impl<T: ComparableRecord> TreePageIterator<T> for LeafNodeIterator<T> {
+impl<T: ComparableRecord> PageIterator<T> for LeafNodeIterator<T> {
     fn seek(&mut self, key: &Bytes) {
         if self.page.data.is_empty() {
             self.cursor = 0;
@@ -97,14 +97,14 @@ impl<T: ComparableRecord> TreePageIterator<T> for LeafNodeIterator<T> {
 }
 
 #[derive(Clone, Default)]
-pub struct LeafNode<T: ComparableRecord> {
+pub struct LeafPage<T: ComparableRecord> {
     data: Vec<T>,
     smallest: Bytes,
     largest: Bytes,
     max_page_size: usize,
 }
 
-impl<T: ComparableRecord> TreePage<T> for LeafNode<T> {
+impl<T: ComparableRecord> Page<T> for LeafPage<T> {
     type Iter = LeafNodeIterator<T>;
 
     fn new_iterator(self: &Arc<Self>) -> Self::Iter {
@@ -138,7 +138,7 @@ impl<T: ComparableRecord> TreePage<T> for LeafNode<T> {
         &self.largest
     }
 
-    fn split(&self) -> Vec<Arc<LeafNode<T>>> {
+    fn split(&self) -> Vec<Arc<LeafPage<T>>> {
         let split_count = (self.data.len() + self.split_page_size() - 1) / self.split_page_size();
         let split_size = self.data.len() / split_count;
         let mut start_idx = 0;
@@ -166,12 +166,12 @@ impl<T: ComparableRecord> TreePage<T> for LeafNode<T> {
         nodes
     }
 
-    fn merge(&self, other: &LeafNode<T>) -> Arc<LeafNode<T>> {
+    fn merge(&self, other: &LeafPage<T>) -> Arc<LeafPage<T>> {
         let mut data = self.data.clone();
         for d in other.data.iter() {
             data.push(d.clone());
         }
-        Arc::new(LeafNode {
+        Arc::new(LeafPage {
             data,
             smallest: self.smallest.clone(),
             largest: other.largest.clone(),
@@ -215,7 +215,7 @@ impl<T: ComparableRecord> TreePage<T> for LeafNode<T> {
 }
 
 #[derive(Clone)]
-pub struct LevelTreePage<R: ComparableRecord, P: TreePage<R>> {
+pub struct BTreePage<R: ComparableRecord, P: Page<R>> {
     son: Vec<Arc<P>>,
     smallest: Bytes,
     largest: Bytes,
@@ -225,16 +225,16 @@ pub struct LevelTreePage<R: ComparableRecord, P: TreePage<R>> {
 }
 
 #[derive(Clone)]
-pub struct LevelTreePageIterator<R: ComparableRecord, P: TreePage<R>> {
-    page: Arc<LevelTreePage<R, P>>,
+pub struct BTreePageIterator<R: ComparableRecord, P: Page<R>> {
+    page: Arc<BTreePage<R, P>>,
     cursor: usize,
     iter: Option<P::Iter>,
 }
 
-impl<R, P> TreePageIterator<R> for LevelTreePageIterator<R, P>
+impl<R, P> PageIterator<R> for BTreePageIterator<R, P>
 where
     R: ComparableRecord,
-    P: TreePage<R>,
+    P: Page<R>,
 {
     fn seek(&mut self, key: &Bytes) {
         if self.page.son.is_empty() {
@@ -317,15 +317,15 @@ where
     }
 }
 
-impl<R, P> TreePage<R> for LevelTreePage<R, P>
+impl<R, P> Page<R> for BTreePage<R, P>
 where
     R: ComparableRecord,
-    P: TreePage<R>,
+    P: Page<R>,
 {
-    type Iter = LevelTreePageIterator<R, P>;
+    type Iter = BTreePageIterator<R, P>;
 
     fn new_iterator(self: &Arc<Self>) -> Self::Iter {
-        LevelTreePageIterator::<R, P> {
+        BTreePageIterator::<R, P> {
             page: self.clone(),
             cursor: 0,
             iter: None,
@@ -378,7 +378,7 @@ where
             } else {
                 self.son[start_idx].smallest().clone()
             };
-            nodes.push(Arc::new(LevelTreePage {
+            nodes.push(Arc::new(BTreePage {
                 son: new_data,
                 smallest: key,
                 largest: self.son[end_idx - 1].largest().clone(),
@@ -520,8 +520,8 @@ where
         while cur_idx < size {
             if self.son[new_idx - 1].size() + self.son[cur_idx].size()
                 < self.son[cur_idx].min_merge_size()
-                || self.son[new_idx - 1].size() == 0
-                || self.son[cur_idx].size() == 0
+                || self.son[new_idx - 1].record_number() == 0
+                || self.son[cur_idx].record_number() == 0
             {
                 self.son[new_idx - 1] = self.son[new_idx - 1].merge(self.son[cur_idx].as_ref());
                 cur_idx += 1;
@@ -543,16 +543,16 @@ where
 }
 
 #[derive(Clone)]
-pub struct LevelTree<T: ComparableRecord> {
-    node: Arc<LevelTreePage<T, LevelTreePage<T, LeafNode<T>>>>,
+pub struct BTree<T: ComparableRecord> {
+    node: Arc<BTreePage<T, BTreePage<T, LeafPage<T>>>>,
 }
 
-impl<T: ComparableRecord> LevelTree<T> {
+impl<T: ComparableRecord> BTree<T> {
     pub fn new(max_page_size: usize, leaf_max_page_size: usize) -> Self {
         Self {
-            node: Arc::new(LevelTreePage::<T, LevelTreePage<T, LeafNode<T>>> {
-                son: vec![Arc::new(LevelTreePage::<T, LeafNode<T>> {
-                    son: vec![Arc::new(LeafNode::<T> {
+            node: Arc::new(BTreePage::<T, BTreePage<T, LeafPage<T>>> {
+                son: vec![Arc::new(BTreePage::<T, LeafPage<T>> {
+                    son: vec![Arc::new(LeafPage::<T> {
                         data: vec![],
                         smallest: Bytes::new(),
                         largest: Bytes::new(),
@@ -591,17 +591,17 @@ impl<T: ComparableRecord> LevelTree<T> {
             to_add.sort_by(|a, b| a.smallest().cmp(b.smallest()));
             node.insert(to_add);
         }
-        LevelTree {
+        BTree {
             node: Arc::new(node),
         }
     }
 
-    pub fn new_iterator(
-        self: Arc<Self>,
-    ) -> LevelTreePageIterator<T, LevelTreePage<T, LeafNode<T>>> {
+    pub fn new_iterator(&self) -> BTreePageIterator<T, BTreePage<T, LeafPage<T>>> {
         self.node.new_iterator()
     }
 }
+
+pub type BTreeIterator<T> = BTreePageIterator<T, BTreePage<T, LeafPage<T>>>;
 
 #[cfg(test)]
 mod tests {
@@ -628,7 +628,7 @@ mod tests {
         }
     }
 
-    fn update_page<P: TreePage<FakeTable>>(
+    fn update_page<P: Page<FakeTable>>(
         page: &mut P,
         left: u64,
         right: u64,
@@ -654,7 +654,7 @@ mod tests {
 
     #[test]
     fn test_leaf_page() {
-        let mut page = LeafNode {
+        let mut page = LeafPage {
             data: vec![],
             smallest: Default::default(),
             largest: Default::default(),
@@ -693,12 +693,7 @@ mod tests {
         assert_eq!(p.unwrap().id, 290);
     }
 
-    fn insert_to_tree(
-        tree: LevelTree<FakeTable>,
-        left: u64,
-        right: u64,
-        gap: u64,
-    ) -> LevelTree<FakeTable> {
+    fn insert_to_tree(tree: BTree<FakeTable>, left: u64, right: u64, gap: u64) -> BTree<FakeTable> {
         let mut ops = vec![];
         for i in left..right {
             let smallest = i * gap;
@@ -713,11 +708,11 @@ mod tests {
     }
 
     fn delete_from_tree(
-        tree: LevelTree<FakeTable>,
+        tree: BTree<FakeTable>,
         left: u64,
         right: u64,
         gap: u64,
-    ) -> LevelTree<FakeTable> {
+    ) -> BTree<FakeTable> {
         let mut ops = vec![];
         for i in left..right {
             let smallest = i * gap;
@@ -733,7 +728,7 @@ mod tests {
 
     #[test]
     fn test_leveltree() {
-        let tree = LevelTree::<FakeTable>::new(32, 64);
+        let tree = BTree::<FakeTable>::new(32, 64);
         let tree = insert_to_tree(tree, 100, 228, 100);
         let t = tree.get(&Bytes::from("20000"));
         assert!(t.is_some());

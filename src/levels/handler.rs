@@ -16,6 +16,7 @@ use super::KeyRange;
 
 use super::compaction::{get_key_range, CompactDef, CompactStatus};
 use crate::table::merge_iterator::Iterators;
+use crate::util::ComparableRecord;
 use bytes::Bytes;
 
 pub trait LevelHandler: Send + Sync {
@@ -26,7 +27,6 @@ pub trait LevelHandler: Send + Sync {
     fn get(&self, key: &Bytes) -> Result<Value>;
 
     fn append_iterators(&self, iters: &mut Vec<TableIterators>, opts: &IteratorOptions);
-    fn delete_tables(&mut self, to_del: &[Table]) -> Result<()>;
     fn overlapping_tables(&self, kr: &KeyRange) -> Vec<Table>;
     fn replace_tables(&mut self, to_del: &[Table], to_add: &[Table]) -> bool;
     fn select_table_range(
@@ -107,12 +107,6 @@ impl<T: 'static + TableAccessor> LevelHandler for HandlerBaseLevel<T> {
             let iter = ConcatIterator::from_tables(Box::new(T::new_iterator(acessor)), 0);
             iters.push(TableIterators::from(iter));
         }
-    }
-
-    fn delete_tables(&mut self, to_del: &[Table]) -> Result<()> {
-        let acessor = self.table_acessor.delete_tables(to_del);
-        self.table_acessor = acessor;
-        Ok(())
     }
 
     fn overlapping_tables(&self, kr: &KeyRange) -> Vec<Table> {
@@ -243,26 +237,6 @@ impl LevelHandler for HandlerLevel0 {
         }
     }
 
-    fn delete_tables(&mut self, to_del: &[Table]) -> Result<()> {
-        let mut to_del_map = HashSet::new();
-
-        for table in to_del {
-            to_del_map.insert(table.id());
-        }
-
-        let mut new_tables = vec![];
-
-        for table in &self.tables {
-            if !to_del_map.contains(&table.id()) {
-                new_tables.push(table.clone());
-                continue;
-            }
-            self.total_size = self.total_size.saturating_sub(table.size());
-        }
-        self.tables = new_tables;
-        Ok(())
-    }
-
     fn overlapping_tables(&self, _: &KeyRange) -> Vec<Table> {
         let mut out = vec![];
         let mut kr = KeyRange::default();
@@ -278,16 +252,32 @@ impl LevelHandler for HandlerLevel0 {
         out
     }
 
-    fn replace_tables(&mut self, _: &[Table], to_add: &[Table]) -> bool {
+    fn replace_tables(&mut self, to_del: &[Table], to_add: &[Table]) -> bool {
         assert_eq!(self.level, 0);
         if self.tables.len() >= self.opts.num_level_zero_tables_stall {
             return false;
         }
+        let mut to_del_map = HashSet::new();
 
+        for table in to_del {
+            to_del_map.insert(table.id());
+        }
+
+        let mut new_tables = vec![];
+
+        for table in &self.tables {
+            if !to_del_map.contains(&table.id()) {
+                new_tables.push(table.clone());
+                continue;
+            }
+            self.total_size = self.total_size.saturating_sub(table.size());
+        }
         for t in to_add {
             self.total_size += t.size();
-            self.tables.push(t.clone());
+            new_tables.push(t.clone());
         }
+        new_tables.sort_by(|a, b| a.id().cmp(&b.id()));
+        self.tables = new_tables;
         true
     }
 
