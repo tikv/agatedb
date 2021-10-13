@@ -33,6 +33,9 @@ pub trait Page<T: ComparableRecord>: Clone {
 
 pub trait PageIterator<T: ComparableRecord>: Clone {
     fn seek(&mut self, key: &Bytes);
+    fn seek_for_previous(&mut self, key: &Bytes);
+    fn seek_to_first(&mut self);
+    fn seek_to_last(&mut self);
     fn next(&mut self);
     fn prev(&mut self);
     fn idx(&self) -> usize;
@@ -61,6 +64,39 @@ impl<T: ComparableRecord> PageIterator<T> for LeafNodeIterator<T> {
             Ok(idx) => idx,
             Err(upper) => upper,
         };
+    }
+
+    fn seek_for_previous(&mut self, key: &Bytes) {
+        if self.page.data.is_empty() {
+            self.cursor = 0;
+            return;
+        }
+        self.cursor = match self
+            .page
+            .data
+            .binary_search_by(|node| node.smallest().cmp(key))
+        {
+            Ok(idx) => idx,
+            Err(upper) => {
+                if upper == 0 {
+                    self.cursor = self.page.data.len();
+                    return;
+                } else {
+                    upper - 1
+                }
+            }
+        };
+    }
+
+    fn seek_to_first(&mut self) {
+        self.cursor = 0;
+    }
+
+    fn seek_to_last(&mut self) {
+        self.cursor = self.page.data.len();
+        if self.page.data.len() > 0 {
+            self.cursor -= 1;
+        }
     }
 
     fn next(&mut self) {
@@ -214,6 +250,10 @@ impl<T: ComparableRecord> Page<T> for LeafPage<T> {
     }
 }
 
+// We decide each range of sons by only `smallest`. It means that if the sons of one page is as
+// following:
+//    son: [a, b],  [d, f],  [i, k],
+// A new table [c,c] will be insert to the first page rather than the second page.
 #[derive(Clone)]
 pub struct BTreePage<R: ComparableRecord, P: Page<R>> {
     son: Vec<Arc<P>>,
@@ -277,6 +317,71 @@ where
         }
     }
 
+    fn seek_for_previous(&mut self, key: &Bytes) {
+        if self.page.son.is_empty() {
+            self.cursor = 0;
+            return;
+        }
+        self.cursor = match self
+            .page
+            .son
+            .binary_search_by(|node| node.smallest().cmp(key))
+        {
+            Ok(idx) => idx,
+            Err(upper) => {
+                if upper > 0 {
+                    upper - 1
+                } else {
+                    self.iter = None;
+                    return;
+                }
+            }
+        };
+        let mut iter = self.page.son[self.cursor].new_iterator();
+        iter.seek_for_previous(key);
+        while !iter.valid() && self.cursor > 0 {
+            self.cursor -= 1;
+            iter = self.page.son[self.cursor].new_iterator();
+            iter.seek_for_previous(key);
+        }
+        if iter.valid() {
+            self.iter = Some(iter);
+        } else {
+            self.iter = None;
+        }
+    }
+
+    fn seek_to_first(&mut self) {
+        self.cursor = 0;
+        self.iter = None;
+        if !self.page.son.is_empty() {
+            let mut iter = self.page.son[self.cursor].new_iterator();
+            iter.seek_to_first();
+            while !iter.valid() && self.cursor + 1 < self.page.son.len() {
+                self.cursor += 1;
+                iter = self.page.son[self.cursor].new_iterator();
+                iter.seek_to_first();
+            }
+            if iter.valid() {
+                self.iter = Some(iter);
+            }
+        }
+    }
+
+    fn seek_to_last(&mut self) {
+        self.cursor = self.page.son.len();
+        self.iter = None;
+        while self.cursor > 0 {
+            self.cursor -= 1;
+            let mut iter = self.page.son[self.cursor].new_iterator();
+            iter.seek_to_last();
+            if iter.valid() {
+                self.iter = Some(iter);
+                return;
+            }
+        }
+    }
+
     fn next(&mut self) {
         if let Some(iter) = self.iter.as_mut() {
             iter.next();
@@ -284,17 +389,35 @@ where
                 return;
             }
         }
-        if self.cursor + 1 < self.page.son.len() {
+        self.iter = None;
+        while self.cursor + 1 < self.page.son.len() {
             self.cursor += 1;
-            self.iter = Some(self.page.son[self.cursor].new_iterator());
-        } else {
-            self.cursor = self.page.son.len();
-            self.iter = None;
+            let mut iter = self.page.son[self.cursor].new_iterator();
+            iter.seek_to_first();
+            if iter.valid() {
+                self.iter = Some(iter);
+                break;
+            }
         }
     }
 
     fn prev(&mut self) {
-        unimplemented!()
+        if let Some(iter) = self.iter.as_mut() {
+            iter.prev();
+            if iter.valid() {
+                return;
+            }
+        }
+        self.iter = None;
+        while self.cursor > 0 {
+            self.cursor -= 1;
+            let mut iter = self.page.son[self.cursor].new_iterator();
+            iter.seek_to_last();
+            if iter.valid() {
+                self.iter = Some(iter);
+                break;
+            }
+        }
     }
 
     fn idx(&self) -> usize {
@@ -302,7 +425,7 @@ where
     }
 
     fn valid(&self) -> bool {
-        self.cursor < self.page.son.len() && self.iter.as_ref().map_or(false, |iter| iter.valid())
+        self.iter.as_ref().map_or(false, |iter| iter.valid())
     }
 
     fn size(&self) -> usize {

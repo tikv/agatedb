@@ -6,22 +6,26 @@ use std::sync::Arc;
 use super::table_accessor::{TableAccessor, TableAccessorIterator};
 use super::Table;
 
-use crate::util::{ComparableRecord, KeyComparator, COMPARATOR};
+use crate::util::ComparableRecord;
 
-pub struct VecTableAccessor {
+pub struct VecTableAccessorInner {
     tables: Vec<Table>,
     total_size: u64,
 }
 
+pub struct VecTableAccessor {
+    inner: Arc<VecTableAccessorInner>,
+}
+
 pub struct VecTableAccessorIterator {
-    inner: Arc<VecTableAccessor>,
+    inner: Arc<VecTableAccessorInner>,
     cursor: Option<usize>,
 }
 
 impl TableAccessorIterator for VecTableAccessorIterator {
     fn seek(&mut self, key: &Bytes) {
         let idx = crate::util::search(self.inner.tables.len(), |idx| {
-            COMPARATOR.compare_key(self.inner.tables[idx].largest(), key) != cmp::Ordering::Less
+            self.inner.tables[idx].largest().cmp(&key) != cmp::Ordering::Less
         });
         if idx >= self.inner.tables.len() {
             self.cursor = None;
@@ -33,8 +37,7 @@ impl TableAccessorIterator for VecTableAccessorIterator {
     fn seek_for_previous(&mut self, key: &Bytes) {
         let n = self.inner.tables.len();
         let ridx = crate::util::search(self.inner.tables.len(), |idx| {
-            COMPARATOR.compare_key(self.inner.tables[n - 1 - idx].smallest(), key)
-                != cmp::Ordering::Greater
+            self.inner.tables[n - 1 - idx].smallest().cmp(&key) != cmp::Ordering::Greater
         });
         if ridx >= self.inner.tables.len() {
             self.cursor = None;
@@ -89,57 +92,59 @@ impl TableAccessorIterator for VecTableAccessorIterator {
 impl TableAccessor for VecTableAccessor {
     type Iter = VecTableAccessorIterator;
 
-    fn create(mut tables: Vec<Table>) -> Arc<Self> {
+    fn create(mut tables: Vec<Table>) -> Self {
         let mut total_size = 0;
         for table in &tables {
             total_size += table.size();
         }
 
-        tables.sort_by(|x, y| COMPARATOR.compare_key(x.smallest(), y.smallest()));
-        Arc::new(VecTableAccessor { tables, total_size })
+        tables.sort_by(|x, y| x.smallest().cmp(y.smallest()));
+        VecTableAccessor {
+            inner: Arc::new(VecTableAccessorInner { tables, total_size }),
+        }
     }
 
     fn get(&self, key: &Bytes) -> Option<Table> {
-        let idx = crate::util::search(self.tables.len(), |idx| {
-            COMPARATOR.compare_key(self.tables[idx].largest(), key) != cmp::Ordering::Less
+        let idx = crate::util::search(self.inner.tables.len(), |idx| {
+            self.inner.tables[idx].largest().cmp(&key) != cmp::Ordering::Less
         });
-        if idx >= self.tables.len() {
+        if idx >= self.inner.tables.len() {
             None
         } else {
-            Some(self.tables[idx].clone())
+            Some(self.inner.tables[idx].clone())
         }
     }
 
     fn is_empty(&self) -> bool {
-        self.tables.is_empty()
+        self.inner.tables.is_empty()
     }
 
     fn len(&self) -> usize {
-        self.tables.len()
+        self.inner.tables.len()
     }
 
     fn total_size(&self) -> u64 {
-        self.total_size
+        self.inner.total_size
     }
 
-    fn new_iterator(inner: Arc<Self>) -> Self::Iter {
+    fn new_iterator(&self) -> Self::Iter {
         VecTableAccessorIterator {
-            inner,
+            inner: self.inner.clone(),
             cursor: None,
         }
     }
 
-    fn replace_tables(&self, to_del: &[Table], to_add: &[Table]) -> Arc<Self> {
+    fn replace_tables(&self, to_del: &[Table], to_add: &[Table]) -> Self {
         // TODO: handle deletion
         let mut to_del_map = HashSet::new();
         for table in to_del {
             to_del_map.insert(table.id());
         }
 
-        let mut tables = Vec::with_capacity(self.tables.len() + to_add.len());
-        let mut total_size = self.total_size;
+        let mut tables = Vec::with_capacity(self.inner.tables.len() + to_add.len());
+        let mut total_size = self.inner.total_size;
 
-        for table in &self.tables {
+        for table in &self.inner.tables {
             if !to_del_map.contains(&table.id()) {
                 tables.push(table.clone());
                 continue;
@@ -152,7 +157,8 @@ impl TableAccessor for VecTableAccessor {
             tables.push(table.clone());
         }
 
-        tables.sort_by(|x, y| COMPARATOR.compare_key(x.smallest(), y.smallest()));
-        Arc::new(VecTableAccessor { tables, total_size })
+        tables.sort_by(|x, y| x.smallest().cmp(y.smallest()));
+        let inner = Arc::new(VecTableAccessorInner { tables, total_size });
+        VecTableAccessor { inner }
     }
 }

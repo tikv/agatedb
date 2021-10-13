@@ -1,8 +1,7 @@
 use super::Table;
 use crate::table::{TableAccessor, TableAccessorIterator};
-use crate::util::{BTree, BTreeIterator, ComparableRecord, PageIterator};
+use crate::util::{BTree, BTreeIterator, PageIterator};
 use bytes::Bytes;
-use prost::alloc::sync::Arc;
 
 const MAX_LEAF_PAGE_SIZE: usize = 128;
 const MAX_TREE_PAGE_SIZE: usize = 64;
@@ -17,17 +16,19 @@ pub struct BTreeTableAccessorIterator {
 
 impl TableAccessorIterator for BTreeTableAccessorIterator {
     fn seek(&mut self, key: &Bytes) {
-        unimplemented!()
+        self.inner.seek(key);
     }
 
     fn seek_for_previous(&mut self, key: &Bytes) {
-        unimplemented!()
+        self.inner.seek_for_previous(key);
     }
 
-    fn seek_first(&mut self) {}
+    fn seek_first(&mut self) {
+        self.inner.seek_to_first();
+    }
 
     fn seek_last(&mut self) {
-        unimplemented!()
+        self.inner.seek_to_last();
     }
 
     fn prev(&mut self) {
@@ -50,14 +51,14 @@ impl TableAccessorIterator for BTreeTableAccessorIterator {
 impl TableAccessor for BTreeTableAccessor {
     type Iter = BTreeTableAccessorIterator;
 
-    fn create(tables: Vec<Table>) -> Arc<Self> {
+    fn create(tables: Vec<Table>) -> Self {
         let mut total_size = 0;
         let tree = BTree::new(MAX_TREE_PAGE_SIZE, MAX_LEAF_PAGE_SIZE);
         for t in &tables {
             total_size += t.size();
         }
         let inner = tree.replace(vec![], tables);
-        Arc::new(BTreeTableAccessor { inner, total_size })
+        BTreeTableAccessor { inner, total_size }
     }
 
     fn get(&self, key: &Bytes) -> Option<Table> {
@@ -73,16 +74,16 @@ impl TableAccessor for BTreeTableAccessor {
     }
 
     fn total_size(&self) -> u64 {
-        unimplemented!()
+        self.total_size
     }
 
-    fn new_iterator(acessor: Arc<Self>) -> Self::Iter {
+    fn new_iterator(&self) -> Self::Iter {
         BTreeTableAccessorIterator {
-            inner: acessor.inner.new_iterator(),
+            inner: self.inner.new_iterator(),
         }
     }
 
-    fn replace_tables(&self, to_del: &[Table], to_add: &[Table]) -> Arc<Self> {
+    fn replace_tables(&self, to_del: &[Table], to_add: &[Table]) -> Self {
         let mut total_size = self.total_size;
         for t in to_add {
             total_size += t.size();
@@ -91,6 +92,6 @@ impl TableAccessor for BTreeTableAccessor {
             total_size -= t.size();
         }
         let inner = self.inner.replace(to_del.to_vec(), to_add.to_vec());
-        Arc::new(BTreeTableAccessor { inner, total_size })
+        BTreeTableAccessor { inner, total_size }
     }
 }

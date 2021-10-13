@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use crate::table::{get_key_range_single, TableAccessor, TableAccessorIterator};
 use crate::value::Value;
@@ -42,12 +41,12 @@ pub trait LevelHandler: Send + Sync {
 pub struct HandlerBaseLevel<T: TableAccessor> {
     opts: AgateOptions,
     level: usize,
-    table_acessor: Arc<T>,
+    table_acessor: T,
 }
 
 impl<T: TableAccessor> Drop for HandlerBaseLevel<T> {
     fn drop(&mut self) {
-        let mut iter = T::new_iterator(self.table_acessor.clone());
+        let mut iter = self.table_acessor.new_iterator();
         iter.seek_first();
         while iter.valid() {
             iter.table().unwrap().mark_save();
@@ -103,8 +102,7 @@ impl<T: 'static + TableAccessor> LevelHandler for HandlerBaseLevel<T> {
 
     fn append_iterators(&self, iters: &mut Vec<TableIterators>, _: &IteratorOptions) {
         if !self.table_acessor.is_empty() {
-            let acessor = self.table_acessor.clone();
-            let iter = ConcatIterator::from_tables(Box::new(T::new_iterator(acessor)), 0);
+            let iter = ConcatIterator::from_tables(Box::new(self.table_acessor.new_iterator()), 0);
             iters.push(TableIterators::from(iter));
         }
     }
@@ -116,7 +114,7 @@ impl<T: 'static + TableAccessor> LevelHandler for HandlerBaseLevel<T> {
             return vec![];
         }
         let mut ret = vec![];
-        let mut iter = T::new_iterator(self.table_acessor.clone());
+        let mut iter = self.table_acessor.new_iterator();
         iter.seek(&kr.left);
         while let Some(table) = iter.table() {
             if COMPARATOR.compare_key(&kr.right, table.smallest()) == Less {
@@ -140,7 +138,7 @@ impl<T: 'static + TableAccessor> LevelHandler for HandlerBaseLevel<T> {
         compact_def: &mut CompactDef,
         status: &mut CompactStatus,
     ) -> Result<()> {
-        let mut it = T::new_iterator(self.table_acessor.clone());
+        let mut it = self.table_acessor.new_iterator();
         it.seek_first();
         while let Some(table) = it.table() {
             if select_table_range(&table, next_level, compact_def, status) {
@@ -153,7 +151,7 @@ impl<T: 'static + TableAccessor> LevelHandler for HandlerBaseLevel<T> {
 
     fn pick_all_tables(&self, max_file_size: u64, tables: &HashSet<u64>) -> Vec<Table> {
         let mut ret = vec![];
-        let mut it = T::new_iterator(self.table_acessor.clone());
+        let mut it = self.table_acessor.new_iterator();
         it.seek_first();
         while let Some(table) = it.table() {
             if table.size() <= max_file_size && !tables.contains(&table.id()) {

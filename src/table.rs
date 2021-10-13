@@ -33,6 +33,7 @@ mod table_accessor;
 mod tests;
 mod vec_table_acessor;
 
+pub use btree_table_accessor::{BTreeTableAccessor, BTreeTableAccessorIterator};
 pub use table_accessor::{TableAccessor, TableAccessorIterator};
 pub use vec_table_acessor::{VecTableAccessor, VecTableAccessorIterator};
 

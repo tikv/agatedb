@@ -147,8 +147,7 @@ mod tests {
     fn test_concat_iterator() {
         let (tables, cnt) = build_test_tables();
         let accessor = VecTableAccessor::create(tables);
-        let mut iter =
-            ConcatIterator::from_tables(Box::new(VecTableAccessor::new_iterator(accessor)), 0);
+        let mut iter = ConcatIterator::from_tables(Box::new(accessor.new_iterator()), 0);
 
         iter.rewind();
 
