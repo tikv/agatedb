@@ -626,14 +626,11 @@ impl Core {
                 vlog.write(&mut requests)?;
             }
 
-            let mut cnt = 0;
-
             // writing to LSM
             for req in requests {
                 if req.entries.is_empty() {
                     continue;
                 }
-                cnt += req.entries.len();
 
                 while let Err(_) = self.ensure_room_for_write() {
                     std::thread::sleep(std::time::Duration::from_millis(10));
@@ -642,8 +639,6 @@ impl Core {
 
                 self.write_to_lsm(req)?;
             }
-
-            // eprintln!("{} entries written", cnt);
 
             Ok(())
         };
