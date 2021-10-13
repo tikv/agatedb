@@ -54,8 +54,8 @@ mod tests {
         }
         let accessor = accessor.replace_tables(&[], &tables);
         let mut iter = accessor.new_iterator();
-        iter.seek(&Bytes::from(20005.to_string()));
-        let mut expected = 2000;
+        iter.seek(&Bytes::from(20009.to_string()));
+        let mut expected = 2001;
         while iter.valid() {
             let table = iter.table().unwrap();
             assert_eq!(expected, table.id());
@@ -63,7 +63,7 @@ mod tests {
             iter.next();
         }
         let mut iter = accessor.new_iterator();
-        iter.seek_for_previous(&Bytes::from(20005.to_string()));
+        iter.seek_for_previous(&Bytes::from(20009.to_string()));
         let mut expected = 2000;
         while iter.valid() {
             let table = iter.table().unwrap();

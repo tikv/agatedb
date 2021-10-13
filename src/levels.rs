@@ -4,7 +4,7 @@ mod handler;
 #[cfg(test)]
 pub(crate) mod tests;
 
-use crate::table::VecTableAccessor;
+use crate::table::BTreeTableAccessor;
 use compaction::{
     get_key_range, CompactDef, CompactStatus, CompactionPriority, LevelCompactStatus, Targets,
 };
@@ -92,7 +92,7 @@ impl Core {
             let level: Box<dyn LevelHandler> = if i == 0 {
                 Box::new(HandlerLevel0::new(tables, opts.clone(), i))
             } else {
-                Box::new(HandlerBaseLevel::<VecTableAccessor>::new(
+                Box::new(HandlerBaseLevel::<BTreeTableAccessor>::new(
                     tables,
                     opts.clone(),
                     i,

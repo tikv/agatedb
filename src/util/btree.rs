@@ -812,8 +812,12 @@ mod tests {
         update_page(&mut page3, 250, 290, 100, false);
         let page = page2.merge(&page3);
         assert_eq!(page.size(), 25);
-        let p = page.seek(&Bytes::from("250".to_string()));
-        assert_eq!(p.unwrap().id, 290);
+        let mut it = page.new_iterator();
+        it.seek(&Bytes::from("250".to_string()));
+        assert_eq!(it.record().unwrap().id, 290);
+        let mut it = page.new_iterator();
+        it.seek_for_previous(&Bytes::from("250".to_string()));
+        assert_eq!(it.record().unwrap().id, 214);
     }
 
     fn insert_to_tree(tree: BTree<FakeTable>, left: u64, right: u64, gap: u64) -> BTree<FakeTable> {
