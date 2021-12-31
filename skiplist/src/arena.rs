@@ -30,7 +30,8 @@ impl Arena {
         mem::forget(buf);
         Arena {
             core: Arc::new(ArenaCore {
-                len: AtomicU32::new(1),
+                // Reserve 8 bytes at the beginning
+                len: AtomicU32::new(8),
                 cap,
                 ptr,
             }),
@@ -44,13 +45,13 @@ impl Arena {
     pub fn alloc(&self, align: usize, size: usize) -> u32 {
         let align_mask = align - 1;
         // Leave enough padding for align.
-        let size = size + align_mask;
+        let size = (size + align_mask) & !align_mask;
         let offset = self.core.len.fetch_add(size as u32, Ordering::SeqCst);
-        // Calculate the correct align point, it equals to
-        // (offset + align_mask) / align * align.
-        let ptr_offset = (offset as usize + align_mask) & !align_mask;
-        assert!(offset as usize + size <= self.core.cap);
-        ptr_offset as u32
+        if offset as usize + size > self.core.cap {
+            // 0 means there is not enough space to allocate.
+            return 0;
+        }
+        offset as u32
     }
 
     pub unsafe fn get_mut<N>(&self, offset: u32) -> *mut N {
@@ -68,5 +69,30 @@ impl Arena {
         } else {
             0
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_arena() {
+        // There is enough space
+        let arena = Arena::with_capacity(128 * 1024);
+        let offset = arena.alloc(8, 8);
+        assert_eq!(offset, 8);
+        assert_eq!(arena.len(), 16);
+
+        unsafe {
+            let ptr = arena.get_mut::<u64>(offset);
+            let offset = arena.offset::<u64>(ptr);
+            assert_eq!(offset, 8);
+        }
+
+        // There is not enough space, return 0
+        let arena = Arena::with_capacity(128);
+        let offset = arena.alloc(8, 256);
+        assert_eq!(offset, 0);
     }
 }
