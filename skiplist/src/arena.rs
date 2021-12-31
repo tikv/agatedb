@@ -2,6 +2,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::{mem, ptr};
 
+const ADDR_ALIGN_MASK: usize = 7;
+
 struct ArenaCore {
     len: AtomicU32,
     cap: usize,
@@ -42,13 +44,14 @@ impl Arena {
         self.core.len.load(Ordering::SeqCst)
     }
 
-    pub fn alloc(&self, align: usize, size: usize) -> u32 {
-        let align_mask = align - 1;
-        // Leave enough padding for align.
-        let size = (size + align_mask) & !align_mask;
+    pub fn alloc(&self, size: usize) -> u32 {
+        // Leave enough padding for alignment.
+        let size = (size + ADDR_ALIGN_MASK) & !ADDR_ALIGN_MASK;
         let offset = self.core.len.fetch_add(size as u32, Ordering::SeqCst);
+
+        // Return 0 if there is not enough space to allocate.
         if offset as usize + size > self.core.cap {
-            // 0 means there is not enough space to allocate.
+            let _ = self.core.len.fetch_sub(size as u32, Ordering::SeqCst);
             return 0;
         }
         offset as u32
@@ -79,20 +82,23 @@ mod tests {
     #[test]
     fn test_arena() {
         // There is enough space
-        let arena = Arena::with_capacity(128 * 1024);
-        let offset = arena.alloc(8, 8);
+        let arena = Arena::with_capacity(128);
+        let offset = arena.alloc(8);
         assert_eq!(offset, 8);
         assert_eq!(arena.len(), 16);
-
         unsafe {
             let ptr = arena.get_mut::<u64>(offset);
             let offset = arena.offset::<u64>(ptr);
             assert_eq!(offset, 8);
         }
 
+        // Align with 8 bytes
+        let offset = arena.alloc(3);
+        assert_eq!(offset, 16);
+        assert_eq!(arena.len(), 24);
+
         // There is not enough space, return 0
-        let arena = Arena::with_capacity(128);
-        let offset = arena.alloc(8, 256);
+        let offset = arena.alloc(256);
         assert_eq!(offset, 0);
     }
 }

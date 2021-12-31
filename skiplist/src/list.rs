@@ -22,11 +22,10 @@ pub struct Node {
 
 impl Node {
     fn alloc(arena: &Arena, key: Bytes, value: Bytes, height: usize) -> u32 {
-        let align = mem::align_of::<Node>();
         let size = mem::size_of::<Node>();
         // Not all values in Node::tower will be utilized.
         let not_used = (MAX_HEIGHT as usize - height as usize - 1) * mem::size_of::<AtomicU32>();
-        let node_offset = arena.alloc(align, size - not_used);
+        let node_offset = arena.alloc(size - not_used);
         unsafe {
             let node_ptr: *mut Node = arena.get_mut(node_offset);
             let node = &mut *node_ptr;
