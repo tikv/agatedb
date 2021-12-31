@@ -60,7 +60,13 @@ mod tests {
         let suffix_comp = FixedLengthSuffixComparator::new(4);
         let (l, r, s) = ("abcd-0", "abcd-1", "abcd-0");
         assert!(suffix_comp.same_key(l.as_bytes(), r.as_bytes()));
-        assert_eq!(suffix_comp.compare_key(l.as_bytes(), r.as_bytes()), Ordering::Less);
-        assert_eq!(suffix_comp.compare_key(l.as_bytes(), s.as_bytes()), Ordering::Equal);
+        assert_eq!(
+            suffix_comp.compare_key(l.as_bytes(), r.as_bytes()),
+            Ordering::Less
+        );
+        assert_eq!(
+            suffix_comp.compare_key(l.as_bytes(), s.as_bytes()),
+            Ordering::Equal
+        );
     }
 }
