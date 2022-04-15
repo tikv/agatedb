@@ -32,7 +32,7 @@ impl Arena {
         mem::forget(buf);
         Arena {
             core: Arc::new(ArenaCore {
-                // Reserve 8 bytes at the beginning
+                // Reserve 8 bytes at the beginning, because func offset return 0 means invalid value
                 len: AtomicU32::new(8),
                 cap,
                 ptr,
