@@ -43,7 +43,7 @@ jobs:
         name: Linting The Code 🩹
         with:
           command: clippy
-          args: --all-targets --all-features --workspace
+          args: --all-targets --all-features --workspace -- -D "warnings"
       - uses: actions-rs/cargo@v1
         name: Running Tests 🚀
         with:
