@@ -155,8 +155,8 @@ mod tests {
             let data: Vec<(Bytes, Bytes)> = (cnt..cnt + size)
                 .map(|x| {
                     (
-                        Bytes::from(format!("{:012x}", x).to_string()),
-                        Bytes::from(format!("{:012x}", x).to_string()),
+                        Bytes::from(format!("{:012x}", x)),
+                        Bytes::from(format!("{:012x}", x)),
                     )
                 })
                 .collect();

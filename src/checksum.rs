@@ -67,9 +67,8 @@ mod xxhash {
     }
 
     pub fn checksum(mut bytes: &[u8]) -> u64 {
-        let mut h;
         let len = bytes.len();
-        if bytes.len() >= 32 {
+        let mut h = if bytes.len() >= 32 {
             let (mut v1, mut v2, mut v3, mut v4) = (add(PRIME1, PRIME2), PRIME2, 0, sub(0, PRIME1));
             loop {
                 v1 = round(v1, u64(bytes.as_ptr()));
@@ -81,16 +80,16 @@ mod xxhash {
                     break;
                 }
             }
-            h = add(v1.rotate_left(1), v2.rotate_left(7));
+            let mut h = add(v1.rotate_left(1), v2.rotate_left(7));
             h = add(h, v3.rotate_left(12));
             h = add(h, v4.rotate_left(18));
             h = merge_round(h, v1);
             h = merge_round(h, v2);
             h = merge_round(h, v3);
-            h = merge_round(h, v4)
+            merge_round(h, v4)
         } else {
-            h = PRIME5;
-        }
+            PRIME5
+        };
         h += len as u64;
         let (mut i, end) = (0, bytes.len());
         if i + 8 <= end {

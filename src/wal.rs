@@ -167,7 +167,7 @@ impl Wal {
     /// +--------+-----+-------+
     /// | header | key | value |
     /// +--------+-----+-------+
-    pub(crate) fn encode_entry(mut buf: &mut BytesMut, entry: &Entry) -> usize {
+    pub(crate) fn encode_entry(buf: &mut BytesMut, entry: &Entry) -> usize {
         let header = Header {
             key_len: entry.key.len() as u32,
             value_len: entry.value.len() as u32,
@@ -177,7 +177,7 @@ impl Wal {
         };
 
         // write header to buffer
-        header.encode(&mut buf);
+        header.encode(buf);
 
         // write key and value to buffer
         // TODO: encryption
@@ -341,8 +341,10 @@ mod tests {
     #[test]
     fn test_wal_create() {
         let tmp_dir = tempdir().unwrap();
-        let mut opts = AgateOptions::default();
-        opts.value_log_file_size = 4096;
+        let opts = AgateOptions {
+            value_log_file_size: 4096,
+            ..Default::default()
+        };
         Wal::open(tmp_dir.path().join("1.wal"), opts).unwrap();
     }
 
@@ -368,8 +370,10 @@ mod tests {
     #[test]
     fn test_wal_iterator() {
         let tmp_dir = tempdir().unwrap();
-        let mut opts = AgateOptions::default();
-        opts.value_log_file_size = 4096;
+        let opts = AgateOptions {
+            value_log_file_size: 4096,
+            ..Default::default()
+        };
         let wal_path = tmp_dir.path().join("1.wal");
         let mut wal = Wal::open(wal_path.clone(), opts.clone()).unwrap();
         for i in 0..20 {
@@ -393,8 +397,10 @@ mod tests {
     #[test]
     fn test_wal_iterator_trunc() {
         let tmp_dir = tempdir().unwrap();
-        let mut opts = AgateOptions::default();
-        opts.value_log_file_size = 4096;
+        let opts = AgateOptions {
+            value_log_file_size: 4096,
+            ..Default::default()
+        };
         let wal_path = tmp_dir.path().join("1.wal");
         let mut wal = Wal::open(wal_path.clone(), opts.clone()).unwrap();
         for i in 0..20 {
