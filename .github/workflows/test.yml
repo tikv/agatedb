@@ -1,13 +1,13 @@
 on:
   push:
     branches:
-    - master
-    - develop
+      - master
+      - develop
   pull_request:
     branches:
-    - master
-    - develop
-    
+      - master
+      - develop
+
 name: Test
 
 jobs:
@@ -39,6 +39,11 @@ jobs:
         with:
           command: fmt
           args: -- --check
+      - uses: actions-rs/cargo@v1
+        name: Linting The Code 🩹
+        with:
+          command: clippy
+          args: --all-targets --all-features --workspace
       - uses: actions-rs/cargo@v1
         name: Running Tests 🚀
         with:
