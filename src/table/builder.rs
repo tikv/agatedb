@@ -229,7 +229,7 @@ mod tests {
 
         let mut builder = Builder::new(opts.clone());
         let tmp_dir = tempdir().unwrap();
-        let filename = tmp_dir.path().join("1.sst".to_string());
+        let filename = tmp_dir.path().join("1.sst");
 
         let mut block_first_keys = vec![];
 
@@ -237,9 +237,7 @@ mod tests {
             let k = key_with_ts(format!("{:016x}", i).as_str(), (i + 1) as u64);
             let v = Bytes::from(i.to_string());
             let vs = Value::new(v);
-            if i == 0 {
-                block_first_keys.push(k.clone());
-            } else if builder.should_finish_block(&k, &vs) {
+            if i == 0 || builder.should_finish_block(&k, &vs) {
                 block_first_keys.push(k.clone());
             }
             builder.add(&k, vs, 0);
@@ -253,8 +251,8 @@ mod tests {
 
         let idx = table.inner.read_table_index().unwrap();
 
-        for i in 0..idx.offsets.len() {
-            assert_eq!(block_first_keys[i], idx.offsets[i].key);
+        for (i, item) in block_first_keys.iter().enumerate().take(idx.offsets.len()) {
+            assert_eq!(item, &idx.offsets[i].key);
         }
 
         // TODO: support max_version
