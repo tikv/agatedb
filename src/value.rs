@@ -211,3 +211,21 @@ impl EntryReader {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_encode_decode_var() {
+        let val = 285u64; // 0x128 - 1
+
+        let bytes = &mut [0u8; 12];
+        let count = encode_var(bytes, val);
+        assert_eq!(count, 2);
+
+        let res = decode_var(bytes);
+        assert_eq!(res.0, val);
+        assert_eq!(res.1, 2);
+    }
+}
