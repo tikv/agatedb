@@ -10,7 +10,7 @@ use std::sync::Arc;
 /// Errors that may encounter during iterator operation
 #[derive(Clone, Debug, PartialEq)]
 pub enum IteratorError {
-    EOF,
+    Eof,
     // TODO: As we need to clone Error from block iterator to table iterator,
     // we had to save `crate::Error` as String. In the future, we could let all
     // seek-related function to return a `Result<()>` instead of saving an
@@ -21,12 +21,12 @@ pub enum IteratorError {
 impl IteratorError {
     /// Check if iterator has reached its end
     pub fn is_eof(&self) -> bool {
-        matches!(self, IteratorError::EOF)
+        matches!(self, IteratorError::Eof)
     }
 
     /// Utility function to check if an Option<IteratorError> is EOF
     pub fn check_eof(err: &Option<IteratorError>) -> bool {
-        matches!(err, Some(IteratorError::EOF))
+        matches!(err, Some(IteratorError::Eof))
     }
 }
 
@@ -99,7 +99,7 @@ impl BlockIterator {
     fn set_idx(&mut self, i: usize) {
         self.idx = i;
         if i >= self.entry_offsets().len() {
-            self.err = Some(IteratorError::EOF);
+            self.err = Some(IteratorError::Eof);
             return;
         }
 
@@ -180,7 +180,7 @@ impl BlockIterator {
     pub fn seek_to_last(&mut self) {
         if self.entry_offsets().is_empty() {
             self.idx = std::usize::MAX;
-            self.err = Some(IteratorError::EOF);
+            self.err = Some(IteratorError::Eof);
         } else {
             self.set_idx(self.entry_offsets().len() - 1);
         }
@@ -193,7 +193,7 @@ impl BlockIterator {
     pub fn prev(&mut self) {
         if self.idx == 0 {
             self.idx = std::usize::MAX;
-            self.err = Some(IteratorError::EOF);
+            self.err = Some(IteratorError::Eof);
         } else {
             self.set_idx(self.idx - 1);
         }
@@ -264,7 +264,7 @@ impl<T: AsRef<TableInner>> TableRefIterator<T> {
     pub fn seek_to_first(&mut self) {
         let num_blocks = self.table.as_ref().offsets_length();
         if num_blocks == 0 {
-            self.err = Some(IteratorError::EOF);
+            self.err = Some(IteratorError::Eof);
             return;
         }
         self.bpos = 0;
@@ -281,7 +281,7 @@ impl<T: AsRef<TableInner>> TableRefIterator<T> {
     pub fn seek_to_last(&mut self) {
         let num_blocks = self.table.as_ref().offsets_length();
         if num_blocks == 0 {
-            self.err = Some(IteratorError::EOF);
+            self.err = Some(IteratorError::Eof);
             return;
         }
         self.bpos = num_blocks - 1;
@@ -357,7 +357,7 @@ impl<T: AsRef<TableInner>> TableRefIterator<T> {
         self.err = None;
 
         if self.bpos >= self.table.as_ref().offsets_length() {
-            self.err = Some(IteratorError::EOF);
+            self.err = Some(IteratorError::Eof);
             return;
         }
 
@@ -388,7 +388,7 @@ impl<T: AsRef<TableInner>> TableRefIterator<T> {
         self.err = None;
 
         if self.bpos == std::usize::MAX {
-            self.err = Some(IteratorError::EOF);
+            self.err = Some(IteratorError::Eof);
             return;
         }
 
@@ -472,7 +472,7 @@ mod tests {
 
     #[test]
     fn test_iterator_error() {
-        let ite1 = IteratorError::EOF;
+        let ite1 = IteratorError::Eof;
         assert!(ite1.is_eof());
 
         let ite3 = IteratorError::Error("23333".to_string());

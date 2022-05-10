@@ -67,7 +67,7 @@ impl LevelHandler {
         unimplemented!()
     }
 
-    pub(crate) fn append_iterators(&self, iters: &mut Vec<TableIterators>, opts: &IteratorOptions) {
+    pub(crate) fn append_iterators(&self, iters: &mut [TableIterators], opts: &IteratorOptions) {
         unimplemented!()
     }
 }
