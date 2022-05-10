@@ -4,8 +4,8 @@ use crate::wal::Header;
 use crate::{Error, Result};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use crossbeam_channel::Sender;
+use prost::{decode_length_delimiter, encode_length_delimiter};
 use std::io::{Cursor, Read};
-use std::mem::MaybeUninit;
 
 pub const VALUE_DELETE: u8 = 1 << 0;
 pub const VALUE_POINTER: u8 = 1 << 1;
@@ -14,7 +14,7 @@ pub const VALUE_MERGE_ENTRY: u8 = 1 << 3;
 pub const VALUE_TXN: u8 = 1 << 6;
 pub const VALUE_FIN_TXN: u8 = 1 << 7;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq)]
 pub struct Value {
     pub meta: u8,
     pub user_meta: u8,
@@ -117,21 +117,19 @@ impl Value {
         (l + var_size(self.expires_at)) as u32
     }
 
-    pub fn decode(&mut self, bytes: &Bytes) {
-        self.meta = bytes[0];
-        self.user_meta = bytes[1];
-        let res = decode_var(&bytes[2..]);
-        self.expires_at = res.0;
-        self.value = bytes.slice(res.1 + 2..);
+    pub fn decode(&mut self, mut bytes: &mut Bytes) {
+        self.meta = bytes.get_u8();
+        self.user_meta = bytes.get_u8();
+
+        self.expires_at = decode_length_delimiter(&mut bytes).unwrap() as u64;
+        self.value = bytes.to_owned();
     }
 
     pub fn encode(&self, buf: &mut BytesMut) {
-        let arr: [MaybeUninit<u8>; 12] = unsafe { MaybeUninit::uninit().assume_init() };
-        let mut arr = unsafe { std::mem::transmute::<_, [u8; 12]>(arr) };
-        arr[0] = self.meta;
-        arr[1] = self.user_meta;
-        let written = encode_var(&mut arr[2..], self.expires_at);
-        buf.put_slice(&arr[..written + 2]);
+        buf.put_u8(self.meta);
+        buf.put_u8(self.user_meta);
+
+        encode_length_delimiter(self.expires_at as usize, buf).unwrap();
         buf.put_slice(&self.value);
     }
 }
@@ -217,16 +215,31 @@ impl EntryReader {
 mod tests {
     use super::*;
 
+    // #[test]
+    // fn test_encode_decode_var() {
+    //     let val = 285u64; // 0x128 - 1
+
+    //     let bytes = &mut [0u8; 12];
+    //     let count = encode_var(bytes, val);
+    //     assert_eq!(count, 2);
+
+    //     let res = decode_var(bytes);
+    //     assert_eq!(res.0, val);
+    //     assert_eq!(res.1, 2);
+    // }
+
     #[test]
-    fn test_encode_decode_var() {
-        let val = 285u64; // 0x128 - 1
+    fn test_encode_decode() {
+        let v = Value::new(Bytes::from("hello world"));
 
-        let bytes = &mut [0u8; 12];
-        let count = encode_var(bytes, val);
-        assert_eq!(count, 2);
+        let mut buf = BytesMut::new();
+        v.encode(&mut buf);
 
-        let res = decode_var(bytes);
-        assert_eq!(res.0, val);
-        assert_eq!(res.1, 2);
+        let mut bytes = buf.freeze();
+
+        let mut new_v = Value::default();
+        new_v.decode(&mut bytes);
+
+        assert_eq!(v, new_v);
     }
 }

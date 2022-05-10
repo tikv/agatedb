@@ -425,7 +425,7 @@ impl<T: AsRef<TableInner>> AgateIterator for TableRefIterator<T> {
 
     fn value(&self) -> Value {
         let mut value = Value::default();
-        value.decode(&self.block_iterator.as_ref().unwrap().val);
+        value.decode(&mut self.block_iterator.as_ref().unwrap().val.clone());
         value
     }
 
