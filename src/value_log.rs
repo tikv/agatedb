@@ -249,7 +249,7 @@ impl ValueLog {
                 };
 
                 let orig_meta = entry.meta;
-                entry.meta &= !value::VALUE_FIN_TXN | value::VALUE_TXN;
+                entry.meta &= !(value::VALUE_FIN_TXN | value::VALUE_TXN);
 
                 let plen = Wal::encode_entry(&mut buf, entry);
                 entry.meta = orig_meta;
