@@ -55,12 +55,12 @@ impl Value {
             + self.value.len()
     }
 
-    pub fn decode(&mut self, mut bytes: &mut Bytes) {
+    pub fn decode(&mut self, mut bytes: Bytes) {
         self.meta = bytes.get_u8();
         self.user_meta = bytes.get_u8();
 
         self.expires_at = decode_length_delimiter(&mut bytes).unwrap() as u64;
-        self.value = bytes.to_owned();
+        self.value = bytes;
     }
 
     pub fn encode(&self, buf: &mut BytesMut) {
@@ -159,10 +159,10 @@ mod tests {
             let mut buf = BytesMut::new();
             v.encode(&mut buf);
 
-            let mut bytes = buf.freeze();
+            let bytes = buf.freeze();
 
             let mut new_v = Value::default();
-            new_v.decode(&mut bytes);
+            new_v.decode(bytes);
 
             assert_eq!(*v, new_v);
         };
