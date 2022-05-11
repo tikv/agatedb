@@ -155,16 +155,22 @@ mod tests {
 
     #[test]
     fn test_encode_decode() {
+        let check = |v: &Value| {
+            let mut buf = BytesMut::new();
+            v.encode(&mut buf);
+
+            let mut bytes = buf.freeze();
+
+            let mut new_v = Value::default();
+            new_v.decode(&mut bytes);
+
+            assert_eq!(*v, new_v);
+        };
+
         let v = Value::new(Bytes::from("hello world"));
+        check(&v);
 
-        let mut buf = BytesMut::new();
-        v.encode(&mut buf);
-
-        let mut bytes = buf.freeze();
-
-        let mut new_v = Value::default();
-        new_v.decode(&mut bytes);
-
-        assert_eq!(v, new_v);
+        let v = Value::new_with_meta(Bytes::from("hello world"), 1, 2);
+        check(&v);
     }
 }
