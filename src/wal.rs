@@ -31,7 +31,7 @@ pub struct Header {
 impl Header {
     /// Get length of header if being encoded
     pub fn encoded_len(&self) -> usize {
-        1 + 1
+        std::mem::size_of::<u8>() * 2
             + length_delimiter_len(self.expires_at as usize)
             + length_delimiter_len(self.key_len as usize)
             + length_delimiter_len(self.value_len as usize)
