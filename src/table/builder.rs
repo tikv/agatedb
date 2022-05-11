@@ -93,7 +93,7 @@ impl Builder {
         self.buf.put_slice(diff_key);
         v.encode(&mut self.buf);
 
-        let sst_size = v.encoded_size() as usize + diff_key.len() + 4;
+        let sst_size = v.encoded_size() + diff_key.len() + 4;
         self.table_index.estimated_size += sst_size as u32 + vlog_len;
     }
 
