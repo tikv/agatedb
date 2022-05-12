@@ -10,9 +10,9 @@ struct ArenaCore {
 
 impl Drop for ArenaCore {
     fn drop(&mut self) {
+        let ptr = self.ptr as *mut u64;
+        let cap = self.cap / 8;
         unsafe {
-            let ptr = self.ptr as *mut u64;
-            let cap = self.cap / 8;
             Vec::from_raw_parts(ptr, 0, cap);
         }
     }
