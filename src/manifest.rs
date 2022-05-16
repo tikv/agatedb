@@ -366,3 +366,77 @@ pub fn new_delete_change(id: u64) -> ManifestChange {
         compression: 0,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::prelude::FileExt;
+
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_manifest_basic() {
+        let mut opts = AgateOptions::default();
+        let tmp_dir = tempdir().unwrap();
+        opts.dir = tmp_dir.path().to_path_buf();
+
+        let manifestfile = ManifestFile::open_or_create_manifest_file(&opts).unwrap();
+
+        let mut changes_param = vec![];
+        let change = new_create_change(1, 1, 1);
+        changes_param.push(change);
+
+        manifestfile.add_changes(changes_param.clone()).unwrap();
+
+        drop(manifestfile);
+
+        let manifestfile = ManifestFile::open_or_create_manifest_file(&opts).unwrap();
+
+        let changes = manifestfile.manifest_cloned().as_changes();
+        assert_eq!(changes_param, changes);
+    }
+
+    fn help_test_manifest_corruption(offset: u64, err: String) {
+        let mut opts = AgateOptions::default();
+        let tmp_dir = tempdir().unwrap();
+        opts.dir = tmp_dir.path().to_path_buf();
+
+        {
+            ManifestFile::open_or_create_manifest_file(&opts).unwrap();
+            let path = opts.dir.join(MANIFEST_FILENAME);
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .open(&path)
+                .unwrap();
+            file.write_at(&[b'G'], offset).unwrap();
+        }
+
+        let res = ManifestFile::open_or_create_manifest_file(&opts);
+
+        match res.err().unwrap() {
+            Error::CustomError(e) => {
+                assert_eq!(e, err);
+            }
+            _ => {
+                panic!("mismatch");
+            }
+        }
+    }
+
+    #[test]
+    fn test_test_manifest_magic() {
+        help_test_manifest_corruption(3, "bad magic text".to_string());
+    }
+
+    #[test]
+    fn test_test_manifest_version() {
+        help_test_manifest_corruption(4, "bad magic version".to_string());
+    }
+
+    #[test]
+    fn test_test_manifest_checksum() {
+        help_test_manifest_corruption(15, "bad checksum".to_string());
+    }
+}
