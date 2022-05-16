@@ -7,6 +7,7 @@ pub struct AgateOptions {
     // TODO: docs
     pub in_memory: bool,
     pub sync_writes: bool,
+    pub read_only: bool,
 
     // Memtable options
     pub mem_table_size: u64,
@@ -45,6 +46,7 @@ impl Default for AgateOptions {
             num_memtables: 20,
             in_memory: false,
             sync_writes: false,
+            read_only: false,
             value_threshold: 1 << 10,
             value_log_file_size: 1 << (30 - 1),
             value_log_max_entries: 1000000,

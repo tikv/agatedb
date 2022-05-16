@@ -75,3 +75,14 @@ pub fn same_key(a: &[u8], b: &[u8]) -> bool {
     }
     return user_key(a) == user_key(b);
 }
+
+#[macro_export]
+macro_rules! write_with_length_check {
+    ($FILE:expr, $BUF:expr) => {
+        let buf_len = $BUF.len();
+        let written = $FILE.write(&$BUF)?;
+        if buf_len != written {
+            return Err(Error::WriteAmountError(written, buf_len));
+        }
+    };
+}
