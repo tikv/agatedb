@@ -57,8 +57,9 @@ struct BlockIterator {
     /// block struct
     // TODO: use `&'a Block` if possible
     block: Arc<Block>,
-    /// previous overlap key, used to construct key of current entry from
-    /// previous one faster
+    /// Stores the overlap of the previous key with the base key,
+    /// to avoid unnecessary copy of base key when the overlap is
+    /// same for multiple keys.
     perv_overlap: u16,
     /// iterator error in last operation
     err: Option<IteratorError>,
@@ -125,17 +126,18 @@ impl BlockIterator {
         let mut header = Header::default();
         header.decode(&mut entry_data);
 
-        // TODO: merge this truncate with the following key truncate
         if header.overlap > self.perv_overlap {
             self.key.truncate(self.perv_overlap as usize);
             self.key.extend_from_slice(
                 &self.base_key[self.perv_overlap as usize..header.overlap as usize],
             );
+        } else {
+            self.key.truncate(header.overlap as usize);
         }
+
         self.perv_overlap = header.overlap;
 
         let diff_key = &entry_data[..header.diff as usize];
-        self.key.truncate(header.overlap as usize);
         self.key.extend_from_slice(diff_key);
         self.val = entry_data.slice(header.diff as usize..);
     }
