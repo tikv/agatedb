@@ -14,7 +14,7 @@ format: pre-format
 	@cargo sort -w ./Cargo.toml ./*/Cargo.toml > /dev/null 
 
 clippy:
-	cargo clippy --all-targets --all-features
+	cargo clippy --all-targets --all-features --workspace -- -D "warnings"
 
 test:
 	cargo test --all-features --workspace

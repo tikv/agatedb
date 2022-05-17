@@ -4,10 +4,10 @@ pub use skiplist::{FixedLengthSuffixComparator as Comparator, KeyComparator};
 
 use crate::{format::user_key, Result};
 
-pub static COMPARATOR: FixedLengthSuffixComparator = make_comparator();
+pub static COMPARATOR: Comparator = make_comparator();
 
-pub const fn make_comparator() -> FixedLengthSuffixComparator {
-    FixedLengthSuffixComparator::new(8)
+pub const fn make_comparator() -> Comparator {
+    Comparator::new(8)
 }
 
 unsafe fn u64(ptr: *const u8) -> u64 {
