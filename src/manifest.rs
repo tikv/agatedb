@@ -1,12 +1,12 @@
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Seek, Write};
-use std::sync::Mutex;
 use std::{
     collections::{HashMap, HashSet},
-    io::SeekFrom,
+    fs::{self, File, OpenOptions},
+    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
+    sync::Mutex,
 };
 
+use bytes::{Buf, BufMut, BytesMut};
 use crc::crc32;
 use prost::Message;
 use proto::meta::{
@@ -14,7 +14,6 @@ use proto::meta::{
 };
 
 use crate::{util, write_with_length_check, AgateOptions, Error, Result};
-use bytes::{Buf, BufMut, BytesMut};
 
 pub const MANIFEST_FILENAME: &str = "MANIFEST";
 const MANIFEST_REWRITE_FILENAME: &str = "MANIFEST_REWRITE";
@@ -371,8 +370,9 @@ pub fn new_delete_change(id: u64) -> ManifestChange {
 mod tests {
     use std::os::unix::prelude::FileExt;
 
-    use super::*;
     use tempfile::tempdir;
+
+    use super::*;
 
     #[test]
     fn test_manifest_basic() {
