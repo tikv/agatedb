@@ -1,6 +1,7 @@
-use crate::value::Value;
 use bytes::Bytes;
 use enum_dispatch::enum_dispatch;
+
+use crate::value::Value;
 
 /// `AgateIterator` defines the interface of all iterators,
 /// including `TableIterator`, `MergeIterator` and `ConcatIterator`.

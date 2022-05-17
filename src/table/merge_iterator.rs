@@ -1,11 +1,12 @@
 use bytes::{Bytes, BytesMut};
 use enum_dispatch::enum_dispatch;
 
-use super::concat_iterator::ConcatIterator;
-use super::TableIterator;
-use crate::iterator_trait::AgateIterator;
-use crate::util::{KeyComparator, COMPARATOR};
-use crate::Value;
+use super::{concat_iterator::ConcatIterator, TableIterator};
+use crate::{
+    iterator_trait::AgateIterator,
+    util::{KeyComparator, COMPARATOR},
+    Value,
+};
 
 /// `Iterators` includes all iterator types for AgateDB.
 /// By packing them into an enum, we could reduce the

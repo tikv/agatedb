@@ -1,6 +1,10 @@
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
-use std::{mem, ptr};
+use std::{
+    mem, ptr,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
+};
 
 struct ArenaCore {
     len: AtomicU32,

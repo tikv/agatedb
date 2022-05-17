@@ -1,5 +1,4 @@
-use std::result;
-use std::{io, ops::Range};
+use std::{io, ops::Range, result};
 
 use thiserror::Error;
 

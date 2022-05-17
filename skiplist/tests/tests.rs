@@ -1,10 +1,12 @@
+use std::{
+    str,
+    sync::{atomic::*, *},
+    thread::yield_now,
+    time::Duration,
+};
+
 use bytes::*;
 use skiplist::*;
-use std::str;
-use std::sync::atomic::*;
-use std::sync::*;
-use std::thread::yield_now;
-use std::time::Duration;
 use yatp::task::callback::Handle;
 
 const ARENA_SIZE: u32 = 1 << 20;

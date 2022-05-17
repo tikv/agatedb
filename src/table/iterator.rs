@@ -1,11 +1,17 @@
-use super::builder::{Header, HEADER_SIZE};
-use super::{Block, TableInner};
-use crate::iterator_trait::AgateIterator;
-use crate::util::{self, KeyComparator, COMPARATOR};
-use crate::value::Value;
-use crate::Error;
-use bytes::{Bytes, BytesMut};
 use std::sync::Arc;
+
+use bytes::{Bytes, BytesMut};
+
+use super::{
+    builder::{Header, HEADER_SIZE},
+    Block, TableInner,
+};
+use crate::{
+    iterator_trait::AgateIterator,
+    util::{self, KeyComparator, COMPARATOR},
+    value::Value,
+    Error,
+};
 
 /// Errors that may encounter during iterator operation
 #[derive(Clone, Debug, PartialEq)]

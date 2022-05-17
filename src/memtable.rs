@@ -1,15 +1,14 @@
-use crate::util::Comparator;
-use crate::value::Value;
-use crate::wal::Wal;
-use crate::AgateOptions;
-use crate::Result;
+use std::{
+    collections::VecDeque,
+    mem::{self, ManuallyDrop, MaybeUninit},
+    ptr,
+    sync::Mutex,
+};
+
 use bytes::Bytes;
 use skiplist::Skiplist;
-use std::collections::VecDeque;
-use std::mem::{self, ManuallyDrop, MaybeUninit};
 
-use std::ptr;
-use std::sync::Mutex;
+use crate::{util::Comparator, value::Value, wal::Wal, AgateOptions, Result};
 
 const MEMTABLE_VIEW_MAX: usize = 20;
 

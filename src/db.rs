@@ -1,16 +1,21 @@
 mod opt;
 
-use super::memtable::{MemTable, MemTables};
-use super::Result;
-use crate::entry::Entry;
-use crate::value::{Request, Value};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+};
 
 pub use opt::AgateOptions;
 
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::Mutex;
+use super::{
+    memtable::{MemTable, MemTables},
+    Result,
+};
+use crate::{
+    entry::Entry,
+    value::{Request, Value},
+};
 
 pub struct Core {
     mt: Mutex<MemTables>,
