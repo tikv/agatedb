@@ -28,9 +28,9 @@ bench:
 bench_sanitizer:
 	RUSTFLAGS="$(SANITIZER_FLAGS)" cargo bench --all-features --workspace
 
-ci: fmt clippy test
+dev: format clippy test
 
 clean:
 	cargo clean
 
-.PHONY: run clean fmt clippy test
+.PHONY: run clean format clippy test dev

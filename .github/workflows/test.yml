@@ -35,7 +35,9 @@ jobs:
           toolchain: nightly
           default: true
       - name: Check Code Format 🔧
-        run: make format
+        run: |
+          make format
+          git diff --quiet
       - name: Linting The Code 🩹
         run: make clippy
       - name: Running Tests 🚀
