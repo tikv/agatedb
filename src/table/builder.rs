@@ -1,12 +1,8 @@
-use crate::bloom::Bloom;
-use crate::format::user_key;
-use crate::opt::Options;
-use crate::value::Value;
-use crate::{checksum, util};
-
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use prost::Message;
 use proto::meta::{checksum::Algorithm as ChecksumAlg, BlockOffset, Checksum, TableIndex};
+
+use crate::{bloom::Bloom, checksum, format::user_key, opt::Options, util, value::Value};
 
 /// Entry header stores the difference between current key and block base key.
 /// `overlap` is the common prefix of key and base key, and diff is the length
@@ -208,12 +204,14 @@ impl Builder {
 }
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::table::tests::build_test_table;
-    use crate::table::Table;
-    use crate::AgateIterator;
-    use crate::{format::key_with_ts, ChecksumVerificationMode};
     use tempfile::tempdir;
+
+    use super::*;
+    use crate::{
+        format::key_with_ts,
+        table::{tests::build_test_table, Table},
+        AgateIterator, ChecksumVerificationMode,
+    };
 
     const TEST_KEYS_COUNT: usize = 100000;
 

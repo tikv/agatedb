@@ -1,13 +1,14 @@
+use std::{
+    collections::*,
+    mem,
+    sync::{atomic::*, *},
+    thread,
+};
+
 use bytes::*;
 use criterion::*;
 use rand::prelude::*;
 use skiplist::*;
-use std::collections::*;
-use std::mem;
-use std::sync::atomic::*;
-use std::sync::*;
-use std::thread;
-
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
 

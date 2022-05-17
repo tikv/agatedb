@@ -1,11 +1,14 @@
-use crate::entry::Entry;
-use crate::entry::EntryRef;
-use crate::wal::Header;
-use crate::{Error, Result};
+use std::io::{Cursor, Read};
+
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use crossbeam_channel::Sender;
 use prost::{decode_length_delimiter, encode_length_delimiter, length_delimiter_len};
-use std::io::{Cursor, Read};
+
+use crate::{
+    entry::{Entry, EntryRef},
+    wal::Header,
+    Error, Result,
+};
 
 pub const VALUE_DELETE: u8 = 1 << 0;
 pub const VALUE_POINTER: u8 = 1 << 1;

@@ -1,12 +1,15 @@
 use std::ops::{Deref, DerefMut};
 
-use super::*;
-use crate::format::{key_with_ts, user_key};
-use crate::value::Value;
 use builder::Builder;
 use iterator::IteratorError;
 use rand::prelude::*;
 use tempfile::{tempdir, TempDir};
+
+use super::*;
+use crate::{
+    format::{key_with_ts, user_key},
+    value::Value,
+};
 
 fn key(prefix: &[u8], i: usize) -> Bytes {
     Bytes::from([prefix, format!("{:04}", i).as_bytes()].concat())

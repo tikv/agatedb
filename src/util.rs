@@ -1,12 +1,8 @@
-pub use skiplist::FixedLengthSuffixComparator as Comparator;
-pub use skiplist::{FixedLengthSuffixComparator, KeyComparator};
+use std::{cmp, fs::File, path::Path, ptr};
 
-use crate::format::user_key;
-use crate::Result;
+pub use skiplist::{FixedLengthSuffixComparator as Comparator, KeyComparator};
 
-use std::fs::File;
-use std::path::Path;
-use std::{cmp, ptr};
+use crate::{format::user_key, Result};
 
 pub static COMPARATOR: FixedLengthSuffixComparator = make_comparator();
 

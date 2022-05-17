@@ -1,13 +1,14 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use bytes::{Bytes, BytesMut};
 use parking_lot::RwLock;
-use std::sync::Arc;
 
 use super::LevelHandler;
-use crate::format::{key_with_ts_first, key_with_ts_last, user_key};
-use crate::util::{KeyComparator, COMPARATOR};
-use crate::{Error, Result, Table};
+use crate::{
+    format::{key_with_ts_first, key_with_ts_last, user_key},
+    util::{KeyComparator, COMPARATOR},
+    Error, Result, Table,
+};
 
 /// Represents a range of keys from `left` to `right`
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -207,7 +208,10 @@ impl CompactStatus {
         if !found {
             let this = compact_def.this_range.clone();
             let next = compact_def.next_range.clone();
-            panic!("try looking for {:?} in this level and {:?} in next level, but key range not found", this, next);
+            panic!(
+                "try looking for {:?} in this level and {:?} in next level, but key range not found",
+                this, next
+            );
         }
 
         for table in compact_def.top.iter() {

@@ -1,5 +1,6 @@
-use crate::value::{ValuePointer, VALUE_DELETE};
 use bytes::Bytes;
+
+use crate::value::{ValuePointer, VALUE_DELETE};
 
 #[derive(Clone)]
 pub struct Entry {

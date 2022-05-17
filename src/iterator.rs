@@ -1,5 +1,6 @@
-use crate::Table;
 use bytes::Bytes;
+
+use crate::Table;
 
 #[derive(Default, Clone)]
 pub struct IteratorOptions {

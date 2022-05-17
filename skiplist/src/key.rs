@@ -1,5 +1,6 @@
-use bytes::Bytes;
 use std::cmp::Ordering;
+
+use bytes::Bytes;
 
 pub trait KeyComparator: Clone {
     fn compare_key(&self, lhs: &[u8], rhs: &[u8]) -> Ordering;
