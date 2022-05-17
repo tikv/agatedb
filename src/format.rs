@@ -1,5 +1,6 @@
-use bytes::{BufMut, Bytes, BytesMut};
 use std::{ptr, u64};
+
+use bytes::{BufMut, Bytes, BytesMut};
 
 pub fn key_with_ts(key: impl Into<BytesMut>, ts: u64) -> Bytes {
     let mut key = key.into();

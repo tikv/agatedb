@@ -1,15 +1,19 @@
-use crate::entry::{Entry, EntryRef};
-use crate::util::sync_dir;
-use crate::value::{EntryReader, ValuePointer};
-use crate::AgateOptions;
-use crate::Error;
-use crate::Result;
+use std::{
+    fs::{File, OpenOptions},
+    io::Cursor,
+    path::PathBuf,
+};
+
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use memmap2::{MmapMut, MmapOptions};
 use prost::{decode_length_delimiter, encode_length_delimiter, length_delimiter_len};
-use std::fs::{File, OpenOptions};
-use std::io::Cursor;
-use std::path::PathBuf;
+
+use crate::{
+    entry::{Entry, EntryRef},
+    util::sync_dir,
+    value::{EntryReader, ValuePointer},
+    AgateOptions, Error, Result,
+};
 
 pub const MAX_HEADER_SIZE: usize = 21;
 
@@ -335,8 +339,9 @@ impl<'a> WalIterator<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tempfile::tempdir;
+
+    use super::*;
 
     #[test]
     fn test_wal_create() {

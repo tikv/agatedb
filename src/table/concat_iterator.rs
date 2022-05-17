@@ -1,9 +1,10 @@
-use super::iterator::ITERATOR_REVERSED;
-use super::{AgateIterator, Table, TableIterator};
-use crate::util::{KeyComparator, COMPARATOR};
-use crate::value::Value;
-
 use bytes::Bytes;
+
+use super::{iterator::ITERATOR_REVERSED, AgateIterator, Table, TableIterator};
+use crate::{
+    util::{KeyComparator, COMPARATOR},
+    value::Value,
+};
 
 /// ConcatIterator iterates on SSTs with no overlap keys.
 pub struct ConcatIterator {
@@ -134,16 +135,17 @@ impl AgateIterator for ConcatIterator {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use bytes::{Bytes, BytesMut};
+    use rand::prelude::*;
 
-    use crate::table::Table;
+    use super::*;
     use crate::{
         format::{key_with_ts, user_key},
-        table::tests::{build_table_data, get_test_table_options},
+        table::{
+            tests::{build_table_data, get_test_table_options},
+            Table,
+        },
     };
-    use bytes::Bytes;
-    use bytes::BytesMut;
-    use rand::prelude::*;
 
     fn build_test_tables() -> (Vec<Table>, usize) {
         let mut tables = vec![];

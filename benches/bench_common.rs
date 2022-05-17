@@ -2,7 +2,6 @@ mod common;
 
 use agatedb::{get_ts, key_with_ts};
 use criterion::{criterion_group, criterion_main, Criterion};
-
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
 
