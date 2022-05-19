@@ -408,7 +408,8 @@ mod tests {
 
         let manifestfile = ManifestFile::open_or_create_manifest_file(&opts).unwrap();
 
-        let changes = manifestfile.manifest_cloned().as_changes();
+        let mut changes = manifestfile.manifest_cloned().as_changes();
+        changes.sort_by(|i, j| i.id.cmp(&j.id));
 
         assert_eq!([changes_param1, changes_param2].concat(), changes);
     }
