@@ -2,7 +2,7 @@ use std::{
     collections::VecDeque,
     mem::{self, ManuallyDrop, MaybeUninit},
     ptr,
-    sync::RwLock,
+    sync::{atomic::AtomicBool, RwLock},
 };
 
 use bytes::Bytes;
@@ -32,6 +32,8 @@ pub struct MemTable {
     pub(crate) skl: Skiplist<Comparator>,
     opt: AgateOptions,
     core: RwLock<MemTableCore>,
+
+    save_after_close: AtomicBool,
 }
 
 impl MemTable {
@@ -43,6 +45,7 @@ impl MemTable {
                 wal,
                 max_version: 0,
             }),
+            save_after_close: AtomicBool::new(false),
         }
     }
 
@@ -116,6 +119,31 @@ impl MemTable {
             Ok(false)
         }
     }
+
+    pub fn mark_save(&self) {
+        self.save_after_close
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn drop_no_fail(&mut self) -> Result<()> {
+        if self
+            .save_after_close
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            let mut core = self.core.write()?;
+            let wal = core.wal.take();
+            if let Some(wal) = wal {
+                wal.close_and_save();
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Drop for MemTable {
+    fn drop(&mut self) {
+        crate::util::no_fail(self.drop_no_fail(), "MemTable::drop");
+    }
 }
 
 pub struct MemTablesView {
@@ -180,6 +208,14 @@ impl MemTables {
     }
 }
 
+impl Drop for MemTables {
+    fn drop(&mut self) {
+        for memtable in self.immutable.drain(..) {
+            memtable.mark_save();
+        }
+        self.mutable.mark_save();
+    }
+}
 #[cfg(test)]
 mod tests {
     use bytes::BytesMut;
