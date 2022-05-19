@@ -73,7 +73,7 @@ impl AgateOptions {
         entry.value.len() < self.value_threshold
     }
 
-    fn arena_size(&self) -> u64 {
+    pub fn arena_size(&self) -> u64 {
         // TODO: take other options into account
         self.mem_table_size as u64
     }

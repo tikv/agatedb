@@ -1,4 +1,4 @@
-use std::{io, ops::Range, result};
+use std::{io, ops::Range, result, sync::PoisonError};
 
 use thiserror::Error;
 
@@ -49,6 +49,8 @@ pub enum Error {
     CustomError(String),
     #[error("Error when creating file in read-only mode: {0}")]
     ReadOnlyError(String),
+    #[error("Lock Poison")]
+    PoisonError(String),
 }
 
 impl From<io::Error> for Error {
@@ -76,6 +78,13 @@ impl From<prost::DecodeError> for Error {
     #[inline]
     fn from(e: prost::DecodeError) -> Error {
         Error::Decode(Box::new(e))
+    }
+}
+
+impl<T: Sized> From<PoisonError<T>> for Error {
+    #[inline]
+    fn from(e: PoisonError<T>) -> Error {
+        Error::PoisonError(e.to_string())
     }
 }
 
