@@ -253,7 +253,7 @@ impl ManifestFile {
         buf.extend_from_slice(&change_buf);
 
         file.write_all(&buf)?;
-        file.sync_all()?;
+        file.sync_data()?;
         drop(file);
 
         let manifest_path = dir.as_ref().join(MANIFEST_FILENAME);
@@ -398,18 +398,19 @@ mod tests {
 
         let manifestfile = ManifestFile::open_or_create_manifest_file(&opts).unwrap();
 
-        let mut changes_param = vec![];
-        let change = new_create_change(1, 1, 1);
-        changes_param.push(change);
+        let changes_param1 = vec![new_create_change(1, 1, 1)];
+        let changes_param2 = vec![new_create_change(2, 2, 2)];
 
-        manifestfile.add_changes(changes_param.clone()).unwrap();
+        manifestfile.add_changes(changes_param1.clone()).unwrap();
+        manifestfile.add_changes(changes_param2.clone()).unwrap();
 
         drop(manifestfile);
 
         let manifestfile = ManifestFile::open_or_create_manifest_file(&opts).unwrap();
 
         let changes = manifestfile.manifest_cloned().as_changes();
-        assert_eq!(changes_param, changes);
+
+        assert_eq!([changes_param1, changes_param2].concat(), changes);
     }
 
     fn help_test_manifest_corruption(offset: u64, err: String) {
