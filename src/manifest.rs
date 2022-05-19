@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File, OpenOptions},
-    io::{Read, Seek, SeekFrom, Write},
+    io::{BufReader, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::Mutex,
 };
@@ -13,7 +13,7 @@ use proto::meta::{
     manifest_change::Operation as ManifestChangeOp, ManifestChange, ManifestChangeSet,
 };
 
-use crate::{util, write_with_length_check, AgateOptions, Error, Result};
+use crate::{util, AgateOptions, Error, Result};
 
 pub const MANIFEST_FILENAME: &str = "MANIFEST";
 const MANIFEST_REWRITE_FILENAME: &str = "MANIFEST_REWRITE";
@@ -92,6 +92,9 @@ impl Manifest {
     }
 
     pub fn replay(file: &mut File) -> Result<(Manifest, u32)> {
+        let file_len = file.metadata()?.len();
+
+        let mut file = BufReader::new(file);
         file.seek(SeekFrom::Start(0))?;
         let mut magic_buf = vec![0; 8];
         file.read_exact(&mut magic_buf)?;
@@ -103,28 +106,40 @@ impl Manifest {
             return Err(Error::CustomError("bad magic version".to_string()));
         }
 
-        let stat = file.metadata()?;
         let mut build = Manifest::new();
         let mut buf = vec![];
         let mut len_crc_buf = vec![0; 8];
         let mut offset = 8;
 
         loop {
-            if file.read(&mut len_crc_buf)? != 8 {
-                break;
+            if let Err(e) = file.read_exact(&mut len_crc_buf) {
+                match e.kind() {
+                    std::io::ErrorKind::UnexpectedEof => {
+                        break;
+                    }
+                    _ => return Err(e.into()),
+                }
             }
+
             offset += 8;
 
             let length = (&len_crc_buf[..4]).get_u32();
-            if length as u64 > stat.len() {
+            if length as u64 > file_len {
                 return Err(Error::CustomError(
                     "buffer length greater than file size".to_string(),
                 ));
             }
+
             buf.resize(length as usize, 0);
-            if file.read(&mut buf)? != length as usize {
-                break;
+            if let Err(e) = file.read_exact(&mut buf) {
+                match e.kind() {
+                    std::io::ErrorKind::UnexpectedEof => {
+                        break;
+                    }
+                    _ => return Err(e.into()),
+                }
             }
+
             offset += length;
 
             if crc32::checksum_castagnoli(&buf) != (&len_crc_buf[4..]).get_u32() {
@@ -237,7 +252,7 @@ impl ManifestFile {
         buf.extend_from_slice(&len_crc_buf);
         buf.extend_from_slice(&change_buf);
 
-        write_with_length_check!(file, buf);
+        file.write_all(&buf)?;
         file.sync_all()?;
         drop(file);
 
@@ -285,10 +300,11 @@ impl ManifestFile {
             (&mut len_crc_buf[..4]).put_u32(buf.len() as u32);
             (&mut len_crc_buf[4..]).put_u32(crc32::checksum_castagnoli(&buf));
             len_crc_buf.extend_from_slice(&buf);
-            write_with_length_check!(core.file.as_mut().unwrap(), len_crc_buf);
+
+            core.file.as_mut().unwrap().write_all(&len_crc_buf)?;
         }
 
-        core.file.as_mut().unwrap().sync_all()?;
+        core.file.as_mut().unwrap().sync_data()?;
         Ok(())
     }
 

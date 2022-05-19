@@ -49,8 +49,6 @@ pub enum Error {
     CustomError(String),
     #[error("Error when creating file in read-only mode: {0}")]
     ReadOnlyError(String),
-    #[error("{0} bytes were written, {0} bytes expected")]
-    WriteAmountError(usize, usize),
 }
 
 impl From<io::Error> for Error {
