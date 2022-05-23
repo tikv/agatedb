@@ -163,12 +163,12 @@ impl MergeIterator {
             0 => panic!("no element in iters"),
             1 => Box::new(iters.pop().unwrap()),
             2 => {
-                let right = Box::new(iters.pop().unwrap());
-                let left = Box::new(iters.pop().unwrap());
+                let right = iters.pop().unwrap();
+                let left = iters.pop().unwrap();
                 Box::new(Iterators::from(MergeIterator {
                     reverse,
-                    left: IteratorNode::new(left),
-                    right: IteratorNode::new(right),
+                    left: IteratorNode::new(Box::new(left)),
+                    right: IteratorNode::new(Box::new(right)),
                     is_left_small: true,
                     current_key: BytesMut::new(),
                 }))

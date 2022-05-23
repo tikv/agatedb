@@ -21,4 +21,8 @@ impl Oracle {
     pub fn set_discard_ts(&self, discard_ts: u64) {
         self.discard_ts.store(discard_ts, Ordering::SeqCst);
     }
+
+    pub(crate) fn discard_at_or_below(&self) -> u64 {
+        todo!()
+    }
 }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::opt;
 
 #[derive(Clone)]
 pub struct AgateOptions {
@@ -8,6 +9,7 @@ pub struct AgateOptions {
     pub in_memory: bool,
     pub sync_writes: bool,
     pub read_only: bool,
+    pub num_versions_to_keep: usize,
 
     // Memtable options
     pub mem_table_size: u64,
@@ -28,6 +30,9 @@ pub struct AgateOptions {
 
     pub value_log_file_size: u64,
     pub value_log_max_entries: u32,
+
+    pub num_compactors: usize,
+    pub checksum_mode: opt::ChecksumVerificationMode,
 }
 
 impl Default for AgateOptions {
@@ -46,6 +51,7 @@ impl Default for AgateOptions {
             num_memtables: 20,
             in_memory: false,
             sync_writes: false,
+            num_versions_to_keep: 1,
             read_only: false,
             value_threshold: 1 << 10,
             value_log_file_size: 1 << (30 - 1),
@@ -54,6 +60,8 @@ impl Default for AgateOptions {
             bloom_false_positive: 0.01,
             num_level_zero_tables: 5,
             num_level_zero_tables_stall: 15,
+            num_compactors: 4,
+            checksum_mode: opt::ChecksumVerificationMode::NoVerification,
         }
         // TODO: add other options
     }

@@ -1,5 +1,12 @@
-use std::{cmp, fs::File, path::Path, ptr};
+use std::{
+    cmp,
+    fs::File,
+    path::Path,
+    ptr,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
+use bytes::Bytes;
 pub use skiplist::{FixedLengthSuffixComparator as Comparator, KeyComparator};
 
 use crate::{format::user_key, Result};
@@ -70,4 +77,16 @@ pub fn same_key(a: &[u8], b: &[u8]) -> bool {
         return false;
     }
     return user_key(a) == user_key(b);
+}
+
+pub fn unix_time() -> u64 {
+    let start = SystemTime::now();
+    let since_the_epoch = start
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards");
+    since_the_epoch.as_millis() as u64
+}
+
+pub fn has_any_prefixes(s: &[u8], list_of_prefixes: &[Bytes]) -> bool {
+    list_of_prefixes.iter().any(|y| s.starts_with(y))
 }

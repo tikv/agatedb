@@ -25,3 +25,13 @@ impl IteratorOptions {
         // TODO: implement table selection logic
     }
 }
+
+pub fn is_deleted_or_expired(meta: u8, expires_at: u64) -> bool {
+    if meta & crate::value::VALUE_DELETE != 0 {
+        return true;
+    }
+    if expires_at == 0 {
+        return false;
+    }
+    expires_at <= crate::util::unix_time()
+}

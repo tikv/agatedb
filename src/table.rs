@@ -15,7 +15,8 @@ use std::{
 };
 
 use bytes::{Buf, Bytes};
-use iterator::{TableRefIterator, ITERATOR_NOCACHE, ITERATOR_REVERSED};
+use iterator::TableRefIterator;
+pub use iterator::{ITERATOR_NOCACHE, ITERATOR_REVERSED};
 use memmap2::{Mmap, MmapOptions};
 use prost::Message;
 use proto::meta::{BlockOffset, Checksum, TableIndex};

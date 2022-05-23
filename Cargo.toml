@@ -18,6 +18,8 @@ proto = { path = "proto" }
 rand = "0.7"
 skiplist = { path = "skiplist" }
 thiserror = "1.0"
+yatp = { git = "https://github.com/tikv/yatp.git" }
+tempdir = "0.3"
 
 [dev-dependencies]
 criterion = "0.3"

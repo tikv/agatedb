@@ -65,7 +65,7 @@ impl Builder {
         util::bytes_diff(&self.base_key, key)
     }
 
-    fn add_helper(&mut self, key: &Bytes, v: Value, vlog_len: u32) {
+    fn add_helper(&mut self, key: &Bytes, v: &Value, vlog_len: u32) {
         self.key_hashes.push(farmhash::fingerprint32(user_key(key)));
         // TODO: check ts
         let diff_key = if self.base_key.is_empty() {
@@ -136,8 +136,8 @@ impl Builder {
     }
 
     /// Add key-value pair to table
-    pub fn add(&mut self, key: &Bytes, value: Value, vlog_len: u32) {
-        if self.should_finish_block(key, &value) {
+    pub fn add(&mut self, key: &Bytes, value: &Value, vlog_len: u32) {
+        if self.should_finish_block(key, value) {
             self.finish_block();
             self.base_key.clear();
             assert!(self.buf.len() < u32::MAX as usize);
@@ -148,7 +148,7 @@ impl Builder {
     }
 
     /// Check if entries reach its capacity
-    pub fn reach_capacity(&self, capacity: u64) -> bool {
+    pub fn reach_capacity(&self) -> bool {
         let block_size = self.buf.len() as u32 + // length of buffer
                                  self.entry_offsets.len() as u32 * 4 + // all entry offsets size
                                  4 + // count of all entry offsets
@@ -157,11 +157,11 @@ impl Builder {
         let estimated_size = block_size +
                                   4 + // index length
                                   5 * self.table_index.offsets.len() as u32; // TODO: why 5?
-        estimated_size as u64 > capacity
+        estimated_size as u64 > self.options.table_capacity
     }
 
     /// Finalize the table
-    pub fn finish(&mut self) -> Bytes {
+    pub fn finish(mut self) -> Bytes {
         self.finish_block();
         if self.buf.is_empty() {
             return Bytes::new();
@@ -183,7 +183,7 @@ impl Builder {
         let cs = self.build_checksum(&bytes);
         self.write_checksum(cs);
         // TODO: eliminate clone if we do not need builder any more after finish
-        self.buf.clone().freeze()
+        self.buf.freeze()
     }
 
     fn build_checksum(&self, data: &[u8]) -> Checksum {
@@ -202,15 +202,16 @@ impl Builder {
         self.buf.put_u32(len as u32);
     }
 }
+
 #[cfg(test)]
 mod tests {
-    use tempfile::tempdir;
+    use tempdir::TempDir;
 
     use super::*;
     use crate::{
         format::key_with_ts,
         table::{tests::build_test_table, Table},
-        AgateIterator, ChecksumVerificationMode,
+        AgateIterator,
     };
 
     const TEST_KEYS_COUNT: usize = 100000;
@@ -219,6 +220,7 @@ mod tests {
     fn test_table_index() {
         // TODO: use cache
         let opts = Options {
+            table_capacity: 0,
             block_size: 4 * 1024,
             bloom_false_positive: 0.01,
             table_size: 30 << 20,
@@ -226,7 +228,7 @@ mod tests {
         };
 
         let mut builder = Builder::new(opts.clone());
-        let tmp_dir = tempdir().unwrap();
+        let tmp_dir = TempDir::new("agatedb").unwrap();
         let filename = tmp_dir.path().join("1.sst");
 
         let mut block_first_keys = vec![];
@@ -238,7 +240,7 @@ mod tests {
             if i == 0 || builder.should_finish_block(&k, &vs) {
                 block_first_keys.push(k.clone());
             }
-            builder.add(&k, vs, 0);
+            builder.add(&k, &vs, 0);
         }
 
         let table = Table::create(&filename, builder.finish(), opts).unwrap();
@@ -249,8 +251,8 @@ mod tests {
 
         let idx = table.inner.read_table_index().unwrap();
 
-        for (i, item) in block_first_keys.iter().enumerate().take(idx.offsets.len()) {
-            assert_eq!(item, &idx.offsets[i].key);
+        for (i, block_first_key) in block_first_keys.iter().enumerate().take(idx.offsets.len()) {
+            assert_eq!(block_first_key, &idx.offsets[i].key);
         }
 
         // TODO: support max_version
@@ -264,7 +266,8 @@ mod tests {
             block_size: 0,
             bloom_false_positive: if with_blooms { 0.01 } else { 0.0 },
             table_size: 0,
-            checksum_mode: ChecksumVerificationMode::OnTableRead,
+            table_capacity: 0,
+            checksum_mode: crate::opt::ChecksumVerificationMode::OnTableAndBlockRead,
         };
 
         let table = build_test_table(key_prefix, key_count, opts);
@@ -295,10 +298,11 @@ mod tests {
             bloom_false_positive: 0.1,
             block_size: 0,
             table_size: 0,
+            table_capacity: 0,
             checksum_mode: crate::opt::ChecksumVerificationMode::NoVerification,
         };
 
-        let mut b = Builder::new(opt);
+        let b = Builder::new(opt);
 
         b.finish();
     }
