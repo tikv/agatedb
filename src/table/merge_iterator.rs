@@ -1,22 +1,23 @@
 use bytes::{Bytes, BytesMut};
 use enum_dispatch::enum_dispatch;
 
-use super::concat_iterator::ConcatIterator;
-use super::TableIterator;
-use crate::iterator_trait::AgateIterator;
-use crate::util::{KeyComparator, COMPARATOR};
-use crate::Value;
+use super::{concat_iterator::ConcatIterator, TableIterator};
+use crate::{
+    iterator_trait::AgateIterator,
+    util::{KeyComparator, COMPARATOR},
+    Value,
+};
 
 /// `Iterators` includes all iterator types for AgateDB.
 /// By packing them into an enum, we could reduce the
 /// overhead of dynamic dispatch.
 #[enum_dispatch(AgateIterator)]
 pub enum Iterators {
-    MergeIterator(MergeIterator),
-    ConcatIterator(ConcatIterator),
-    TableIterator(TableIterator),
+    Merge(MergeIterator),
+    Concat(ConcatIterator),
+    Table(TableIterator),
     #[cfg(test)]
-    VecIterator(tests::VecIterator),
+    Vec(tests::VecIterator),
 }
 
 /// `MergeIterator` merges two `Iterators` into one by sequentially emitting
@@ -157,13 +158,13 @@ impl MergeIterator {
     /// Construct a single merge iterator from multiple iterators
     ///
     /// If the iterator emits elements in descending order, set `reverse` to true.
-    pub fn from_iterators(mut iters: Vec<Box<Iterators>>, reverse: bool) -> Box<Iterators> {
+    pub fn from_iterators(mut iters: Vec<Iterators>, reverse: bool) -> Box<Iterators> {
         match iters.len() {
             0 => panic!("no element in iters"),
-            1 => iters.pop().unwrap(),
+            1 => Box::new(iters.pop().unwrap()),
             2 => {
-                let right = iters.pop().unwrap();
-                let left = iters.pop().unwrap();
+                let right = Box::new(iters.pop().unwrap());
+                let left = Box::new(iters.pop().unwrap());
                 Box::new(Iterators::from(MergeIterator {
                     reverse,
                     left: IteratorNode::new(left),
@@ -261,9 +262,9 @@ mod tests {
             let found_entry_idx = crate::util::search(self.vec.len(), |idx| {
                 use std::cmp::Ordering::*;
                 if self.reversed {
-                    COMPARATOR.compare_key(&self.vec[idx], &key) != Greater
+                    COMPARATOR.compare_key(&self.vec[idx], key) != Greater
                 } else {
-                    COMPARATOR.compare_key(&self.vec[idx], &key) != Less
+                    COMPARATOR.compare_key(&self.vec[idx], key) != Less
                 }
             });
             self.pos = found_entry_idx;
@@ -377,14 +378,14 @@ mod tests {
         let mut rev_b = b.clone();
         rev_b.reverse();
 
-        let iter_a = Box::new(Iterators::from(VecIterator::new(a, false)));
-        let iter_b = Box::new(Iterators::from(VecIterator::new(b, false)));
+        let iter_a = Iterators::from(VecIterator::new(a, false));
+        let iter_b = Iterators::from(VecIterator::new(b, false));
         let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], false);
 
         check_sequence(merge_iter, 0xfff);
 
-        let iter_a = Box::new(Iterators::from(VecIterator::new(rev_a, true)));
-        let iter_b = Box::new(Iterators::from(VecIterator::new(rev_b, true)));
+        let iter_a = Iterators::from(VecIterator::new(rev_a, true));
+        let iter_b = Iterators::from(VecIterator::new(rev_b, true));
         let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], true);
         check_reverse_sequence(merge_iter, 0xfff);
     }
@@ -398,26 +399,22 @@ mod tests {
             .into_iter()
             .map(|i| gen_vec_data(0xfff, |x| x % vec_map_size == i))
             .collect();
-        let rev_vecs: Vec<Vec<Bytes>> = vecs
+
+        let rev_iters: Vec<Iterators> = vecs
             .iter()
             .map(|x| {
                 let mut y = x.clone();
                 y.reverse();
-                y
+                Iterators::from(VecIterator::new(y, true))
             })
             .collect();
 
-        let iters: Vec<Box<Iterators>> = vecs
+        let iters: Vec<Iterators> = vecs
             .into_iter()
-            .map(|vec| Box::new(Iterators::from(VecIterator::new(vec, false))))
+            .map(|vec| Iterators::from(VecIterator::new(vec, false)))
             .collect();
 
         check_sequence(MergeIterator::from_iterators(iters, false), 0xfff);
-
-        let rev_iters: Vec<Box<Iterators>> = rev_vecs
-            .into_iter()
-            .map(|vec| Box::new(Iterators::from(VecIterator::new(vec, true))))
-            .collect();
 
         check_reverse_sequence(MergeIterator::from_iterators(rev_iters, true), 0xfff);
     }

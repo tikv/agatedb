@@ -1,12 +1,8 @@
-use crate::bloom::Bloom;
-use crate::format::user_key;
-use crate::opt::Options;
-use crate::value::Value;
-use crate::{checksum, util};
-
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use prost::Message;
 use proto::meta::{checksum::Algorithm as ChecksumAlg, BlockOffset, Checksum, TableIndex};
+
+use crate::{bloom::Bloom, checksum, format::user_key, opt::Options, util, value::Value};
 
 /// Entry header stores the difference between current key and block base key.
 /// `overlap` is the common prefix of key and base key, and diff is the length
@@ -93,7 +89,7 @@ impl Builder {
         self.buf.put_slice(diff_key);
         v.encode(&mut self.buf);
 
-        let sst_size = v.encoded_size() as usize + diff_key.len() + 4;
+        let sst_size = v.encoded_size() + diff_key.len() + 4;
         self.table_index.estimated_size += sst_size as u32 + vlog_len;
     }
 
@@ -208,12 +204,14 @@ impl Builder {
 }
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::table::tests::build_test_table;
-    use crate::table::Table;
-    use crate::AgateIterator;
-    use crate::{format::key_with_ts, ChecksumVerificationMode};
     use tempfile::tempdir;
+
+    use super::*;
+    use crate::{
+        format::key_with_ts,
+        table::{tests::build_test_table, Table},
+        AgateIterator, ChecksumVerificationMode,
+    };
 
     const TEST_KEYS_COUNT: usize = 100000;
 
@@ -229,7 +227,7 @@ mod tests {
 
         let mut builder = Builder::new(opts.clone());
         let tmp_dir = tempdir().unwrap();
-        let filename = tmp_dir.path().join("1.sst".to_string());
+        let filename = tmp_dir.path().join("1.sst");
 
         let mut block_first_keys = vec![];
 
@@ -237,9 +235,7 @@ mod tests {
             let k = key_with_ts(format!("{:016x}", i).as_str(), (i + 1) as u64);
             let v = Bytes::from(i.to_string());
             let vs = Value::new(v);
-            if i == 0 {
-                block_first_keys.push(k.clone());
-            } else if builder.should_finish_block(&k, &vs) {
+            if i == 0 || builder.should_finish_block(&k, &vs) {
                 block_first_keys.push(k.clone());
             }
             builder.add(&k, vs, 0);
@@ -253,8 +249,8 @@ mod tests {
 
         let idx = table.inner.read_table_index().unwrap();
 
-        for i in 0..idx.offsets.len() {
-            assert_eq!(block_first_keys[i], idx.offsets[i].key);
+        for (i, item) in block_first_keys.iter().enumerate().take(idx.offsets.len()) {
+            assert_eq!(item, &idx.offsets[i].key);
         }
 
         // TODO: support max_version

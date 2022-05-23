@@ -1,15 +1,19 @@
-use crate::entry::{Entry, EntryRef};
-use crate::util::sync_dir;
-use crate::value::{EntryReader, ValuePointer};
-use crate::AgateOptions;
-use crate::Error;
-use crate::Result;
+use std::{
+    fs::{File, OpenOptions},
+    io::Cursor,
+    path::PathBuf,
+};
+
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use memmap2::{MmapMut, MmapOptions};
 use prost::{decode_length_delimiter, encode_length_delimiter, length_delimiter_len};
-use std::fs::{File, OpenOptions};
-use std::io::Cursor;
-use std::path::PathBuf;
+
+use crate::{
+    entry::{Entry, EntryRef},
+    util::sync_dir,
+    value::{EntryReader, ValuePointer},
+    AgateOptions, Error, Result,
+};
 
 pub const MAX_HEADER_SIZE: usize = 21;
 
@@ -31,7 +35,7 @@ pub struct Header {
 impl Header {
     /// Get length of header if being encoded
     pub fn encoded_len(&self) -> usize {
-        1 + 1
+        std::mem::size_of::<u8>() * 2
             + length_delimiter_len(self.expires_at as usize)
             + length_delimiter_len(self.key_len as usize)
             + length_delimiter_len(self.value_len as usize)
@@ -167,7 +171,7 @@ impl Wal {
     /// +--------+-----+-------+
     /// | header | key | value |
     /// +--------+-----+-------+
-    pub(crate) fn encode_entry(mut buf: &mut BytesMut, entry: &Entry) -> usize {
+    pub(crate) fn encode_entry(buf: &mut BytesMut, entry: &Entry) -> usize {
         let header = Header {
             key_len: entry.key.len() as u32,
             value_len: entry.value.len() as u32,
@@ -177,7 +181,7 @@ impl Wal {
         };
 
         // write header to buffer
-        header.encode(&mut buf);
+        header.encode(buf);
 
         // write key and value to buffer
         // TODO: encryption
@@ -335,14 +339,17 @@ impl<'a> WalIterator<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tempfile::tempdir;
+
+    use super::*;
 
     #[test]
     fn test_wal_create() {
         let tmp_dir = tempdir().unwrap();
-        let mut opts = AgateOptions::default();
-        opts.value_log_file_size = 4096;
+        let opts = AgateOptions {
+            value_log_file_size: 4096,
+            ..Default::default()
+        };
         Wal::open(tmp_dir.path().join("1.wal"), opts).unwrap();
     }
 
@@ -368,8 +375,10 @@ mod tests {
     #[test]
     fn test_wal_iterator() {
         let tmp_dir = tempdir().unwrap();
-        let mut opts = AgateOptions::default();
-        opts.value_log_file_size = 4096;
+        let opts = AgateOptions {
+            value_log_file_size: 4096,
+            ..Default::default()
+        };
         let wal_path = tmp_dir.path().join("1.wal");
         let mut wal = Wal::open(wal_path.clone(), opts.clone()).unwrap();
         for i in 0..20 {
@@ -393,8 +402,10 @@ mod tests {
     #[test]
     fn test_wal_iterator_trunc() {
         let tmp_dir = tempdir().unwrap();
-        let mut opts = AgateOptions::default();
-        opts.value_log_file_size = 4096;
+        let opts = AgateOptions {
+            value_log_file_size: 4096,
+            ..Default::default()
+        };
         let wal_path = tmp_dir.path().join("1.wal");
         let mut wal = Wal::open(wal_path.clone(), opts.clone()).unwrap();
         for i in 0..20 {

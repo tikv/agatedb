@@ -1,12 +1,17 @@
-use super::arena::Arena;
-use super::KeyComparator;
-use super::MAX_HEIGHT;
+use std::{
+    mem, ptr,
+    ptr::NonNull,
+    sync::{
+        atomic::{AtomicU32, AtomicUsize, Ordering},
+        Arc,
+    },
+    u32,
+};
+
 use bytes::Bytes;
 use rand::Rng;
-use std::ptr::NonNull;
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::{mem, ptr, u32};
+
+use super::{arena::Arena, KeyComparator, MAX_HEIGHT};
 
 const HEIGHT_INCREASE: u32 = u32::MAX / 3;
 

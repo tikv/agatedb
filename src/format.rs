@@ -1,5 +1,6 @@
-use bytes::{BufMut, Bytes, BytesMut};
 use std::{ptr, u64};
+
+use bytes::{BufMut, Bytes, BytesMut};
 
 pub fn key_with_ts(key: impl Into<BytesMut>, ts: u64) -> Bytes {
     let mut key = key.into();
@@ -33,8 +34,8 @@ pub fn append_ts(key: &mut BytesMut, ts: u64) {
 
 pub fn get_ts(key: &[u8]) -> u64 {
     let mut ts: u64 = 0;
+    let src = &key[key.len() - 8..];
     unsafe {
-        let src = &key[key.len() - 8..];
         ptr::copy_nonoverlapping(src.as_ptr(), &mut ts as *mut u64 as *mut u8, 8);
     }
     u64::MAX - u64::from_be(ts)

@@ -1,29 +1,39 @@
 mod opt;
 
-use super::memtable::{MemTable, MemTables};
-use super::Result;
-use crate::entry::Entry;
-use crate::value::{Request, Value};
+use std::{
+    collections::VecDeque,
+    fs,
+    path::{Path, PathBuf},
+    sync::{atomic::AtomicUsize, Arc, RwLock},
+};
 
+use log::debug;
 pub use opt::AgateOptions;
+use skiplist::Skiplist;
 
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::Mutex;
+use super::{
+    memtable::{MemTable, MemTables},
+    Result,
+};
+use crate::{
+    entry::Entry,
+    util::make_comparator,
+    value::{Request, Value},
+    wal::Wal,
+};
+
+const MEMTABLE_FILE_EXT: &str = ".mem";
 
 pub struct Core {
-    mt: Mutex<MemTables>,
+    mts: RwLock<MemTables>,
     opts: AgateOptions,
-    next_mem_fid: usize,
+    next_mem_fid: AtomicUsize,
 }
 
 #[derive(Clone)]
 pub struct Agate {
     core: Arc<Core>,
 }
-
-const MEMTABLE_FILE_EXT: &str = ".mem";
 
 impl Agate {
     /*
@@ -43,26 +53,76 @@ impl Core {
         unimplemented!()
     }
 
-    fn memtable_file_path(base_path: &Path, file_id: usize) -> PathBuf {
-        base_path
-            .to_path_buf()
+    fn memtable_file_path(opts: &AgateOptions, file_id: usize) -> PathBuf {
+        opts.dir
             .join(format!("{:05}{}", file_id, MEMTABLE_FILE_EXT))
     }
 
-    fn open_mem_table<P: AsRef<Path>>(
-        _base_path: P,
-        _opts: AgateOptions,
-        _file_id: usize,
-    ) -> Result<MemTable> {
-        unimplemented!()
+    fn open_mem_table(opts: &AgateOptions, file_id: usize) -> Result<MemTable> {
+        let path = Self::memtable_file_path(opts, file_id);
+        let c = make_comparator();
+        // TODO: refactor skiplist to use `u64`
+        let skl = Skiplist::with_capacity(c, opts.arena_size() as u32);
+
+        // We don't need to create the WAL for the skiplist in in-memory mode so return the memtable.
+        if opts.in_memory {
+            return Ok(MemTable::new(skl, None, opts.clone()));
+        }
+
+        let wal = Wal::open(path, opts.clone())?;
+        // TODO: delete WAL when skiplist ref count becomes zero
+
+        let mem_table = MemTable::new(skl, Some(wal), opts.clone());
+
+        mem_table.update_skip_list()?;
+
+        Ok(mem_table)
     }
 
-    fn open_mem_tables(&mut self) -> Result<()> {
-        unimplemented!()
+    fn open_mem_tables(opts: &AgateOptions) -> Result<(VecDeque<Arc<MemTable>>, usize)> {
+        // We don't need to open any tables in in-memory mode.
+        if opts.in_memory {
+            return Ok((VecDeque::new(), 0));
+        }
+
+        let mut fids = vec![];
+        let mut mts = VecDeque::new();
+
+        for file in fs::read_dir(&opts.dir)? {
+            let file = file?;
+            let filename_ = file.file_name();
+            let filename = filename_.to_string_lossy();
+            if filename.ends_with(MEMTABLE_FILE_EXT) {
+                let end = filename.len() - MEMTABLE_FILE_EXT.len();
+                let fid: usize = filename[end - 5..end].parse().unwrap();
+                fids.push(fid);
+            }
+        }
+
+        fids.sort();
+
+        for fid in &fids {
+            let memtable = Self::open_mem_table(opts, *fid)?;
+            mts.push_back(Arc::new(memtable));
+        }
+
+        let mut next_mem_fid = 0;
+
+        if !fids.is_empty() {
+            next_mem_fid = *fids.last().unwrap();
+        }
+
+        next_mem_fid += 1;
+
+        Ok((mts, next_mem_fid))
     }
 
-    fn new_mem_table(&mut self) -> Result<MemTable> {
-        unimplemented!()
+    fn new_mem_table(&self) -> Result<MemTable> {
+        let file_id = self
+            .next_mem_fid
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let mt = Self::open_mem_table(&self.opts, file_id)?;
+        Ok(mt)
     }
 
     pub fn is_closed(&self) -> bool {
@@ -82,6 +142,37 @@ impl Core {
     /// 3. level controller lock (TBD)
     pub(crate) fn write_to_lsm(&self, _request: Request) -> Result<()> {
         unimplemented!()
+    }
+
+    /// Calling ensure_room_for_write requires locking whole memtable
+    pub fn ensure_room_for_write(&mut self) -> Result<()> {
+        // we do not need to force flush memtable in in-memory mode as WAL is None.
+        let mut mts = self.mts.write()?;
+        let mut force_flush = false;
+
+        if !self.opts.in_memory && mts.table_mut().should_flush_wal()? {
+            force_flush = true;
+        }
+
+        let mem_size = mts.table_mut().skl.mem_size() as u64;
+
+        if !force_flush && mem_size < self.opts.mem_table_size {
+            return Ok(());
+        }
+
+        // TODO: use flush channel
+
+        let memtable = self.new_mem_table()?;
+
+        mts.use_new_table(memtable);
+
+        debug!(
+            "memtable flushed, total={}, mt.size={}",
+            mts.nums_of_memtable(),
+            mem_size
+        );
+
+        Ok(())
     }
 }
 
@@ -108,5 +199,90 @@ impl Agate {
         Ok(Agate {
             core: Arc::new(Core::new(opts)?),
         })
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test {
+    use bytes::{Bytes, BytesMut};
+    use tempfile::tempdir;
+
+    use super::*;
+    use crate::format::{append_ts, key_with_ts};
+
+    #[test]
+    fn test_open_mem_tables() {
+        let mut opts = AgateOptions::default();
+        let tmp_dir = tempdir().unwrap();
+        opts.dir = tmp_dir.path().to_path_buf();
+
+        let (_imm_tables, next_mem_fid) = Core::open_mem_tables(&opts).unwrap();
+        assert_eq!(next_mem_fid, 1);
+        let _mt = Core::open_mem_table(&opts, next_mem_fid).unwrap();
+    }
+
+    #[test]
+    fn test_memtable_persist() {
+        let mut opts = AgateOptions::default();
+        let tmp_dir = tempdir().unwrap();
+        opts.dir = tmp_dir.path().to_path_buf();
+
+        let mt = Core::open_mem_table(&opts, 1).unwrap();
+
+        let mut key = BytesMut::from("key".to_string().as_bytes());
+        append_ts(&mut key, 100);
+        let key = key.freeze();
+        let value = Value::new(key.clone());
+
+        mt.put(key.clone(), value.clone()).unwrap();
+
+        let value_get = mt.skl.get(&key).unwrap();
+        assert_eq!(&Bytes::from(value.clone()), value_get);
+
+        drop(mt);
+
+        let mt = Core::open_mem_table(&opts, 1).unwrap();
+        let value_get = mt.skl.get(&key).unwrap();
+        assert_eq!(&Bytes::from(value), value_get);
+    }
+
+    #[test]
+    fn test_ensure_room_for_write() {
+        let mut opts = AgateOptions::default();
+        let tmp_dir = tempdir().unwrap();
+        opts.dir = tmp_dir.path().to_path_buf();
+
+        // Wal::zero_next_entry will need MAX_HEADER_SIZE bytes free space.
+        // So we should put bytes more than value_log_file_size but less than
+        // 2*value_log_file_size - MAX_HEADER_SIZE.
+        opts.value_log_file_size = 25;
+
+        let mt = Core::open_mem_table(&opts, 1).unwrap();
+
+        let mts = MemTables::new(mt, VecDeque::new());
+
+        let mut core = Core {
+            mts: RwLock::new(mts),
+            opts,
+            next_mem_fid: AtomicUsize::new(2),
+        };
+
+        {
+            let mts = core.mts.read().unwrap();
+            assert_eq!(mts.nums_of_memtable(), 1);
+
+            let mt = mts.table_mut();
+
+            let key = key_with_ts(BytesMut::new(), 1);
+            let value = Value::new(Bytes::new());
+            // write_at in wal += 13
+            mt.put(key.clone(), value.clone()).unwrap();
+            mt.put(key, value).unwrap();
+        }
+
+        core.ensure_room_for_write().unwrap();
+
+        let mts = core.mts.read().unwrap();
+        assert_eq!(mts.nums_of_memtable(), 2);
     }
 }

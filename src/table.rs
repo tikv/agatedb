@@ -7,24 +7,26 @@ pub use concat_iterator::ConcatIterator;
 pub use merge_iterator::{Iterators as TableIterators, MergeIterator};
 pub type TableIterator = TableRefIterator<Arc<TableInner>>;
 
-use crate::bloom::Bloom;
-use crate::checksum;
-use crate::iterator_trait::AgateIterator;
-use crate::opt::{ChecksumVerificationMode, Options};
-use crate::Error;
-use crate::Result;
-
-use iterator::{TableRefIterator, ITERATOR_NOCACHE, ITERATOR_REVERSED};
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+    sync::{atomic::AtomicBool, Arc},
+};
 
 use bytes::{Buf, Bytes};
+use iterator::{TableRefIterator, ITERATOR_NOCACHE, ITERATOR_REVERSED};
 use memmap2::{Mmap, MmapOptions};
 use prost::Message;
 use proto::meta::{BlockOffset, Checksum, TableIndex};
-use std::fs;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+
+use crate::{
+    bloom::Bloom,
+    checksum,
+    iterator_trait::AgateIterator,
+    opt::{ChecksumVerificationMode, Options},
+    Error, Result,
+};
 
 #[cfg(test)]
 mod tests;

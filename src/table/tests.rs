@@ -1,12 +1,15 @@
 use std::ops::{Deref, DerefMut};
 
-use super::*;
-use crate::format::{key_with_ts, user_key};
-use crate::value::Value;
 use builder::Builder;
 use iterator::IteratorError;
 use rand::prelude::*;
 use tempfile::{tempdir, TempDir};
+
+use super::*;
+use crate::{
+    format::{key_with_ts, user_key},
+    value::Value,
+};
 
 fn key(prefix: &[u8], i: usize) -> Bytes {
     Bytes::from([prefix, format!("{:04}", i).as_bytes()].concat())
@@ -80,7 +83,7 @@ impl DerefMut for TableGuard {
 
 fn build_table(kv_pairs: Vec<(Bytes, Bytes)>, opts: Options) -> TableGuard {
     let tmp_dir = tempdir().unwrap();
-    let filename = tmp_dir.path().join("1.sst".to_string());
+    let filename = tmp_dir.path().join("1.sst");
 
     let data = build_table_data(kv_pairs, opts.clone());
 
@@ -124,9 +127,9 @@ fn test_table_iterator() {
 
 #[test]
 fn test_seek_to_first() {
-    for n in vec![99, 100, 101, 199, 200, 250, 9999, 10000] {
+    for n in &[99, 100, 101, 199, 200, 250, 9999, 10000] {
         let opts = get_test_table_options();
-        let table = build_test_table(b"key", n, opts);
+        let table = build_test_table(b"key", *n, opts);
         let mut it = table.new_iterator(0);
         it.seek_to_first();
         assert!(it.valid());
@@ -137,9 +140,9 @@ fn test_seek_to_first() {
 
 #[test]
 fn test_seek_to_last() {
-    for n in vec![99, 100, 101, 199, 200, 250, 9999, 10000] {
+    for n in &[99, 100, 101, 199, 200, 250, 9999, 10000] {
         let opts = get_test_table_options();
-        let table = build_test_table(b"key", n, opts);
+        let table = build_test_table(b"key", *n, opts);
         let mut it = table.new_iterator(0);
         it.seek_to_last();
         assert!(it.valid());
@@ -208,9 +211,9 @@ fn test_seek_for_prev() {
 
 #[test]
 fn test_iterate_from_start() {
-    for n in vec![99, 100, 101, 199, 200, 250, 9999, 10000] {
+    for n in &[99, 100, 101, 199, 200, 250, 9999, 10000] {
         let opts = get_test_table_options();
-        let table = build_test_table(b"key", n, opts);
+        let table = build_test_table(b"key", *n, opts);
         let mut it = table.new_iterator(0);
         it.reset();
         it.seek_to_first();
@@ -225,21 +228,21 @@ fn test_iterate_from_start() {
             count += 1;
         }
 
-        assert_eq!(n, count);
+        assert_eq!(*n, count);
     }
 }
 
 #[test]
 fn test_iterate_from_end() {
-    for n in vec![99, 100, 101, 199, 200, 250, 9999, 10000] {
+    for n in &[99, 100, 101, 199, 200, 250, 9999, 10000] {
         let opts = get_test_table_options();
-        let table = build_test_table(b"key", n, opts);
+        let table = build_test_table(b"key", *n, opts);
         let mut it = table.new_iterator(0);
         it.reset();
         it.seek(&key_with_ts(b"zzzzzz" as &[u8], 0));
         assert!(!it.valid());
 
-        for i in (0..n).rev() {
+        for i in (0..*n).rev() {
             it.prev_inner();
             assert!(it.valid());
             let v = it.value();
@@ -363,7 +366,7 @@ fn test_table_big_values() {
     }
 
     let tmp_dir = tempdir().unwrap();
-    let filename = tmp_dir.path().join("1.sst".to_string());
+    let filename = tmp_dir.path().join("1.sst");
 
     let table = Table::create(&filename, builder.finish(), opts).unwrap();
 
@@ -424,7 +427,7 @@ fn test_iterator_error_eof() {
         it.next();
     }
 
-    assert_eq!(it.error(), Some(&IteratorError::EOF));
+    assert_eq!(it.error(), Some(&IteratorError::Eof));
 }
 
 #[test]
@@ -448,11 +451,11 @@ fn test_iterator_out_of_bound() {
     it.seek_to_last();
     assert!(it.error().is_none());
     it.next();
-    assert_eq!(it.error(), Some(&IteratorError::EOF));
+    assert_eq!(it.error(), Some(&IteratorError::Eof));
     it.next();
-    assert_eq!(it.error(), Some(&IteratorError::EOF));
+    assert_eq!(it.error(), Some(&IteratorError::Eof));
     it.next();
-    assert_eq!(it.error(), Some(&IteratorError::EOF));
+    assert_eq!(it.error(), Some(&IteratorError::Eof));
     it.rewind();
     assert!(it.error().is_none());
     assert_eq!(user_key(it.key()), key(b"key", 0));
@@ -466,11 +469,11 @@ fn test_iterator_out_of_bound_reverse() {
     it.seek_to_first();
     assert!(it.error().is_none());
     it.next();
-    assert_eq!(it.error(), Some(&IteratorError::EOF));
+    assert_eq!(it.error(), Some(&IteratorError::Eof));
     it.next();
-    assert_eq!(it.error(), Some(&IteratorError::EOF));
+    assert_eq!(it.error(), Some(&IteratorError::Eof));
     it.next();
-    assert_eq!(it.error(), Some(&IteratorError::EOF));
+    assert_eq!(it.error(), Some(&IteratorError::Eof));
     it.rewind();
     assert!(it.error().is_none());
     assert_eq!(user_key(it.key()), key(b"key", 999));

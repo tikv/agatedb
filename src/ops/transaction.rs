@@ -1,8 +1,8 @@
-use crate::db::Agate;
-use crate::entry::Entry;
-use crate::{Error, Result};
-use bytes::Bytes;
 use std::collections::HashMap;
+
+use bytes::Bytes;
+
+use crate::{db::Agate, entry::Entry, Error, Result};
 
 const MAX_KEY_LENGTH: usize = 65000;
 

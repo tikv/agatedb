@@ -1,15 +1,21 @@
-use crate::util::Comparator;
-use crate::value::Value;
-use crate::wal::Wal;
-use crate::AgateOptions;
-use crate::Result;
+use std::{
+    collections::VecDeque,
+    mem::{self, ManuallyDrop, MaybeUninit},
+    ptr,
+    sync::RwLock,
+};
+
 use bytes::Bytes;
 use skiplist::Skiplist;
-use std::collections::VecDeque;
-use std::mem::{self, ManuallyDrop, MaybeUninit};
 
-use std::ptr;
-use std::sync::Mutex;
+use crate::{
+    entry::Entry,
+    format::get_ts,
+    util::Comparator,
+    value::{self, Value},
+    wal::Wal,
+    AgateOptions, Result,
+};
 
 const MEMTABLE_VIEW_MAX: usize = 20;
 
@@ -25,7 +31,7 @@ struct MemTableCore {
 pub struct MemTable {
     pub(crate) skl: Skiplist<Comparator>,
     opt: AgateOptions,
-    core: Mutex<MemTableCore>,
+    core: RwLock<MemTableCore>,
 }
 
 impl MemTable {
@@ -33,7 +39,7 @@ impl MemTable {
         Self {
             skl,
             opt,
-            core: Mutex::new(MemTableCore {
+            core: RwLock::new(MemTableCore {
                 wal,
                 max_version: 0,
             }),
@@ -41,15 +47,74 @@ impl MemTable {
     }
 
     pub fn update_skip_list(&self) -> Result<()> {
-        unimplemented!()
+        let mut core = self.core.write()?;
+        let mut max_version = core.max_version;
+        if let Some(ref mut wal) = core.wal {
+            let mut it = wal.iter()?;
+            while let Some(entry) = it.next()? {
+                let ts = get_ts(entry.key);
+                if ts > max_version {
+                    max_version = ts;
+                }
+                let v = Value {
+                    value: Bytes::copy_from_slice(entry.value),
+                    meta: entry.meta,
+                    user_meta: entry.user_meta,
+                    expires_at: entry.expires_at,
+                    version: 0,
+                };
+                self.skl.put(Bytes::copy_from_slice(entry.key), v);
+            }
+        }
+        core.max_version = max_version;
+        Ok(())
     }
 
-    pub fn put(&self, _key: Bytes, _value: Value) -> Result<()> {
-        unimplemented!()
+    pub fn put(&self, key: Bytes, value: Value) -> Result<()> {
+        let mut core = self.core.write()?;
+        if let Some(ref mut wal) = core.wal {
+            let entry = Entry {
+                key: key.clone(),
+                value: value.value.clone(),
+                expires_at: value.expires_at,
+                version: value.version,
+                user_meta: value.user_meta,
+                meta: value.meta,
+            };
+            // If WAL exceeds opt.value_log_file_size, we'll force flush the memtable.
+            wal.write_entry(&entry)?;
+        }
+
+        // only insert finish marker in WAL
+        if value.meta & value::VALUE_FIN_TXN != 0 {
+            return Ok(());
+        }
+
+        // write to skiplist
+        let ts = get_ts(&key);
+        self.skl.put(key, value);
+
+        // update max version
+        core.max_version = ts;
+
+        Ok(())
     }
 
     pub fn sync_wal(&self) -> Result<()> {
-        unimplemented!()
+        let mut core = self.core.write()?;
+        if let Some(ref mut wal) = core.wal {
+            wal.sync()?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn should_flush_wal(&self) -> Result<bool> {
+        let core = self.core.read()?;
+        if let Some(ref wal) = core.wal {
+            Ok(wal.should_flush())
+        } else {
+            Ok(false)
+        }
     }
 }
 
@@ -103,5 +168,71 @@ impl MemTables {
     /// Get mutable memtable
     pub fn table_mut(&self) -> &MemTable {
         &self.mutable
+    }
+
+    pub(crate) fn use_new_table(&mut self, memtable: MemTable) {
+        let old_mt = std::mem::replace(&mut self.mutable, memtable);
+        self.immutable.push_back(old_mt);
+    }
+
+    pub(crate) fn nums_of_memtable(&self) -> usize {
+        self.immutable.len() + 1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::BytesMut;
+
+    use super::*;
+    use crate::{format::append_ts, util::make_comparator};
+
+    fn get_memtable(data: Vec<(Bytes, Value)>) -> MemTable {
+        let skl = Skiplist::with_capacity(make_comparator(), 4 * 1024 * 1024);
+        let memtable = MemTable::new(skl, None, AgateOptions::default());
+
+        for (k, v) in data {
+            assert!(memtable.put(k, v).is_ok());
+        }
+
+        memtable
+    }
+
+    #[test]
+    fn test_memtable_put() {
+        let mut data = vec![];
+        for i in 0..1000 {
+            let mut v = BytesMut::from(i.to_string().as_bytes());
+            append_ts(&mut v, i);
+            let v = v.freeze();
+            data.push((v.clone(), Value::new(v)));
+        }
+        let (d1, dx) = data.split_at(250);
+        let (d2, dx) = dx.split_at(250);
+        let (d3, dx) = dx.split_at(250);
+        let (d4, _) = dx.split_at(250);
+
+        let mem_tables = MemTables {
+            mutable: get_memtable(d1.to_vec()),
+            immutable: VecDeque::from(
+                [d2, d3, d4]
+                    .iter()
+                    .map(|x| get_memtable(x.to_vec()))
+                    .collect::<Vec<MemTable>>(),
+            ),
+        };
+        let view = mem_tables.view();
+        for k in 0..4 {
+            for i in k * 250..(k + 1) * 250 {
+                let mut v = BytesMut::from(i.to_string().as_str());
+                append_ts(&mut v, i);
+                let v = v.freeze();
+
+                // get value from skiplist
+                let value = view.tables()[k as usize].get(&v).unwrap();
+                let expect: Bytes = Value::new(v).into();
+                assert_eq!(value, &expect);
+            }
+        }
     }
 }

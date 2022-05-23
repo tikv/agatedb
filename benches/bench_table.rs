@@ -1,10 +1,11 @@
 mod common;
 
-use agatedb::ChecksumVerificationMode::NoVerification;
-use agatedb::{AgateIterator, Table, TableBuilder, TableOptions, Value};
-
 use std::ops::{Deref, DerefMut};
 
+use agatedb::{
+    AgateIterator, ChecksumVerificationMode::NoVerification, Table, TableBuilder, TableOptions,
+    Value,
+};
 use bytes::Bytes;
 use common::rand_value;
 use criterion::{criterion_group, criterion_main, Criterion};
@@ -33,8 +34,8 @@ fn bench_table_builder(c: &mut Criterion) {
 
         b.iter(|| {
             let mut builder = TableBuilder::new(opt.clone());
-            for j in 0..KEY_COUNT {
-                builder.add(&key_list[j], vs.clone(), 0);
+            for key in key_list.iter().take(KEY_COUNT) {
+                builder.add(key, vs.clone(), 0);
             }
             builder.finish()
         });
@@ -76,7 +77,7 @@ fn get_table_for_benchmark(count: usize) -> TableGuard {
     };
 
     let mut builder = TableBuilder::new(opts.clone());
-    let filename = tmp_dir.path().join("1.sst".to_string());
+    let filename = tmp_dir.path().join("1.sst");
 
     for i in 0..count {
         let k = Bytes::from(format!("{:016x}", i));

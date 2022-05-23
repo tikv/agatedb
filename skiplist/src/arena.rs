@@ -1,6 +1,10 @@
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
-use std::{mem, ptr};
+use std::{
+    mem, ptr,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
+};
 
 const ADDR_ALIGN_MASK: usize = 7;
 
@@ -12,9 +16,9 @@ struct ArenaCore {
 
 impl Drop for ArenaCore {
     fn drop(&mut self) {
+        let ptr = self.ptr as *mut u64;
+        let cap = self.cap / 8;
         unsafe {
-            let ptr = self.ptr as *mut u64;
-            let cap = self.cap / 8;
             Vec::from_raw_parts(ptr, 0, cap);
         }
     }

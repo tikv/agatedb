@@ -1,5 +1,6 @@
-use crate::Table;
 use bytes::Bytes;
+
+use crate::Table;
 
 #[derive(Default, Clone)]
 pub struct IteratorOptions {
@@ -20,7 +21,7 @@ impl IteratorOptions {
     }
 
     /// Remove unnecessary tables
-    pub fn pick_tables(&self, _tables: &mut Vec<Table>) {
+    pub fn pick_tables(&self, _tables: &mut [Table]) {
         // TODO: implement table selection logic
     }
 }

@@ -1,13 +1,13 @@
 on:
   push:
     branches:
-    - master
-    - develop
+      - master
+      - develop
   pull_request:
     branches:
-    - master
-    - develop
-    
+      - master
+      - develop
+
 name: Test
 
 jobs:
@@ -34,16 +34,14 @@ jobs:
           components: rustfmt, clippy
           toolchain: nightly
           default: true
-      - uses: actions-rs/cargo@v1
-        name: Check Code Format 🔧
-        with:
-          command: fmt
-          args: -- --check
-      - uses: actions-rs/cargo@v1
-        name: Running Tests 🚀
-        with:
-          command: test
-          args: --all-features --workspace
+      - name: Check Code Format 🔧
+        run: |
+          make format
+          git diff --quiet
+      - name: Linting The Code 🩹
+        run: make clippy
+      - name: Running Tests 🚀
+        run: make test
   sanitizer_test:
     name: Test with Sanitizer
     runs-on: ubuntu-latest

@@ -1,15 +1,18 @@
-use crate::error::InvalidValuePointerError;
-use crate::value::{self, Request, ValuePointer};
-use crate::wal::{Header, Wal};
-use crate::AgateOptions;
-use crate::{Error, Result};
+use std::{
+    collections::{HashMap, HashSet},
+    path::{Path, PathBuf},
+    sync::{atomic::AtomicU32, Arc},
+};
 
 use bytes::{Bytes, BytesMut};
 use parking_lot::RwLock;
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicU32;
-use std::sync::Arc;
+
+use crate::{
+    error::InvalidValuePointerError,
+    value::{self, Request, ValuePointer},
+    wal::{Header, Wal},
+    AgateOptions, Error, Result,
+};
 
 fn vlog_file_path(dir: impl AsRef<Path>, fid: u32) -> PathBuf {
     dir.as_ref().join(format!("{:06}.vlog", fid))
@@ -104,7 +107,7 @@ impl ValueLog {
                     return Err(Error::InvalidFilename(format!(
                         "Unrecognized filename {:?}",
                         filename
-                    )))
+                    )));
                 }
             }
         }
@@ -249,7 +252,7 @@ impl ValueLog {
                 };
 
                 let orig_meta = entry.meta;
-                entry.meta &= !value::VALUE_FIN_TXN | value::VALUE_TXN;
+                entry.meta &= !(value::VALUE_FIN_TXN | value::VALUE_TXN);
 
                 let plen = Wal::encode_entry(&mut buf, entry);
                 entry.meta = orig_meta;
@@ -328,10 +331,11 @@ impl ValueLog {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::entry::Entry;
     use tempfile::tempdir;
     use value::VALUE_POINTER;
+
+    use super::*;
+    use crate::entry::Entry;
 
     #[test]
     fn test_value_basic() {

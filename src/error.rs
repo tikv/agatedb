@@ -1,5 +1,4 @@
-use std::result;
-use std::{io, ops::Range};
+use std::{io, ops::Range, result, sync::PoisonError};
 
 use thiserror::Error;
 
@@ -44,6 +43,8 @@ pub enum Error {
     VlogNotFound(u32),
     #[error("Error when compaction: {0}")]
     CompactionError(String),
+    #[error("Lock Poison")]
+    PoisonError(String),
 }
 
 impl From<io::Error> for Error {
@@ -64,6 +65,13 @@ impl From<prost::DecodeError> for Error {
     #[inline]
     fn from(e: prost::DecodeError) -> Error {
         Error::Decode(Box::new(e))
+    }
+}
+
+impl<T: Sized> From<PoisonError<T>> for Error {
+    #[inline]
+    fn from(e: PoisonError<T>) -> Error {
+        Error::PoisonError(e.to_string())
     }
 }
 
