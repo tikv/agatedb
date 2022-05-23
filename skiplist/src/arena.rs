@@ -36,7 +36,8 @@ impl Arena {
         mem::forget(buf);
         Arena {
             core: Arc::new(ArenaCore {
-                // Reserve 8 bytes at the beginning, because func offset return 0 means invalid value
+                // Reserve 8 bytes at the beginning, because func offset return 0 means invalid value,
+                // also 'fn get_mut' return invalid ptr when offset is 0
                 len: AtomicU32::new(8),
                 cap,
                 ptr,
@@ -48,7 +49,7 @@ impl Arena {
         self.core.len.load(Ordering::SeqCst)
     }
 
-    pub fn alloc(&self, size: usize) -> u32 {
+    pub fn alloc(&self, size: usize) -> Option<u32> {
         // Leave enough padding for alignment.
         let size = (size + ADDR_ALIGN_MASK) & !ADDR_ALIGN_MASK;
         let offset = self.core.len.fetch_add(size as u32, Ordering::SeqCst);
@@ -56,9 +57,9 @@ impl Arena {
         // Return 0 if there is not enough space to allocate.
         if offset as usize + size > self.core.cap {
             let _ = self.core.len.fetch_sub(size as u32, Ordering::SeqCst);
-            return 0;
+            return None;
         }
-        offset as u32
+        Some(offset as u32)
     }
 
     pub unsafe fn get_mut<N>(&self, offset: u32) -> *mut N {
@@ -88,21 +89,16 @@ mod tests {
         // There is enough space
         let arena = Arena::with_capacity(128);
         let offset = arena.alloc(8);
-        assert_eq!(offset, 8);
+        assert_eq!(offset, Some(8));
         assert_eq!(arena.len(), 16);
         unsafe {
-            let ptr = arena.get_mut::<u64>(offset);
+            let ptr = arena.get_mut::<u64>(offset.unwrap());
             let offset = arena.offset::<u64>(ptr);
             assert_eq!(offset, 8);
         }
 
-        // Align with 8 bytes
-        let offset = arena.alloc(3);
-        assert_eq!(offset, 16);
-        assert_eq!(arena.len(), 24);
-
         // There is not enough space, return 0
         let offset = arena.alloc(256);
-        assert_eq!(offset, 0);
+        assert_eq!(offset, None);
     }
 }

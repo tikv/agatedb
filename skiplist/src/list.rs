@@ -15,6 +15,11 @@ use super::{arena::Arena, KeyComparator, MAX_HEIGHT};
 
 const HEIGHT_INCREASE: u32 = u32::MAX / 3;
 
+#[derive(Debug)]
+pub enum ListErr {
+    NoEnoughMem,
+}
+
 // Uses C layout to make sure tower is at the bottom
 #[derive(Debug)]
 #[repr(C)]
@@ -26,20 +31,23 @@ pub struct Node {
 }
 
 impl Node {
-    fn alloc(arena: &Arena, key: Bytes, value: Bytes, height: usize) -> u32 {
+    fn alloc(arena: &Arena, key: Bytes, value: Bytes, height: usize) -> Option<u32> {
         let size = mem::size_of::<Node>();
         // Not all values in Node::tower will be utilized.
         let not_used = (MAX_HEIGHT as usize - height as usize - 1) * mem::size_of::<AtomicU32>();
-        let node_offset = arena.alloc(size - not_used);
-        unsafe {
-            let node_ptr: *mut Node = arena.get_mut(node_offset);
-            let node = &mut *node_ptr;
-            ptr::write(&mut node.key, key);
-            ptr::write(&mut node.value, value);
-            node.height = height;
-            ptr::write_bytes(node.tower.as_mut_ptr(), 0, height + 1);
+        if let Some(offset) = arena.alloc(size - not_used) {
+            unsafe {
+                let node_ptr: *mut Node = arena.get_mut(offset);
+                let node = &mut *node_ptr;
+                ptr::write(&mut node.key, key);
+                ptr::write(&mut node.value, value);
+                node.height = height;
+                ptr::write_bytes(node.tower.as_mut_ptr(), 0, height + 1);
+            }
+            Some(offset)
+        } else {
+            None
         }
-        node_offset
     }
 
     fn next_offset(&self, height: usize) -> u32 {
@@ -62,7 +70,8 @@ pub struct Skiplist<C> {
 impl<C> Skiplist<C> {
     pub fn with_capacity(c: C, arena_size: u32) -> Skiplist<C> {
         let arena = Arena::with_capacity(arena_size);
-        let head_offset = Node::alloc(&arena, Bytes::new(), Bytes::new(), MAX_HEIGHT - 1);
+        // arena must have enough space for head, so we can unwrap safely.
+        let head_offset = Node::alloc(&arena, Bytes::new(), Bytes::new(), MAX_HEIGHT - 1).unwrap();
         let head = unsafe { NonNull::new_unchecked(arena.get_mut(head_offset)) };
         Skiplist {
             core: Arc::new(SkiplistCore {
@@ -168,7 +177,11 @@ impl<C: KeyComparator> Skiplist<C> {
         }
     }
 
-    pub fn put(&self, key: impl Into<Bytes>, value: impl Into<Bytes>) -> Option<(Bytes, Bytes)> {
+    pub fn put(
+        &self,
+        key: impl Into<Bytes>,
+        value: impl Into<Bytes>,
+    ) -> Result<Option<(Bytes, Bytes)>, ListErr> {
         let (key, value) = (key.into(), value.into());
         let mut list_height = self.height();
         let mut prev = [ptr::null_mut(); MAX_HEIGHT + 1];
@@ -182,15 +195,19 @@ impl<C: KeyComparator> Skiplist<C> {
             if p == n {
                 unsafe {
                     if (*p).value != value {
-                        return Some((key, value));
+                        return Ok(Some((key, value)));
                     }
                 }
-                return None;
+                return Ok(None);
             }
         }
 
         let height = self.random_height();
-        let node_offset = Node::alloc(&self.core.arena, key, value, height);
+        let node_offset = if let Some(offset) = Node::alloc(&self.core.arena, key, value, height) {
+            offset
+        } else {
+            return Err(ListErr::NoEnoughMem);
+        };
         while height > list_height {
             match self.core.height.compare_exchange_weak(
                 list_height,
@@ -229,12 +246,12 @@ impl<C: KeyComparator> Skiplist<C> {
                             if unsafe { &*p }.value != x.value {
                                 let key = mem::replace(&mut x.key, Bytes::new());
                                 let value = mem::replace(&mut x.value, Bytes::new());
-                                return Some((key, value));
+                                return Ok(Some((key, value)));
                             }
                             unsafe {
                                 ptr::drop_in_place(x);
                             }
-                            return None;
+                            return Ok(None);
                         }
                         prev[i] = p;
                         next[i] = n;
@@ -242,7 +259,7 @@ impl<C: KeyComparator> Skiplist<C> {
                 }
             }
         }
-        None
+        Ok(None)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -427,7 +444,7 @@ mod tests {
         for i in 0..1000 {
             let key = Bytes::from(format!("{:05}{:08}", i * 10 + 5, 0));
             let value = Bytes::from(format!("{:05}", i));
-            list.put(key, value);
+            list.put(key, value).unwrap();
         }
         let mut cases = vec![
             ("00001", false, false, Some("00005")),
