@@ -23,15 +23,13 @@ const MANIFEST_DELETIONS_RATIO: usize = 10;
 const MAGIC_TEXT: &[u8] = b"Agat";
 const MAGIC_VERSION: u32 = 8;
 
-/// LevelManifest contains information about LSM tree levels
-/// in the MANIFEST file.
+/// Contains information about LSM tree levels in the MANIFEST file.
 #[derive(Default, Clone, Debug)]
 pub struct LevelManifest {
     pub tables: HashSet<u64>,
 }
 
-/// TableManifest contains information about a specific table
-/// in the LSM tree.
+/// Contains information about a specific table in the LSM tree.
 #[derive(Clone, Debug)]
 pub struct TableManifest {
     pub level: u8,
@@ -39,8 +37,8 @@ pub struct TableManifest {
     // TODO: compression
 }
 
-/// Manifest represents the contents of the MANIFEST file.
-#[derive(Clone, Debug)]
+/// Represents the contents of the MANIFEST file.
+#[derive(Clone, Debug, Default)]
 pub struct Manifest {
     pub levels: Vec<LevelManifest>,
     pub tables: HashMap<u64, TableManifest>,
@@ -65,8 +63,8 @@ impl Core {
     }
 }
 
-// ManifestFile holds the file pointer (and other info) about the MANIFEST file, which is a log
-// file we append to.
+/// Holds the file pointer (and other info) about the MANIFEST file, which is a log
+/// file we append to.
 pub struct ManifestFile {
     directory: PathBuf,
     deletions_rewrite_threshold: usize,
@@ -74,15 +72,7 @@ pub struct ManifestFile {
 }
 
 impl Manifest {
-    pub fn new() -> Self {
-        Self {
-            levels: vec![],
-            tables: HashMap::new(),
-            creations: 0,
-            deletions: 0,
-        }
-    }
-
+    /// Returns a sequence of changes that could be used to recreate the manifest in its present state.
     fn as_changes(&self) -> Vec<ManifestChange> {
         let mut changes = Vec::with_capacity(self.tables.len());
         for (id, tm) in &self.tables {
@@ -91,6 +81,8 @@ impl Manifest {
         changes
     }
 
+    /// Reads the manifest file and constructs manifest object. Returns the object
+    /// and last offset after a completely read manifest entry.
     pub fn replay(file: &mut File) -> Result<(Manifest, u32)> {
         let file_len = file.metadata()?.len();
 
@@ -106,7 +98,7 @@ impl Manifest {
             return Err(Error::CustomError("bad magic version".to_string()));
         }
 
-        let mut build = Manifest::new();
+        let mut build = Manifest::default();
         let mut buf = vec![];
         let mut len_crc_buf = vec![0; 8];
         let mut offset = 8;
@@ -156,6 +148,7 @@ impl Manifest {
 }
 
 impl ManifestFile {
+    /// Opens a Agate manifest file if it exists, or creates one if doesn’t exists.
     pub fn open_or_create_manifest_file(opt: &AgateOptions) -> Result<Self> {
         if opt.in_memory {
             Ok(Self {
@@ -163,7 +156,7 @@ impl ManifestFile {
                 deletions_rewrite_threshold: 0,
                 core: Mutex::new(Core {
                     file: None,
-                    manifest: Manifest::new(),
+                    manifest: Manifest::default(),
                 }),
             })
         } else {
@@ -209,7 +202,7 @@ impl ManifestFile {
                 return Err(Error::ReadOnlyError(path.as_path().display().to_string()));
             }
 
-            let manifest = Manifest::new();
+            let manifest = Manifest::default();
             let (file, net_creations) = Self::help_rewrite(dir.as_ref(), &manifest)?;
             assert_eq!(net_creations, 0);
 
@@ -224,6 +217,7 @@ impl ManifestFile {
         }
     }
 
+    /// Writes `manifest` to MANIFEST file **atomically**.
     fn help_rewrite(dir: impl AsRef<Path>, manifest: &Manifest) -> Result<(File, usize)> {
         let rewrite_path = dir.as_ref().join(MANIFEST_REWRITE_FILENAME);
 
@@ -271,6 +265,8 @@ impl ManifestFile {
         Ok((file, net_creations))
     }
 
+    /// Writes a batch of changes, **atomically**, to the file. When we replay the
+    /// MANIFEST file, we'll either replay all the changes or none of them.
     pub fn add_changes(&self, changes_param: Vec<ManifestChange>) -> Result<()> {
         {
             let core = self.core.lock().unwrap();
@@ -279,7 +275,7 @@ impl ManifestFile {
             }
         }
 
-        // we could drop the lock during encoding
+        // We could drop the lock during encoding.
         let changes = ManifestChangeSet {
             changes: changes_param,
         };
