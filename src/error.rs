@@ -25,9 +25,9 @@ pub enum Error {
     InvalidChecksum(String),
     #[error("Invalid filename")]
     InvalidFilename(String),
-    #[error("Invalid prost data: {0}")]
+    #[error("Prost encode error: {0}")]
     Encode(#[source] Box<prost::EncodeError>),
-    #[error("Invalid prost data: {0}")]
+    #[error("Prost decode error: {0}")]
     Decode(#[source] Box<prost::DecodeError>),
     #[error("Invalid data: {0}")]
     VarDecode(&'static str),

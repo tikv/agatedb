@@ -18,7 +18,7 @@ use crate::{
 pub const MAX_HEADER_SIZE: usize = 21;
 
 /// `Header` stores metadata of an entry in WAL and in value log.
-#[derive(Default, Debug, PartialEq)]
+#[derive(Default, Debug, Eq, PartialEq)]
 pub struct Header {
     /// length of key
     pub key_len: u32,
