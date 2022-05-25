@@ -57,7 +57,7 @@ impl LevelHandler {
         if self.level == 0 {
             // Key range will overlap. Just sort by file id in ascending order
             // because newer tables are at the end of level 0.
-            self.tables.sort_by(|x, y| x.id().cmp(&y.id()));
+            self.tables.sort_by_key(|x| x.id());
         } else {
             // Sort tables by keys.
             self.tables
@@ -209,7 +209,6 @@ impl LevelHandler {
             let iter = ConcatIterator::from_tables(tables, topt);
             iters.push(TableIterators::from(iter));
         }
-        return;
     }
 
     /// Returns the tables that intersect with key range. Returns a half-interval.
