@@ -1021,7 +1021,7 @@ impl LevelsController {
     }
 
     /// Appends iterators to an array of iterators, for merging.
-    pub(crate) fn append_iterators(&self, iters: &mut [TableIterators], opts: &IteratorOptions) {
+    pub(crate) fn append_iterators(&self, iters: &mut Vec<TableIterators>, opts: &IteratorOptions) {
         // Iterate the levels from 0 on upward, to avoid missing
         // data when there's a compaction.
         for level in &self.core.levels {
