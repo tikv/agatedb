@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[derive(Default)]
 pub struct Oracle {
     next_txn_ts: AtomicU64,
     discard_ts: AtomicU64,
@@ -23,6 +24,7 @@ impl Oracle {
     }
 
     pub(crate) fn discard_at_or_below(&self) -> u64 {
-        todo!()
+        // TODO: Update it.
+        0
     }
 }
