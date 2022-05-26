@@ -24,7 +24,7 @@ impl Oracle {
     }
 
     pub(crate) fn discard_at_or_below(&self) -> u64 {
-        // TODO: Update it.
-        0
+        // TODO: Implement it.
+        self.discard_ts.load(Ordering::SeqCst)
     }
 }
