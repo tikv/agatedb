@@ -17,7 +17,7 @@ pub const VALUE_MERGE_ENTRY: u8 = 1 << 3;
 pub const VALUE_TXN: u8 = 1 << 6;
 pub const VALUE_FIN_TXN: u8 = 1 << 7;
 
-#[derive(Default, Debug, Clone, PartialEq)]
+#[derive(Default, Debug, Clone, Eq, PartialEq)]
 pub struct Value {
     pub meta: u8,
     pub user_meta: u8,

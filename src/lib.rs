@@ -9,6 +9,7 @@ mod format;
 mod iterator;
 mod iterator_trait;
 mod levels;
+mod manifest;
 mod memtable;
 mod ops;
 mod opt;
