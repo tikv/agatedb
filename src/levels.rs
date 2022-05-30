@@ -502,7 +502,8 @@ impl Core {
                     &compact_def,
                 )))
                 .ok();
-            });
+            })
+            .join()?;
         }
 
         for table in rx.iter().take(compact_def.splits.len()).flatten() {

@@ -1,4 +1,4 @@
-use std::{io, ops::Range, result, sync::PoisonError};
+use std::{any::Any, io, ops::Range, result, sync::PoisonError};
 
 use thiserror::Error;
 
@@ -51,6 +51,8 @@ pub enum Error {
     ReadOnlyError(String),
     #[error("Lock Poison")]
     PoisonError(String),
+    #[error("Join Error")]
+    JoinError(Box<dyn Any + Send>),
 }
 
 impl From<io::Error> for Error {
@@ -85,6 +87,13 @@ impl<T: Sized> From<PoisonError<T>> for Error {
     #[inline]
     fn from(e: PoisonError<T>) -> Error {
         Error::PoisonError(e.to_string())
+    }
+}
+
+impl From<Box<dyn Any + Send>> for Error {
+    #[inline]
+    fn from(e: Box<dyn Any + Send>) -> Self {
+        Error::JoinError(e)
     }
 }
 
