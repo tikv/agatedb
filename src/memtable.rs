@@ -216,6 +216,7 @@ impl Drop for MemTables {
         self.mutable.mark_save();
     }
 }
+
 #[cfg(test)]
 mod tests {
     use bytes::BytesMut;
