@@ -69,7 +69,8 @@ fn test_ensure_room_for_write() {
 
         let key = key_with_ts(BytesMut::new(), 1);
         let value = Value::new(Bytes::new());
-        // write_at in wal += 13
+        // Put once, write_at in wal += 13, so we put twice to make write_at larger
+        // than value_log_file_size.
         mt.put(key.clone(), value.clone()).unwrap();
         mt.put(key, value).unwrap();
     }

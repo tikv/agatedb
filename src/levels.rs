@@ -1016,7 +1016,7 @@ impl LevelsController {
             loop {
                 select! {
                     recv(ticker) -> _ => run_once(),
-                    recv(closer.has_been_closed()) -> _ => return
+                    recv(closer.get_receiver()) -> _ => return
                 }
             }
         });

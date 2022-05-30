@@ -2,12 +2,12 @@ use std::sync::{Arc, Mutex};
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 
-type CloserChanType = Arc<(Mutex<Option<Sender<()>>>, Receiver<()>)>;
+type CloserChan = Arc<(Mutex<Option<Sender<()>>>, Receiver<()>)>;
 
 // TODO: review closer implementation
 #[derive(Clone)]
 pub struct Closer {
-    chan: CloserChanType,
+    chan: CloserChan,
 }
 
 impl Closer {
@@ -22,7 +22,7 @@ impl Closer {
         self.chan.0.lock().unwrap().take();
     }
 
-    pub fn has_been_closed(&self) -> &Receiver<()> {
+    pub fn get_receiver(&self) -> &Receiver<()> {
         &self.chan.1
     }
 }
@@ -44,7 +44,7 @@ mod tests {
             let closer = closer.clone();
             let tx = tx.clone();
             pool.spawn(move |_: &mut Handle<'_>| {
-                assert!(closer.has_been_closed().recv().is_err());
+                assert!(closer.get_receiver().recv().is_err());
                 tx.send(()).unwrap();
             });
         }
