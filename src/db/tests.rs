@@ -33,7 +33,7 @@ fn test_memtable_persist() {
     let value_get = mt.skl.get(&key).unwrap();
     assert_eq!(&Bytes::from(value.clone()), value_get);
 
-    drop(mt);
+    mt.mark_save();
 
     let mt = Core::open_mem_table(&opts, 1).unwrap();
     let value_get = mt.skl.get(&key).unwrap();

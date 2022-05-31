@@ -1,10 +1,4 @@
-use std::{
-    cmp,
-    fs::File,
-    path::Path,
-    ptr,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{cmp, fs::File, path::Path, ptr, sync::atomic::AtomicBool};
 
 use bytes::Bytes;
 pub use skiplist::{FixedLengthSuffixComparator as Comparator, KeyComparator};
@@ -87,8 +81,25 @@ pub fn has_any_prefixes(s: &[u8], list_of_prefixes: &[Bytes]) -> bool {
     list_of_prefixes.iter().any(|y| s.starts_with(y))
 }
 
+static FAILED: AtomicBool = AtomicBool::new(false);
+
+pub fn no_fail<T>(result: Result<T>, id: &str) {
+    if let Err(err) = result {
+        log::warn!("WARN: {}, {:?}", id, err);
+        FAILED.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+pub fn panic_if_fail() {
+    if FAILED.load(std::sync::atomic::Ordering::SeqCst) {
+        panic!("failed");
+    }
+}
+
 #[cfg(test)]
 mod test {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use super::*;
 
     #[test]
