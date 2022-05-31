@@ -229,14 +229,14 @@ impl CompactStatus {
             this_level < self.levels.len() - 1,
             "compaction on invalid level"
         );
-
-        let next_level = compact_def.next_level_id;
         if self.levels[this_level].overlaps_with(&compact_def.this_range) {
             return Err(Error::CompactionError(format!(
                 "{:?} overlap with this level {} {:?}",
                 compact_def.this_range, compact_def.this_level_id, self.levels[this_level].ranges
             )));
         }
+
+        let next_level = compact_def.next_level_id;
         if self.levels[next_level].overlaps_with(&compact_def.next_range) {
             return Err(Error::CompactionError(format!(
                 "{:?} overlap with next level {} {:?}",
