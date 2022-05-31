@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 bytes = "1.0"
+coarsetime = "0.1.22"
 crc = "1.8"
 crossbeam-channel = "0.5"
 enum_dispatch = "0.3"

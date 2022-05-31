@@ -80,13 +80,21 @@ pub fn same_key(a: &[u8], b: &[u8]) -> bool {
 }
 
 pub fn unix_time() -> u64 {
-    let start = SystemTime::now();
-    let since_the_epoch = start
-        .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards");
-    since_the_epoch.as_millis() as u64
+    coarsetime::Clock::now_since_epoch().as_millis() as u64
 }
 
 pub fn has_any_prefixes(s: &[u8], list_of_prefixes: &[Bytes]) -> bool {
     list_of_prefixes.iter().any(|y| s.starts_with(y))
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_unix_time() {
+        let start = SystemTime::now();
+        let since_the_epoch = start.duration_since(UNIX_EPOCH).unwrap();
+        assert_eq!(since_the_epoch.as_millis() as u64 / 10, unix_time() / 10);
+    }
 }

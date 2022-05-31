@@ -182,7 +182,6 @@ impl Builder {
         // append checksum
         let cs = self.build_checksum(&bytes);
         self.write_checksum(cs);
-        // TODO: eliminate clone if we do not need builder any more after finish
         self.buf.freeze()
     }
 
