@@ -92,8 +92,8 @@ impl KeyValVersion {
 }
 
 macro_rules! kv {
-    ($key: expr, $val: expr, $meta: expr, $user_meta: expr) => {
-        KeyValVersion::new($key, $val, $meta, $user_meta)
+    ($key: expr, $val: expr, $version: expr, $meta: expr) => {
+        KeyValVersion::new($key, $val, $version, $meta)
     };
 }
 

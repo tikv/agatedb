@@ -18,6 +18,7 @@ use compaction::{
 };
 use crossbeam_channel::{select, tick, unbounded};
 use handler::LevelHandler;
+use log::{error, info};
 use proto::meta::ManifestChangeSet;
 use yatp::task::callback::Handle;
 
@@ -37,14 +38,14 @@ use crate::{
 pub(crate) struct Core {
     next_file_id: AtomicU64,
 
-    // `levels[i].level == i` should be ensured
+    // `levels[i].level == i` should be ensured.
     pub(crate) levels: Vec<Arc<RwLock<LevelHandler>>>,
     opts: AgateOptions,
     orc: Arc<Oracle>,
 
     cpt_status: RwLock<CompactStatus>,
     manifest: Arc<ManifestFile>,
-    //TODO: Add l0_stalls_ms
+    // TODO: Add l0_stalls_ms.
 }
 
 pub struct LevelsController {
@@ -146,13 +147,13 @@ impl Core {
 
         let mut tsz = self.opts.base_level_size;
 
-        // Use mem_table_size for Level 0. Because at Level 0, we stop
-        // compactions based on the number of tables, not the size of
-        // the level. So, having a 1:1 size ratio between memtable size
-        // and the size of L0 files is better than churning out 32 files
-        // per memtable (assuming 64MB mem_table_size and 2MB base_table_size).
         for i in 0..self.levels.len() {
             if i == 0 {
+                // Use mem_table_size for Level 0. Because at Level 0, we stop
+                // compactions based on the number of tables, not the size of
+                // the level. So, having a 1:1 size ratio between memtable size
+                // and the size of L0 files is better than churning out 32 files
+                // per memtable (assuming 64MB mem_table_size and 2MB base_table_size).
                 targets.file_size[i] = self.opts.mem_table_size;
             } else if i <= targets.base_level {
                 targets.file_size[i] = tsz;
@@ -215,10 +216,10 @@ impl Core {
 
         // TODO: Adjust score.
 
-        prios.pop(); // remove last level
+        // Remove last level.
+        prios.pop();
         let mut x: Vec<CompactionPriority> = prios.into_iter().filter(|x| x.score > 1.0).collect();
-        x.sort_by(|x, y| x.adjusted.partial_cmp(&y.adjusted).unwrap());
-        x.reverse();
+        x.sort_by(|x, y| y.adjusted.partial_cmp(&x.adjusted).unwrap());
         x
     }
 
@@ -290,9 +291,9 @@ impl Core {
             }
 
             let mut bopts = crate::opt::build_table_options(&self.opts);
+            bopts.table_size = compact_def.targets.file_size[compact_def.next_level_id];
             // TODO: Add key registry and cache.
 
-            bopts.table_size = compact_def.targets.file_size[compact_def.next_level_id];
             let mut builder = TableBuilder::new(bopts.clone());
             let mut table_kr = KeyRange::default();
             let mut vp = ValuePointer::default();
@@ -306,7 +307,7 @@ impl Core {
                     && has_any_prefixes(&iter_key, &compact_def.drop_prefixes)
                 {
                     num_skips += 1;
-                    // TODO: update stats of vlog
+                    // TODO: Update stats of vlog.
 
                     iter.next();
                     continue;
@@ -316,7 +317,7 @@ impl Core {
                 if !skip_key.is_empty() {
                     if same_key(&iter_key, &skip_key) {
                         num_skips += 1;
-                        // TODO: update stats of vlog
+                        // TODO: Update stats of vlog.
 
                         iter.next();
                         continue;
@@ -334,9 +335,9 @@ impl Core {
                         }
                     }
 
-                    // Ensure that all versions of the key are stored in the same
-                    // sstable, and not divided across multiple tables at the same
-                    // level.
+                    // Only break if we are on a different key, and have reached capacity.
+                    // Ensure that all versions of the key are stored in the same sstable,
+                    // and not divided across multiple tables at the same level.
                     if builder.reach_capacity() {
                         break;
                     }
@@ -352,7 +353,7 @@ impl Core {
                             }
                             *right = Bytes::copy_from_slice(&last_key);
                         }
-                        KeyRange::Inf => todo!(),
+                        KeyRange::Inf => unreachable!(),
                         KeyRange::Empty => {
                             table_kr = KeyRange::Range {
                                 left: Bytes::copy_from_slice(&iter_key),
@@ -367,23 +368,39 @@ impl Core {
                 let vs = iter.value();
                 let version = get_ts(&iter_key);
 
+                // Do not discard entries inserted by merge operator. These entries will be
+                // discarded once they're merged. (Currently we don't need to consider it.)
                 if version <= discard_ts && vs.meta & crate::value::VALUE_MERGE_ENTRY == 0 {
+                    // Keep track of the number of versions encountered for this key. Only consider the
+                    // versions which are below the discard_ts, otherwise, we might end up discarding the
+                    // only valid version for a running transaction.
                     num_versions += 1;
 
+                    // Check if current version is deleted or expired.
+                    let deleted_or_expired = is_deleted_or_expired(vs.meta, vs.expires_at);
+
+                    // Keep the current version and discard all the next versions if
+                    // - The `VALUE_DISCARD_EARLIER_VERSIONS` bit is set OR
+                    // - We've already processed `num_versions_to_keep` number of versions
+                    // (including the current item being processed).
                     let last_valid_version = vs.meta & crate::value::VALUE_DISCARD_EARLIER_VERSIONS
                         != 0
                         || num_versions == self.opts.num_versions_to_keep;
 
-                    let is_expired = is_deleted_or_expired(vs.meta, vs.expires_at);
-
-                    if is_expired || last_valid_version {
+                    if deleted_or_expired || last_valid_version {
+                        // If this version of the key is deleted/expired, or the last version to keep,
+                        // set skip_key to skip all the rest of the versions.
                         skip_key = BytesMut::from(&iter_key[..]);
+
                         #[allow(clippy::if_same_then_else)]
-                        if !is_expired && last_valid_version {
-                            // do nothing
+                        if !deleted_or_expired && last_valid_version {
+                            // If current version is not deleted or expired, add the key to the table.
                         } else if has_overlap {
-                            // do nothing
+                            // If this key range has overlap with lower levels, then keep the deletion
+                            // marker with the latest version, discarding the rest. We have set skip_key,
+                            // so the following key versions would be skipped.
                         } else {
+                            // If no overlap, we can skip all the versions, by continuing here.
                             num_skips += 1;
                             // TODO: update stats of vlog
 
@@ -420,7 +437,7 @@ impl Core {
             tables.push(table);
         }
 
-        eprintln!(
+        info!(
             "compactor {}, sub_compact took {} mills, produce {} tables, added {} keys, skipped {} keys",
             compact_def.compactor_id,
             std::time::Instant::now()
@@ -441,7 +458,7 @@ impl Core {
         compact_def: &CompactDef,
         _pool: &yatp::ThreadPool<yatp::task::callback::TaskCell>,
     ) -> Result<Vec<Table>> {
-        // TODO: this implementation is very very trivial
+        // TODO: This implementation is very very trivial.
 
         let mut valid = vec![];
 
@@ -489,11 +506,11 @@ impl Core {
             let this = self.clone();
             let valid = valid.clone();
             let tx = tx.clone();
-            // TODO: currently, the thread will never wake up when using yatp. So we use std::thread instead.
+            // TODO: Currently, the thread will never wake up when using yatp. So we use std::thread instead.
             std::thread::spawn(move || {
                 let iters = make_iterator(&compact_def, &valid);
                 if iters.is_empty() {
-                    // TODO: iters should not be empty
+                    // TODO: Iters should not be empty.
                     tx.send(None).ok();
                 }
                 tx.send(Some(this.sub_compact(
@@ -581,7 +598,6 @@ impl Core {
             ));
         }
 
-        // TODO: should compact_def be mutable?
         compact_def.next_level = self.levels[0].clone();
         compact_def.next_level_id = 0;
         compact_def.next_range = KeyRange::default();
@@ -596,7 +612,7 @@ impl Core {
 
         for table in this_level.tables.iter() {
             if table.size() >= 2 * compact_def.targets.file_size[0] {
-                // file already big, don't include it
+                // File already big, don't include it.
                 continue;
             }
 
@@ -616,7 +632,6 @@ impl Core {
         compact_def.top = out;
 
         // Avoid any other L0 -> Lbase from happening, while this is going on.
-        // TODO: ?
         cpt_status.levels[this_level.level]
             .ranges
             .push(KeyRange::Inf);
@@ -666,7 +681,8 @@ impl Core {
                 }
             }
         }
-        compact_def.this_range = get_key_range(&compact_def.top);
+
+        compact_def.this_range = get_key_range(&out);
         compact_def.top = out;
 
         let (left, right) = next_level.overlapping_tables(&compact_def.this_range);
@@ -715,7 +731,6 @@ impl Core {
             compact_def.this_size = table.size();
             compact_def.this_range = get_key_range_single(table);
             // If we're already compacting this range, don't do anything.
-            // TODO: ?
             if cpt_status.overlaps_with(compact_def.this_level_id, &compact_def.this_range) {
                 continue;
             }
@@ -724,7 +739,7 @@ impl Core {
 
             // TODO: Try to fix it.
             if right < left {
-                eprintln!(
+                error!(
                     "right {} is less than left {} in overlapping_tables for current level {}, next level {}, key_range {:?}",
                     right,
                     left,
@@ -794,7 +809,7 @@ impl Core {
 
         let change_set = build_change_set(compact_def, &new_tables);
 
-        // We write to the manifest _before_ we delete files (and _after_ we created files)
+        // We write to the manifest _before_ we delete files (and _after_ we created files).
         self.manifest.add_changes(change_set.changes)?;
 
         // TODO: Re-examine this.
@@ -860,13 +875,13 @@ impl Core {
             self.fill_tables(&mut compact_def)?;
         };
         if let Err(err) = self.run_compact_def(idx, level, &mut compact_def, pool) {
-            eprintln!("failed on compaction {:?}", err);
+            error!("failed on compaction {:?}", err);
             self.cpt_status.write().unwrap().delete(&compact_def);
         }
 
-        // TODO: will compact_def be used now?
+        // TODO: Will compact_def be used now?
 
-        eprintln!(
+        info!(
             "compactor #{} on level {} success",
             idx, compact_def.this_level_id
         );
@@ -893,7 +908,7 @@ impl Core {
             let duration = current.duration_since(time_start);
 
             if duration.as_millis() > 1000 {
-                eprintln!("L0 was stalled for {} ms", duration.as_millis());
+                info!("L0 was stalled for {} ms", duration.as_millis());
             }
 
             // TODO: Update l0_stalls_ms.
@@ -1037,7 +1052,7 @@ fn build_change_set(compact_def: &CompactDef, new_tables: &[Table]) -> ManifestC
     let mut changes = vec![];
 
     for table in new_tables {
-        // TODO: data key id
+        // TODO: Data key id.
         changes.push(new_create_change(table.id(), compact_def.next_level_id, 0));
     }
     for table in &compact_def.top {
