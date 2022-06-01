@@ -13,6 +13,7 @@ use yatp::task::callback::Handle;
 
 use crate::closer::Closer;
 
+#[derive(Debug)]
 enum Index {
     Single(u64),
     Multiple(Vec<u64>),
@@ -21,6 +22,7 @@ enum Index {
 // Contains one or more indices, along with a done boolean to indicate the
 // status of the index: begin or done. It also contains waiters, who could be
 // waiting for the watermark to reach >= a certain index.
+#[derive(Debug)]
 struct Mark {
     index: Index,
     waiter: Option<Sender<()>>,
@@ -177,6 +179,7 @@ impl WaterMark {
         }
     }
 
+    /// Initializes a [`WaterMark`] struct. MUST be called before using it.
     pub fn init(&self, pool: &yatp::ThreadPool<yatp::task::callback::TaskCell>, closer: Closer) {
         let core = self.core.clone();
         pool.spawn(move |_: &mut Handle<'_>| {
@@ -184,6 +187,7 @@ impl WaterMark {
         });
     }
 
+    /// Sets the last index to the given value.
     pub fn begin(&self, index: u64) {
         self.core.last_index.store(index, Ordering::SeqCst);
         self.tx
@@ -195,6 +199,7 @@ impl WaterMark {
             .unwrap();
     }
 
+    /// Works like `begin` but accepts multiple indices.
     pub fn begin_many(&self, indices: Vec<u64>) {
         self.core
             .last_index
@@ -208,6 +213,7 @@ impl WaterMark {
             .unwrap();
     }
 
+    /// Sets a single index as done.
     pub fn done(&self, index: u64) {
         self.tx
             .send(Mark {
@@ -218,6 +224,7 @@ impl WaterMark {
             .unwrap();
     }
 
+    /// Works like done but accepts multiple indices.
     pub fn done_many(&self, indices: Vec<u64>) {
         self.tx
             .send(Mark {
@@ -228,18 +235,24 @@ impl WaterMark {
             .unwrap();
     }
 
+    /// Returns the maximum index that has the property that all indices
+    /// less than or equal to it are done.
     pub fn done_until(&self) -> u64 {
         self.core.done_until.load(Ordering::SeqCst)
     }
 
+    /// Sets the maximum index that has the property that all indices
+    /// less than or equal to it are done.
     pub fn set_done_until(&self, val: u64) {
         self.core.done_until.store(val, Ordering::SeqCst);
     }
 
+    /// Returns the last index for which `begin` has been called.
     pub fn last_index(&self) -> u64 {
         self.core.last_index.load(Ordering::SeqCst)
     }
 
+    /// Waits until the given index is marked as done.
     pub fn wait_for_mark(&self, index: u64) -> Option<Receiver<()>> {
         if self.done_until() >= index {
             return None;
@@ -256,5 +269,73 @@ impl WaterMark {
             .unwrap();
 
         Some(rx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use yatp::Builder;
+
+    use super::*;
+    use crate::closer::Closer;
+
+    fn init_and_close<F>(f: F)
+    where
+        F: FnOnce(&WaterMark),
+    {
+        let pool = Builder::new("watermark-basic").build_callback_pool();
+        let closer = Closer::new();
+
+        let watermark = WaterMark::new("watermark".into());
+        watermark.init(&pool, closer.clone());
+
+        f(&watermark);
+
+        closer.close();
+        pool.shutdown();
+    }
+
+    #[test]
+    fn test_basic() {
+        init_and_close(|_| {});
+    }
+
+    #[test]
+    fn test_begin_done() {
+        init_and_close(|watermark| {
+            watermark.begin(1);
+            watermark.begin_many(vec![2, 3]);
+
+            watermark.done(1);
+            watermark.done_many(vec![2, 3]);
+        });
+    }
+
+    #[test]
+    fn test_wait_for_mark() {
+        init_and_close(|watermark| {
+            watermark.begin_many(vec![1, 2, 3]);
+            watermark.done_many(vec![2, 3]);
+
+            assert_eq!(watermark.done_until(), 0);
+
+            watermark.done(1);
+
+            matches!(
+                watermark.wait_for_mark(1).unwrap().recv(),
+                Err(crossbeam_channel::RecvError)
+            );
+            assert_eq!(watermark.done_until(), 3);
+        });
+    }
+
+    #[test]
+    fn test_last_index() {
+        init_and_close(|watermark| {
+            watermark.begin_many(vec![1, 2, 3]);
+            watermark.done_many(vec![2, 3]);
+
+            assert_eq!(watermark.last_index(), 3);
+        });
     }
 }
