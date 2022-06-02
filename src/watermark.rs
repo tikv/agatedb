@@ -6,10 +6,10 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
+    thread::JoinHandle,
 };
 
 use crossbeam_channel::{bounded, select, Receiver, Sender};
-use yatp::task::callback::Handle;
 
 use crate::closer::Closer;
 
@@ -180,11 +180,12 @@ impl WaterMark {
     }
 
     /// Initializes a [`WaterMark`] struct. MUST be called before using it.
-    pub fn init(&self, pool: &yatp::ThreadPool<yatp::task::callback::TaskCell>, closer: Closer) {
+    pub fn init(&self, pool: std::thread::Builder, closer: Closer) -> JoinHandle<()> {
         let core = self.core.clone();
-        pool.spawn(move |_: &mut Handle<'_>| {
+        pool.spawn(move || {
             core.process(closer);
-        });
+        })
+        .unwrap()
     }
 
     /// Sets the last index to the given value.
@@ -274,35 +275,33 @@ impl WaterMark {
 
 #[cfg(test)]
 mod tests {
-    use yatp::Builder;
-
     use super::*;
     use crate::closer::Closer;
 
-    fn init_and_close<F>(f: F)
+    fn init_and_close<F>(name: &str, f: F)
     where
         F: FnOnce(&WaterMark),
     {
-        let pool = Builder::new("watermark-basic").build_callback_pool();
+        let pool = std::thread::Builder::new().name(name.into());
         let closer = Closer::new();
 
         let watermark = WaterMark::new("watermark".into());
-        watermark.init(&pool, closer.clone());
+        let handle = watermark.init(pool, closer.clone());
 
         f(&watermark);
 
         closer.close();
-        pool.shutdown();
+        handle.join().unwrap();
     }
 
     #[test]
     fn test_basic() {
-        init_and_close(|_| {});
+        init_and_close("test_basic", |_| {});
     }
 
     #[test]
     fn test_begin_done() {
-        init_and_close(|watermark| {
+        init_and_close("test_begin_done", |watermark| {
             watermark.begin(1);
             watermark.begin_many(vec![2, 3]);
 
@@ -313,7 +312,7 @@ mod tests {
 
     #[test]
     fn test_wait_for_mark() {
-        init_and_close(|watermark| {
+        init_and_close("test_wait_for_mark", |watermark| {
             watermark.begin_many(vec![1, 2, 3]);
             watermark.done_many(vec![2, 3]);
 
@@ -328,7 +327,7 @@ mod tests {
 
     #[test]
     fn test_last_index() {
-        init_and_close(|watermark| {
+        init_and_close("test_last_index", |watermark| {
             watermark.begin_many(vec![1, 2, 3]);
             watermark.done_many(vec![2, 3]);
 

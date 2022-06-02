@@ -29,24 +29,23 @@ impl Closer {
 
 #[cfg(test)]
 mod tests {
-    use yatp::task::callback::Handle;
-
     use super::*;
 
     #[test]
     fn test_closer() {
-        let pool = yatp::Builder::new("test_closer").build_callback_pool();
         let closer = Closer::new();
 
         let (tx, rx) = unbounded::<()>();
 
+        let mut handles = vec![];
+
         for _i in 0..10 {
             let closer = closer.clone();
             let tx = tx.clone();
-            pool.spawn(move |_: &mut Handle<'_>| {
+            handles.push(std::thread::spawn(move || {
                 assert!(closer.get_receiver().recv().is_err());
                 tx.send(()).unwrap();
-            });
+            }));
         }
 
         closer.close();
@@ -54,5 +53,7 @@ mod tests {
         for _ in 0..10 {
             rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
         }
+
+        handles.into_iter().for_each(|h| h.join().unwrap());
     }
 }
