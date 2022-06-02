@@ -105,6 +105,18 @@ pub struct AgateOptions {
     ///
     /// The default value of `checksum_mode` is [`ChecksumVerificationMode`].
     pub checksum_mode: opt::ChecksumVerificationMode,
+
+    /// Determines whether the transactions would be checked for conflicts.
+    /// The transactions can be processed at a higher rate when conflict
+    /// detection is disabled.
+    ///
+    /// The default value of `detect_conflicts` is true.
+    pub detect_conflicts: bool,
+
+    /// Transaction start and commit timestamps are managed by end-user.
+    ///
+    /// The default value of `managed_txns` is false.
+    pub managed_txns: bool,
 }
 
 impl Default for AgateOptions {
@@ -138,6 +150,10 @@ impl Default for AgateOptions {
 
             num_compactors: 4,
             checksum_mode: opt::ChecksumVerificationMode::NoVerification,
+
+            detect_conflicts: true,
+
+            managed_txns: false,
         }
         // TODO: add other options
     }
