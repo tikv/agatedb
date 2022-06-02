@@ -253,9 +253,9 @@ impl WaterMark {
     }
 
     /// Waits until the given index is marked as done.
-    pub fn wait_for_mark(&self, index: u64) -> Option<Receiver<()>> {
+    pub fn wait_for_mark(&self, index: u64) {
         if self.done_until() >= index {
-            return None;
+            return;
         }
 
         let (tx, rx) = bounded(1);
@@ -268,7 +268,7 @@ impl WaterMark {
             })
             .unwrap();
 
-        Some(rx)
+        matches!(rx.recv(), Err(crossbeam_channel::RecvError));
     }
 }
 
@@ -321,10 +321,7 @@ mod tests {
 
             watermark.done(1);
 
-            matches!(
-                watermark.wait_for_mark(1).unwrap().recv(),
-                Err(crossbeam_channel::RecvError)
-            );
+            watermark.wait_for_mark(1);
             assert_eq!(watermark.done_until(), 3);
         });
     }
