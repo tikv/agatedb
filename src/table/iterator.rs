@@ -14,7 +14,7 @@ use crate::{
 };
 
 /// Errors that may encounter during iterator operation
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IteratorError {
     Eof,
     // TODO: As we need to clone Error from block iterator to table iterator,

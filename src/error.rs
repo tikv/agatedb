@@ -25,7 +25,9 @@ pub enum Error {
     InvalidChecksum(String),
     #[error("Invalid filename")]
     InvalidFilename(String),
-    #[error("Invalid prost data: {0}")]
+    #[error("Prost encode error: {0}")]
+    Encode(#[source] Box<prost::EncodeError>),
+    #[error("Prost decode error: {0}")]
     Decode(#[source] Box<prost::DecodeError>),
     #[error("Invalid data: {0}")]
     VarDecode(&'static str),
@@ -43,6 +45,10 @@ pub enum Error {
     VlogNotFound(u32),
     #[error("Error when compaction: {0}")]
     CompactionError(String),
+    #[error("{0}")]
+    CustomError(String),
+    #[error("Error when creating file in read-only mode: {0}")]
+    ReadOnlyError(String),
     #[error("Lock Poison")]
     PoisonError(String),
 }
@@ -58,6 +64,13 @@ impl From<InvalidValuePointerError> for Error {
     #[inline]
     fn from(e: InvalidValuePointerError) -> Error {
         Error::InvalidValuePointer(Box::new(e))
+    }
+}
+
+impl From<prost::EncodeError> for Error {
+    #[inline]
+    fn from(e: prost::EncodeError) -> Error {
+        Error::Encode(Box::new(e))
     }
 }
 

@@ -1,6 +1,7 @@
 use std::{
-    fs::{File, OpenOptions},
+    fs::{self, File, OpenOptions},
     io::Cursor,
+    mem::ManuallyDrop,
     path::PathBuf,
 };
 
@@ -18,7 +19,7 @@ use crate::{
 pub const MAX_HEADER_SIZE: usize = 21;
 
 /// `Header` stores metadata of an entry in WAL and in value log.
-#[derive(Default, Debug, PartialEq)]
+#[derive(Default, Debug, Eq, PartialEq)]
 pub struct Header {
     /// length of key
     pub key_len: u32,
@@ -83,12 +84,14 @@ impl Header {
 /// TODO: delete WAL file when reference to WAL (or memtable) comes to 0
 pub struct Wal {
     path: PathBuf,
-    file: File,
-    mmap_file: MmapMut,
+    file: ManuallyDrop<File>,
+    mmap_file: ManuallyDrop<MmapMut>,
     opts: AgateOptions,
     write_at: u32,
     buf: BytesMut,
     size: u32,
+
+    save_after_close: bool,
 }
 
 impl Wal {
@@ -117,13 +120,14 @@ impl Wal {
         let mmap_file = unsafe { MmapOptions::new().map_mut(&file)? };
         let mut wal = Wal {
             path,
-            file,
+            file: ManuallyDrop::new(file),
             size: mmap_file.len() as u32,
-            mmap_file,
+            mmap_file: ManuallyDrop::new(mmap_file),
             opts,
             write_at: 0,
             // TODO: current implementation doesn't have keyID and baseIV header
             buf: BytesMut::new(),
+            save_after_close: false,
         };
 
         if bootstrap {
@@ -284,6 +288,33 @@ impl Wal {
     pub(crate) fn data(&mut self) -> &mut MmapMut {
         &mut self.mmap_file
     }
+
+    pub fn close_and_save(mut self) {
+        self.save_after_close = true;
+    }
+
+    pub fn mark_close_and_save(&mut self) {
+        self.save_after_close = true;
+    }
+
+    fn drop_no_fail(&mut self) -> Result<()> {
+        unsafe {
+            ManuallyDrop::drop(&mut self.mmap_file);
+        }
+        let file = unsafe { ManuallyDrop::take(&mut self.file) };
+        if !self.save_after_close {
+            file.set_len(0).unwrap();
+            drop(file);
+            fs::remove_file(&self.path)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for Wal {
+    fn drop(&mut self) {
+        crate::util::no_fail(self.drop_no_fail(), "Wal::drop");
+    }
 }
 
 pub struct WalIterator<'a> {
@@ -385,7 +416,7 @@ mod tests {
             let entry = Entry::new(Bytes::from(i.to_string()), Bytes::from(i.to_string()));
             wal.write_entry(&entry).unwrap();
         }
-        drop(wal);
+        wal.close_and_save();
 
         // reopen WAL and iterate
         let mut wal = Wal::open(wal_path, opts).unwrap();
@@ -412,7 +443,7 @@ mod tests {
             let entry = Entry::new(Bytes::from(i.to_string()), Bytes::from(i.to_string()));
             wal.write_entry(&entry).unwrap();
         }
-        drop(wal);
+        wal.close_and_save();
 
         for trunc_length in (50..100).rev() {
             // truncate some data from WAL
@@ -434,6 +465,7 @@ mod tests {
                 cnt += 1;
             }
             assert!(cnt < 20);
+            wal.close_and_save()
         }
     }
 }
