@@ -93,6 +93,10 @@ impl ValueLog {
         vlog_file_path(&self.dir_path, fid)
     }
 
+    /// Opens all vlog and put them into files map.
+    ///
+    /// Returns OK if there is no error.
+    /// Returns Error when there are duplicated files or vlog file with invalid file name.
     fn populate_files_map(&self) -> Result<()> {
         let dir = std::fs::read_dir(&self.dir_path)?;
         let mut core = self.core.write().unwrap();
@@ -128,6 +132,7 @@ impl ValueLog {
         Ok(())
     }
 
+    /// Creates a new vlog file.
     fn create_vlog_file(&self) -> Result<(u32, Arc<RwLock<Wal>>)> {
         let mut core = self.core.write().unwrap();
         let fid = core.max_fid + 1;
@@ -145,6 +150,7 @@ impl ValueLog {
         Ok((fid, wal))
     }
 
+    /// Gets sorted valid vlog files' ID set.
     fn sorted_fids(&self) -> Vec<u32> {
         let core = self.core.read().unwrap();
         let mut to_be_deleted = HashSet::new();
@@ -157,6 +163,9 @@ impl ValueLog {
                 result.push(*fid);
             }
         }
+        // Hold read lock as short as we can
+        drop(core);
+
         // cargo clippy suggests using `sort_ubstable`
         result.sort_unstable();
         result
