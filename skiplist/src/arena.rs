@@ -1,79 +1,103 @@
 use std::{
+    cell::Cell,
     mem, ptr,
-    sync::{
-        atomic::{AtomicU32, Ordering},
-        Arc,
-    },
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
 const ADDR_ALIGN_MASK: usize = 7;
 
 struct ArenaCore {
-    len: AtomicU32,
-    cap: usize,
-    ptr: *mut u8,
+    len: AtomicUsize,
+    cap: Cell<usize>,
+    ptr: Cell<*mut u8>,
 }
 
 impl Drop for ArenaCore {
     fn drop(&mut self) {
-        let ptr = self.ptr as *mut u64;
-        let cap = self.cap / 8;
+        let ptr = self.ptr.get() as *mut u64;
+        let cap = self.cap.get() / 8;
         unsafe {
             Vec::from_raw_parts(ptr, 0, cap);
         }
     }
 }
 
+// Thread-local Arena
 pub struct Arena {
-    core: Arc<ArenaCore>,
+    core: ArenaCore,
 }
 
 impl Arena {
-    pub fn with_capacity(cap: u32) -> Arena {
-        let mut buf: Vec<u64> = Vec::with_capacity(cap as usize / 8);
+    pub fn with_capacity(cap: usize) -> Arena {
+        let mut buf: Vec<u64> = Vec::with_capacity(cap / 8);
         let ptr = buf.as_mut_ptr() as *mut u8;
         let cap = buf.capacity() * 8;
         mem::forget(buf);
         Arena {
-            core: Arc::new(ArenaCore {
+            core: ArenaCore {
                 // Reserve 8 bytes at the beginning, because func offset return 0 means invalid value,
                 // also 'fn get_mut' return invalid ptr when offset is 0
-                len: AtomicU32::new(8),
-                cap,
-                ptr,
-            }),
+                len: AtomicUsize::new(8),
+                cap: Cell::new(cap),
+                ptr: Cell::new(ptr),
+            },
         }
     }
 
-    pub fn len(&self) -> u32 {
+    pub fn len(&self) -> usize {
         self.core.len.load(Ordering::SeqCst)
     }
 
-    pub fn alloc(&self, size: usize) -> Option<u32> {
+    /// Alloc 8-byte aligned memory.
+    pub fn alloc(&self, size: usize) -> usize {
         // Leave enough padding for alignment.
         let size = (size + ADDR_ALIGN_MASK) & !ADDR_ALIGN_MASK;
-        let offset = self.core.len.fetch_add(size as u32, Ordering::SeqCst);
+        let offset = self.core.len.fetch_add(size, Ordering::SeqCst);
 
-        // Return 0 if there is not enough space to allocate.
-        if offset as usize + size > self.core.cap {
-            let _ = self.core.len.fetch_sub(size as u32, Ordering::SeqCst);
-            return None;
+        // Grow the arena if there is no enough space
+        if offset + size > self.core.cap.get() {
+            // Alloc new buf and copy data to new buf
+            let mut grow_by = self.core.cap.get();
+            if grow_by > 1 << 30 {
+                grow_by = 1 << 30;
+            }
+            if grow_by < size {
+                grow_by = size;
+            }
+            let mut new_buf: Vec<u64> =
+                Vec::with_capacity((self.core.cap.get() + grow_by) as usize / 8);
+            let new_ptr = new_buf.as_mut_ptr() as *mut u8;
+            unsafe {
+                ptr::copy_nonoverlapping(new_ptr, self.core.ptr.get(), self.core.cap.get());
+            }
+
+            // Release old buf
+            let old_ptr = self.core.ptr.get() as *mut u64;
+            unsafe {
+                Vec::from_raw_parts(old_ptr, 0, self.core.cap.get() / 8);
+            }
+
+            // Use new buf
+            self.core.ptr.set(new_ptr);
+            self.core.cap.set(new_buf.capacity() * 8);
+            mem::forget(new_buf);
         }
-        Some(offset as u32)
+        offset
     }
 
-    pub unsafe fn get_mut<N>(&self, offset: u32) -> *mut N {
+    pub unsafe fn get_mut<N>(&self, offset: usize) -> *mut N {
         if offset == 0 {
             return ptr::null_mut();
         }
-        self.core.ptr.add(offset as usize) as _
+
+        self.core.ptr.get().add(offset) as _
     }
 
-    pub fn offset<N>(&self, ptr: *const N) -> u32 {
+    pub fn offset<N>(&self, ptr: *const N) -> usize {
         let ptr_addr = ptr as usize;
-        let self_addr = self.core.ptr as usize;
-        if ptr_addr > self_addr && ptr_addr < self_addr + self.core.cap {
-            (ptr_addr - self_addr) as u32
+        let self_addr = self.core.ptr.get() as usize;
+        if ptr_addr > self_addr && ptr_addr < self_addr + self.core.cap.get() {
+            ptr_addr - self_addr
         } else {
             0
         }
@@ -89,16 +113,16 @@ mod tests {
         // There is enough space
         let arena = Arena::with_capacity(128);
         let offset = arena.alloc(8);
-        assert_eq!(offset, Some(8));
+        assert_eq!(offset, 8);
         assert_eq!(arena.len(), 16);
         unsafe {
-            let ptr = arena.get_mut::<u64>(offset.unwrap());
+            let ptr = arena.get_mut::<u64>(offset);
             let offset = arena.offset::<u64>(ptr);
             assert_eq!(offset, 8);
         }
 
-        // There is not enough space, return 0
+        // There is not enough space, grow buf and then return the offset
         let offset = arena.alloc(256);
-        assert_eq!(offset, None);
+        assert_eq!(offset, 16);
     }
 }

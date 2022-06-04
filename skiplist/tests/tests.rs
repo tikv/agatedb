@@ -9,7 +9,7 @@ use bytes::*;
 use skiplist::*;
 use yatp::task::callback::Handle;
 
-const ARENA_SIZE: u32 = 1 << 20;
+const ARENA_SIZE: usize = 1 << 20;
 
 fn new_value(v: usize) -> Bytes {
     Bytes::from(format!("{:05}", v))
@@ -51,7 +51,7 @@ fn test_basic() {
     ];
 
     for (key, value) in &table {
-        list.put(key_with_ts(*key, 0), value.clone()).unwrap();
+        list.put(key_with_ts(*key, 0), value.clone());
     }
 
     assert_eq!(list.get(&key_with_ts("key", 0)), None);
@@ -63,7 +63,7 @@ fn test_basic() {
     }
 }
 
-fn test_concurrent_basic(n: usize, cap: u32, value_len: usize) {
+fn test_concurrent_basic(n: usize, cap: usize, value_len: usize) {
     let pool = yatp::Builder::new("concurrent_basic").build_callback_pool();
     let comp = FixedLengthSuffixComparator::new(8);
     let list = Skiplist::with_capacity(comp, cap);
@@ -80,7 +80,7 @@ fn test_concurrent_basic(n: usize, cap: u32, value_len: usize) {
         let tx = tx.clone();
         let list = list.clone();
         pool.spawn(move |_: &mut Handle<'_>| {
-            list.put(k, v).unwrap();
+            list.put(k, v);
             tx.send(()).unwrap();
         })
     }
@@ -121,14 +121,14 @@ fn test_one_key() {
     let list = Skiplist::with_capacity(comp, ARENA_SIZE);
     let key = key_with_ts("thekey", 0);
     let (tx, rx) = mpsc::channel();
-    list.put(key.clone(), new_value(0)).unwrap();
+    list.put(key.clone(), new_value(0));
     for i in 0..n {
         let tx = tx.clone();
         let list = list.clone();
         let key = key.clone();
         let value = new_value(i);
         write_pool.spawn(move |_: &mut Handle<'_>| {
-            list.put(key, value).unwrap();
+            list.put(key, value);
             tx.send("w").unwrap();
             yield_now();
         })
@@ -177,7 +177,7 @@ fn test_iterator_next() {
     assert!(!iter_ref.valid());
     for i in (0..n).rev() {
         let key = key_with_ts(format!("{:05}", i).as_str(), 0);
-        list.put(key, new_value(i)).unwrap();
+        list.put(key, new_value(i));
     }
     iter_ref.seek_to_first();
     for i in 0..n {
@@ -200,7 +200,7 @@ fn test_iterator_prev() {
     assert!(!iter_ref.valid());
     for i in (0..n).rev() {
         let key = key_with_ts(format!("{:05}", i).as_str(), 0);
-        list.put(key, new_value(i)).unwrap();
+        list.put(key, new_value(i));
     }
     iter_ref.seek_to_last();
     for i in (0..n).rev() {
@@ -224,7 +224,7 @@ fn test_iterator_seek() {
     for i in (0..n).rev() {
         let v = i * 10 + 1000;
         let key = key_with_ts(format!("{:05}", v).as_str(), 0);
-        list.put(key, new_value(v)).unwrap();
+        list.put(key, new_value(v));
     }
     iter_ref.seek_to_first();
     assert!(iter_ref.valid());
