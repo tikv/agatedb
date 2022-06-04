@@ -35,8 +35,8 @@ impl Arena {
         mem::forget(buf);
         Arena {
             core: ArenaCore {
-                // Reserve 8 bytes at the beginning, because func offset return 0 means invalid value,
-                // also 'fn get_mut' return invalid ptr when offset is 0
+                // Offset 0 is invalid value for func `offset` and `get_mut`, initialize the
+                // len 8 to guarantee the allocated memory addr is always align with 8 bytes.
                 len: AtomicUsize::new(8),
                 cap: Cell::new(cap),
                 ptr: Cell::new(ptr),
