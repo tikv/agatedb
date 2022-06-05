@@ -50,7 +50,7 @@ impl Node {
 struct SkiplistCore {
     height: AtomicUsize,
     head: NonNull<Node>,
-    arena: Arc<Arena>,
+    arena: Arena,
 }
 
 #[derive(Clone)]
@@ -61,7 +61,7 @@ pub struct Skiplist<C> {
 
 impl<C> Skiplist<C> {
     pub fn with_capacity(c: C, arena_size: usize) -> Skiplist<C> {
-        let arena = Arc::new(Arena::with_capacity(arena_size));
+        let arena = Arena::with_capacity(arena_size);
         let head_offset = Node::alloc(&arena, Bytes::new(), Bytes::new(), MAX_HEIGHT - 1);
         let head = unsafe { NonNull::new_unchecked(arena.get_mut(head_offset)) };
         Skiplist {
