@@ -85,14 +85,12 @@ impl Core {
         let manifest_data = manifest.manifest_cloned();
 
         let mut max_file_id = 0;
-        let mut tables: Vec<Vec<Table>> = Vec::new();
-        tables.resize(opts.max_levels, vec![]);
+
+        let mut tables = vec![vec![]; opts.max_levels];
 
         // TODO: Parallelly open tables.
         for (id, table_manifest) in manifest_data.tables {
-            if id > max_file_id {
-                max_file_id = id;
-            }
+            max_file_id = std::cmp::max(max_file_id, id);
 
             let table_opts = build_table_options(&opts);
             // TODO: Set compression, data_key, cache.
@@ -258,7 +256,7 @@ impl Core {
 
         // TODO: Check if the given key-range overlaps with next_level too much.
 
-        let start_time = std::time::Instant::now();
+        let start_time = coarsetime::Instant::now();
 
         // For return.
         let mut tables = vec![];
@@ -440,9 +438,7 @@ impl Core {
         info!(
             "compactor {}, sub_compact took {} mills, produce {} tables, added {} keys, skipped {} keys",
             compact_def.compactor_id,
-            std::time::Instant::now()
-                .duration_since(start_time)
-                .as_millis(),
+            start_time.elapsed().as_millis(),
             tables.len(),
             num_keys,
             num_skips
@@ -520,7 +516,8 @@ impl Core {
                 )))
                 .ok();
             })
-            .join()?;
+            .join()
+            .map_err(|err| Error::JoinError(format!("{:?}", err)))?;
         }
 
         for table in rx.iter().take(compact_def.splits.len()).flatten() {
@@ -898,14 +895,15 @@ impl Core {
         }
 
         while !self.levels[0].write()?.try_add_l0_table(table.clone()) {
-            let time_start = std::time::Instant::now();
+            let time_start = coarsetime::Instant::now();
+
+            // TODO: Use notifier or condition variable.
 
             while self.levels[0].read()?.num_tables() >= self.opts.num_level_zero_tables_stall {
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
 
-            let current = std::time::Instant::now();
-            let duration = current.duration_since(time_start);
+            let duration = time_start.elapsed();
 
             if duration.as_millis() > 1000 {
                 info!("L0 was stalled for {} ms", duration.as_millis());
