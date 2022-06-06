@@ -65,7 +65,7 @@ impl LevelHandler {
         }
     }
 
-    pub fn delete_tables(&mut self, to_del: &[Table]) -> Result<()> {
+    pub fn delete_tables(&mut self, to_del: &[Table]) {
         let mut to_del_map = HashSet::new();
 
         for table in to_del {
@@ -83,8 +83,6 @@ impl LevelHandler {
         }
 
         self.tables = new_tables;
-
-        Ok(())
     }
 
     pub fn replace_tables(&mut self, to_del: &[Table], to_add: &[Table]) -> Result<()> {

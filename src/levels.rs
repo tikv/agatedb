@@ -813,11 +813,11 @@ impl Core {
         if this_level_id != next_level_id {
             let mut this_level = this_level.write().unwrap();
             let mut next_level = next_level.write().unwrap();
-            this_level.delete_tables(&compact_def.top)?;
+            this_level.delete_tables(&compact_def.top);
             next_level.replace_tables(&compact_def.bot, &new_tables)?;
         } else {
             let mut this_level = this_level.write().unwrap();
-            this_level.delete_tables(&compact_def.top)?;
+            this_level.delete_tables(&compact_def.top);
             this_level.replace_tables(&compact_def.bot, &new_tables)?;
         }
 
@@ -871,9 +871,12 @@ impl Core {
             );
             self.fill_tables(&mut compact_def)?;
         };
+
         if let Err(err) = self.run_compact_def(idx, level, &mut compact_def, pool) {
             error!("failed on compaction {:?}", err);
             self.cpt_status.write().unwrap().delete(&compact_def);
+
+            return Err(err);
         }
 
         // TODO: Will compact_def be used now?
