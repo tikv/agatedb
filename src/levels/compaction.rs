@@ -1,7 +1,9 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::HashSet,
+    sync::{Arc, RwLock},
+};
 
 use bytes::{Bytes, BytesMut};
-use parking_lot::RwLock;
 
 use super::LevelHandler;
 use crate::{
@@ -105,6 +107,12 @@ impl KeyRange {
     }
 }
 
+impl Default for KeyRange {
+    fn default() -> Self {
+        Self::Empty
+    }
+}
+
 #[derive(Default)]
 pub struct LevelCompactStatus {
     pub ranges: Vec<KeyRange>,
@@ -124,6 +132,7 @@ impl LevelCompactStatus {
     }
 }
 
+#[derive(Default)]
 pub struct CompactStatus {
     pub levels: Vec<LevelCompactStatus>,
     pub tables: HashSet<u64>,
@@ -298,9 +307,9 @@ impl Targets {
     }
 }
 
-pub fn get_key_range(tables: &[Table]) -> Option<KeyRange> {
+pub fn get_key_range(tables: &[Table]) -> KeyRange {
     if tables.is_empty() {
-        return None;
+        return KeyRange::default();
     }
 
     let mut smallest = tables[0].smallest();
@@ -318,15 +327,15 @@ pub fn get_key_range(tables: &[Table]) -> Option<KeyRange> {
     let mut biggest_buf = BytesMut::with_capacity(biggest.len() + 8);
     smallest_buf.extend_from_slice(user_key(smallest));
     biggest_buf.extend_from_slice(user_key(biggest));
-    Some(KeyRange::new(
+    KeyRange::new(
         key_with_ts_first(smallest_buf),
         // the appended key will be `<biggest_key><u64::MAX>`.
         key_with_ts_last(biggest_buf),
-    ))
+    )
 }
 
 pub fn get_key_range_single(table: &Table) -> KeyRange {
-    get_key_range(std::slice::from_ref(table)).unwrap()
+    get_key_range(std::slice::from_ref(table))
 }
 
 #[cfg(test)]

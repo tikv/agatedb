@@ -51,6 +51,8 @@ pub enum Error {
     ReadOnlyError(String),
     #[error("Lock Poison")]
     PoisonError(String),
+    #[error("Join Error")]
+    JoinError(String),
 }
 
 impl From<io::Error> for Error {

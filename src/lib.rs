@@ -2,6 +2,7 @@
 
 mod bloom;
 mod checksum;
+mod closer;
 mod db;
 mod entry;
 mod error;
@@ -12,7 +13,7 @@ mod levels;
 mod manifest;
 mod memtable;
 mod ops;
-mod opt;
+pub mod opt;
 mod table;
 mod util;
 mod value;
