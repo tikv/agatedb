@@ -6,10 +6,12 @@ edition = "2018"
 
 [dependencies]
 bytes = "1.0"
+coarsetime = "0.1.22"
 crc = "1.8"
 crossbeam-channel = "0.5"
 enum_dispatch = "0.3"
 farmhash = "1.1"
+lazy_static = "1.4.0"
 log = "0.4.17"
 memmap2 = "0.3"
 parking_lot = "0.11"
@@ -17,7 +19,9 @@ prost = "0.8"
 proto = { path = "proto" }
 rand = "0.7"
 skiplist = { path = "skiplist" }
+tempdir = "0.3"
 thiserror = "1.0"
+yatp = { git = "https://github.com/tikv/yatp.git" }
 
 [dev-dependencies]
 criterion = "0.3"
