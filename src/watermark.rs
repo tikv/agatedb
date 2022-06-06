@@ -124,10 +124,13 @@ impl Core {
                             let done_until = self.done_until.load(Ordering::SeqCst);
                             if done_until >= index {
                                 mark.waiter.take(); // Close channel.
-                            } else if let Some(ws) = waiters.borrow_mut().get_mut(&index) {
-                                ws.push(waiter.clone());
-                            } else {
-                                waiters.borrow_mut().insert(index, vec![waiter.clone()]);
+                            } else{
+                                let mut waiters = waiters.borrow_mut();
+                                if let Some(ws) = waiters.get_mut(&index) {
+                                    ws.push(waiter.clone());
+                                } else {
+                                    waiters.insert(index, vec![waiter.clone()]);
+                                }
                             }
                         } else {
                             panic!("waiter used without index");
