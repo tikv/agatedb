@@ -1,6 +1,7 @@
 use std::{
     collections::HashSet,
     sync::{Arc, Mutex},
+    thread::JoinHandle,
 };
 
 use super::transaction::Transaction;
@@ -49,25 +50,20 @@ impl CommitInfo {
         if reads.is_empty() {
             false
         } else {
-            for committed_txn in &self.committed_txns {
-                // If the committed_txn.ts is less than txn.read_ts that implies that the
-                // committed_txn finished before the current transaction started.
-                // We don't need to check for conflict in that case.
-                // This change assumes linearizability. Lack of linearizability could
-                // cause the read ts of a new txn to be lower than the commit ts of
-                // a txn before it.
-                if committed_txn.ts <= txn.read_ts {
-                    continue;
-                }
-
-                for read in reads.iter() {
-                    if committed_txn.conflict_keys.contains(read) {
-                        return true;
-                    }
-                }
-            }
-
-            false
+            // If the committed_txn.ts is less than txn.read_ts that implies that the
+            // committed_txn finished before the current transaction started.
+            // We don't need to check for conflict in that case.
+            // This change assumes linearizability. Lack of linearizability could
+            // cause the read ts of a new txn to be lower than the commit ts of
+            // a txn before it.
+            self.committed_txns
+                .iter()
+                .filter(|committed_txn| committed_txn.ts > txn.read_ts)
+                .any(|committed_txn| {
+                    reads
+                        .iter()
+                        .any(|read| committed_txn.conflict_keys.contains(read))
+                })
         }
     }
 }
@@ -91,11 +87,26 @@ pub struct Oracle {
 
     /// Used to stop watermarks.
     closer: Closer,
+
+    // TODO: Try to find a better way.
+    txn_handle: JoinHandle<()>,
+    read_handle: JoinHandle<()>,
 }
 
 impl Oracle {
     pub fn new(opts: &AgateOptions) -> Self {
-        let oracle = Self {
+        let txn_pool = std::thread::Builder::new().name("oracle_txn_watermark".into());
+        let read_pool = std::thread::Builder::new().name("oracle_read_watermark".into());
+
+        let closer = Closer::new();
+
+        let txn_mark = Arc::new(WaterMark::new("txn_ts".into()));
+        let read_mark = Arc::new(WaterMark::new("pending_reads".into()));
+
+        let txn_handle = txn_mark.init(txn_pool, closer.clone());
+        let read_handle = read_mark.init(read_pool, closer.clone());
+
+        Self {
             is_managed: opts.managed_txns,
             detect_conflicts: opts.detect_conflicts,
 
@@ -103,23 +114,20 @@ impl Oracle {
 
             write_ch_lock: Mutex::new(()),
 
-            txn_mark: Arc::new(WaterMark::new("txn_ts".into())),
-            read_mark: Arc::new(WaterMark::new("pending_reads".into())),
+            txn_mark,
+            read_mark,
 
-            closer: Closer::new(),
-        };
+            closer,
 
-        let txn_pool = std::thread::Builder::new().name("oracle_txn_watermark".into());
-        let read_pool = std::thread::Builder::new().name("oracle_read_watermark".into());
-
-        oracle.txn_mark.init(txn_pool, oracle.closer.clone());
-        oracle.read_mark.init(read_pool, oracle.closer.clone());
-
-        oracle
+            txn_handle,
+            read_handle,
+        }
     }
 
-    pub fn stop(&self) {
-        todo!()
+    pub fn stop(self) {
+        self.closer.close();
+        self.txn_handle.join().unwrap();
+        self.read_handle.join().unwrap();
     }
 
     fn read_ts(&self) -> u64 {
@@ -133,6 +141,8 @@ impl Oracle {
                 read_ts
             };
 
+            // Not waiting here could mean that some txns which have been
+            // committed would not be read.
             self.txn_mark.wait_for_mark(read_ts);
             read_ts
         }
@@ -201,14 +211,7 @@ impl Oracle {
     fn done_read(&self, txn: &mut Transaction) {
         if !txn.done_read {
             txn.done_read = true;
-            self.read_mark.done(txn.read_ts)
-        }
-    }
-
-    fn cleanup_committed_transactions(&self) {
-        if self.detect_conflicts {
-            let mut commit_info = self.commit_info.lock().unwrap();
-            commit_info.cleanup_committed_transactions(self.is_managed, self.read_mark.clone());
+            self.read_mark.done(txn.read_ts);
         }
     }
 
@@ -216,5 +219,79 @@ impl Oracle {
         if !self.is_managed {
             self.txn_mark.done(commit_ts);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_basic() {
+        let opts = AgateOptions::default();
+        let oracle = Oracle::new(&opts);
+        oracle.stop();
+    }
+
+    #[test]
+    fn test_read_ts() {
+        let opts = AgateOptions::default();
+        let oracle = Oracle::new(&opts);
+
+        for i in 0..100 {
+            oracle.increment_next_ts();
+            oracle.done_commit(i);
+            assert_eq!(oracle.read_ts(), i);
+        }
+
+        oracle.stop();
+    }
+
+    #[test]
+    fn test_detect_confict() {
+        let opts = AgateOptions::default();
+        let mut oracle = Oracle::new(&opts);
+
+        oracle.increment_next_ts();
+
+        let mut txn = Transaction::default();
+        txn.read_ts = 1;
+        txn.conflict_keys = [11u64, 22, 33].iter().cloned().collect();
+
+        // No conflict.
+        assert_eq!(oracle.new_commit_ts(&mut txn), (1, false));
+
+        txn.read_ts = 0;
+        txn.reads = Mutex::new(vec![11, 23]);
+
+        // Has conflict.
+        assert_eq!(oracle.new_commit_ts(&mut txn), (0, true));
+
+        txn.reads = Mutex::new(vec![23]);
+
+        // No conflict.
+        assert_eq!(oracle.new_commit_ts(&mut txn), (2, false));
+
+        oracle.stop();
+    }
+
+    #[test]
+    fn test_cleanup() {
+        let opts = AgateOptions {
+            managed_txns: true,
+            ..Default::default()
+        };
+        let mut oracle = Oracle::new(&opts);
+
+        let mut txn = Transaction::default();
+
+        assert_eq!(oracle.new_commit_ts(&mut txn), (0, false));
+        assert_eq!(oracle.commit_info.lock().unwrap().committed_txns.len(), 1);
+
+        oracle.set_discard_ts(1);
+
+        assert_eq!(oracle.commit_info.lock().unwrap().committed_txns.len(), 0);
+
+        oracle.stop();
     }
 }
