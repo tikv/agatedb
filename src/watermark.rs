@@ -61,7 +61,7 @@ impl Core {
 
             let prev = pending.entry(index).or_default();
             if done {
-                *prev -= 1;
+                (*prev) = (*prev).saturating_sub(1);
             } else {
                 *prev += 1;
             }
