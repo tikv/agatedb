@@ -29,6 +29,7 @@ pub(crate) fn get_test_table_options() -> Options {
         block_size: 4 * 1024,
         table_size: 0,
         bloom_false_positive: 0.01,
+        table_capacity: 0,
         checksum_mode: ChecksumVerificationMode::OnTableRead,
     }
 }
@@ -100,7 +101,11 @@ pub(crate) fn build_table_data(mut kv_pairs: Vec<(Bytes, Bytes)>, opts: Options)
     kv_pairs.sort_by(|x, y| x.0.cmp(&y.0));
 
     for (k, v) in kv_pairs {
-        builder.add(&key_with_ts(&k[..], 0), Value::new_with_meta(v, b'A', 0), 0);
+        builder.add(
+            &key_with_ts(&k[..], 0),
+            &Value::new_with_meta(v, b'A', 0),
+            0,
+        );
     }
     builder.finish()
 }
@@ -355,6 +360,7 @@ fn test_table_big_values() {
         block_size: 4 * 1024,
         bloom_false_positive: 0.01,
         table_size: (n as u64) * (1 << 20),
+        table_capacity: 0,
         checksum_mode: ChecksumVerificationMode::OnTableRead,
     };
     let mut builder = Builder::new(opts.clone());
@@ -362,7 +368,7 @@ fn test_table_big_values() {
     for i in 0..n {
         let key = key_with_ts(&key(b"", i)[..], i as u64 + 1);
         let vs = Value::new(value(i));
-        builder.add(&key, vs, 0);
+        builder.add(&key, &vs, 0);
     }
 
     let tmp_dir = tempdir().unwrap();

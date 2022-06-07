@@ -1,11 +1,10 @@
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
-    sync::{atomic::AtomicU32, Arc},
+    sync::{atomic::AtomicU32, Arc, RwLock},
 };
 
 use bytes::{Bytes, BytesMut};
-use parking_lot::RwLock;
 
 use crate::{
     error::InvalidValuePointerError,
@@ -39,6 +38,21 @@ impl Core {
             files_to_delete: vec![],
             num_entries_written: 0,
         }
+    }
+
+    fn drop_no_fail(&mut self) -> Result<()> {
+        for wal in &mut self.files_map.values_mut() {
+            let mut wal = wal.write()?;
+            wal.mark_close_and_save();
+        }
+
+        Ok(())
+    }
+}
+
+impl Drop for Core {
+    fn drop(&mut self) {
+        crate::util::no_fail(self.drop_no_fail(), "ValueLog::Core::drop");
     }
 }
 
@@ -79,9 +93,13 @@ impl ValueLog {
         vlog_file_path(&self.dir_path, fid)
     }
 
+    /// Opens all vlog and put them into files map.
+    ///
+    /// Returns OK if there is no error.
+    /// Returns Error when there are duplicated files or vlog file with invalid file name.
     fn populate_files_map(&self) -> Result<()> {
         let dir = std::fs::read_dir(&self.dir_path)?;
-        let mut core = self.core.write();
+        let mut core = self.core.write().unwrap();
         for file in dir {
             let file = file?;
             match file.file_name().into_string() {
@@ -114,8 +132,9 @@ impl ValueLog {
         Ok(())
     }
 
+    /// Creates a new vlog file.
     fn create_vlog_file(&self) -> Result<(u32, Arc<RwLock<Wal>>)> {
-        let mut core = self.core.write();
+        let mut core = self.core.write().unwrap();
         let fid = core.max_fid + 1;
         let path = self.file_path(fid);
         let wal = Wal::open(path, self.opts.clone())?;
@@ -131,8 +150,9 @@ impl ValueLog {
         Ok((fid, wal))
     }
 
+    /// Gets sorted valid vlog files' ID set.
     fn sorted_fids(&self) -> Vec<u32> {
-        let core = self.core.read();
+        let core = self.core.read().unwrap();
         let mut to_be_deleted = HashSet::new();
         for fid in &core.files_to_delete {
             to_be_deleted.insert(*fid);
@@ -143,6 +163,9 @@ impl ValueLog {
                 result.push(*fid);
             }
         }
+        // Hold read lock as short as we can
+        drop(core);
+
         // cargo clippy suggests using `sort_ubstable`
         result.sort_unstable();
         result
@@ -166,10 +189,10 @@ impl ValueLog {
     pub fn write(&self, requests: &mut [Request]) -> Result<()> {
         let result = self.write_inner(requests);
         if self.opts.sync_writes {
-            let core = self.core.read();
+            let core = self.core.read().unwrap();
             let current_log_id = core.max_fid;
             let current_log_ptr = core.files_map.get(&current_log_id).unwrap().clone();
-            let mut current_log = current_log_ptr.write();
+            let mut current_log = current_log_ptr.write().unwrap();
             drop(core);
             current_log.sync()?;
         }
@@ -177,7 +200,7 @@ impl ValueLog {
     }
 
     pub fn write_inner(&self, requests: &mut [Request]) -> Result<()> {
-        let core = self.core.read();
+        let core = self.core.read().unwrap();
         let mut current_log_id = core.max_fid;
         let mut current_log = core.files_map.get(&current_log_id).unwrap().clone();
         drop(core);
@@ -197,7 +220,7 @@ impl ValueLog {
 
             // expand file size if space is not enough
             // TODO: handle value >= 4GB case
-            let mut current_log = current_log_lck.write();
+            let mut current_log = current_log_lck.write().unwrap();
             if end_offset >= current_log.size() {
                 current_log.set_len(end_offset as u64)?;
             }
@@ -211,7 +234,7 @@ impl ValueLog {
             // ensure data are flushed to main memory
             std::sync::atomic::fence(std::sync::atomic::Ordering::SeqCst);
 
-            let mut current_log = current_log_lck.write();
+            let mut current_log = current_log_lck.write().unwrap();
             current_log.set_size(end_offset);
             drop(current_log);
             Ok(())
@@ -219,11 +242,11 @@ impl ValueLog {
 
         // `to_disk` returns `true` if we need a new vLog.
         let to_disk = |current_log: &RwLock<Wal>| -> Result<bool> {
-            let core = self.core.read();
+            let core = self.core.read().unwrap();
             if self.w_offset() as u64 > self.opts.value_log_file_size
                 || core.num_entries_written > self.opts.value_log_max_entries
             {
-                let mut current_log = current_log.write();
+                let mut current_log = current_log.write().unwrap();
                 current_log.done_writing(self.w_offset())?;
                 Ok(true)
             } else {
@@ -269,7 +292,7 @@ impl ValueLog {
                 current_log = log;
             }
 
-            let mut core = self.core.write();
+            let mut core = self.core.write().unwrap();
             core.num_entries_written += written;
         }
 
@@ -280,7 +303,7 @@ impl ValueLog {
     }
 
     fn get_file(&self, value_ptr: &ValuePointer) -> Result<Arc<RwLock<Wal>>> {
-        let core = self.core.read();
+        let core = self.core.read().unwrap();
         let file = core.files_map.get(&value_ptr.file_id).cloned();
         if let Some(file) = file {
             let max_fid = core.max_fid;
@@ -306,7 +329,7 @@ impl ValueLog {
     /// TODO: return header together with k-v pair.
     pub(crate) fn read(&self, value_ptr: ValuePointer) -> Result<Bytes> {
         let log_file = self.get_file(&value_ptr)?;
-        let r = log_file.read();
+        let r = log_file.read().unwrap();
         let mut buf = r.read(&value_ptr)?;
         let original_buf = buf.slice(..);
         drop(r);

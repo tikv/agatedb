@@ -1,5 +1,6 @@
-use std::{cmp, fs::File, path::Path, ptr};
+use std::{cmp, fs::File, path::Path, ptr, sync::atomic::AtomicBool};
 
+use bytes::Bytes;
 pub use skiplist::{FixedLengthSuffixComparator as Comparator, KeyComparator};
 
 use crate::{format::user_key, Result};
@@ -70,4 +71,41 @@ pub fn same_key(a: &[u8], b: &[u8]) -> bool {
         return false;
     }
     return user_key(a) == user_key(b);
+}
+
+pub fn unix_time() -> u64 {
+    coarsetime::Clock::now_since_epoch().as_millis() as u64
+}
+
+pub fn has_any_prefixes(s: &[u8], list_of_prefixes: &[Bytes]) -> bool {
+    list_of_prefixes.iter().any(|y| s.starts_with(y))
+}
+
+static FAILED: AtomicBool = AtomicBool::new(false);
+
+pub fn no_fail<T>(result: Result<T>, id: &str) {
+    if let Err(err) = result {
+        log::warn!("WARN: {}, {:?}", id, err);
+        FAILED.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+pub fn panic_if_fail() {
+    if FAILED.load(std::sync::atomic::Ordering::SeqCst) {
+        panic!("failed");
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::*;
+
+    #[test]
+    fn test_unix_time() {
+        let start = SystemTime::now();
+        let since_the_epoch = start.duration_since(UNIX_EPOCH).unwrap();
+        assert_eq!(since_the_epoch.as_millis() as u64 / 10, unix_time() / 10);
+    }
 }

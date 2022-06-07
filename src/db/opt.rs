@@ -1,33 +1,110 @@
 use super::*;
+use crate::opt;
 
 #[derive(Clone)]
 pub struct AgateOptions {
+    /* Required options. */
+    /// The path of the directory where key data will be stored in.
+    ///
+    /// If it doesn't exist, Agate will try to create it for you.
     pub dir: PathBuf,
+    /// The path of the directory where value data will be stored in.
+    ///
+    /// If it doesn't exist, Agate will try to create it for you.
     pub value_dir: PathBuf,
-    // TODO: docs
-    pub in_memory: bool,
-    pub sync_writes: bool,
-    pub read_only: bool,
 
-    // Memtable options
+    /*  Usually modified options. */
+    /// When set to true, the DB would call an additional sync after writes to flush
+    /// mmap buffer over to disk to survive hard reboots.
+    ///
+    /// The default value of `sync_writes` is false.
+    pub sync_writes: bool,
+    /// Sets how many versions to keep per key at most.
+    ///
+    /// The default value of `num_versions_to_keep` is 1.
+    pub num_versions_to_keep: usize,
+    /// When set to true, the DB will be opened on read-only mode.
+    ///
+    /// The default value of `read_only` is false.
+    pub read_only: bool,
+    /// When set to true, everything is stored in memory. No value/sst files are
+    /// created. In case of a crash all data will be lost.
+    ///
+    /// The default value of `in_memory` is false.
+    pub in_memory: bool,
+
+    /* Fine tuning options. */
+    /// Sets the maximum size in bytes for memtable.
+    ///
+    /// The default value of `mem_table_size` is 64 << 20 bytes.
     pub mem_table_size: u64,
+    /// Sets the maximum size in bytes for LSM table or file in the base level.
+    ///
+    /// The default value of `base_table_size` is 2 << 20 bytes.
     pub base_table_size: u64,
+    /// Sets the maximum size target for the base level.
+    ///
+    /// The default value of `base_level_size` is 10 << 20 bytes.
     pub base_level_size: u64,
+    /// Sets the ratio between the maximum sizes of contiguous levels in the LSM.
+    ///
+    /// The default value of `level_size_multiplier` is 10.
     pub level_size_multiplier: usize,
+    /// Sets the ratio between the maximum sizes of table in contiguous levels.
+    ///
+    /// The default value of `table_size_multiplier` is 2.
     pub table_size_multiplier: usize,
+    /// Sets the maximum number of levels of compaction allowed in the LSM.
+    ///
+    /// The default value of `max_levels` is 7.
     pub max_levels: usize,
 
+    /// Sets the threshold used to decide whether a value is stored directly in the
+    /// LSM tree or separately in the log value files.
+    ///
+    /// The default value of `value_threshold` is 1 << 10 bytes.
     pub value_threshold: usize,
+    /// Sets the maximum number of tables to keep in memory before stalling.
+    ///
+    /// The default value of `num_memtables` is 20.
     pub num_memtables: usize,
 
+    /// Sets the size of any block in SSTable.
+    ///
+    /// The default value of `block_size` is 4 << 10 bytes.
     pub block_size: usize,
+    /// Sets the false positive probability of the bloom filter in any SSTable.
+    ///
+    /// The default value of `bloom_false_positive` is 0.01.
     pub bloom_false_positive: f64,
 
+    /// Sets the maximum number of Level 0 tables before compaction starts.
+    ///
+    /// The default value of `num_level_zero_tables` is 5.
     pub num_level_zero_tables: usize,
+    /// Sets the number of Level 0 tables that once reached causes the DB to
+    /// stall until compaction succeeds.
+    ///
+    /// The default value of `num_level_zero_tables_stall` is 15.
     pub num_level_zero_tables_stall: usize,
 
+    /// Sets the maximum size of a single value log file.
+    ///
+    /// The default value of `value_log_file_size` is 1 << (30 - 1) bytes.
     pub value_log_file_size: u64,
+    /// Sets the maximum number of entries a value log file can hold approximately.
+    ///
+    /// The default value of `value_log_max_entries` is 1000000.
     pub value_log_max_entries: u32,
+
+    /// Sets the number of compaction workers to run concurrently.
+    ///
+    /// The default value of `num_compactors` is 4.
+    pub num_compactors: usize,
+    /// Indicates when the db should verify checksums for SSTable blocks.
+    ///
+    /// The default value of `checksum_mode` is [`ChecksumVerificationMode`].
+    pub checksum_mode: opt::ChecksumVerificationMode,
 }
 
 impl Default for AgateOptions {
@@ -35,25 +112,32 @@ impl Default for AgateOptions {
         Self {
             dir: PathBuf::new(),
             value_dir: PathBuf::new(),
-            // memtable options
+
+            sync_writes: false,
+            num_versions_to_keep: 1,
+            read_only: false,
+            in_memory: false,
+
             mem_table_size: 64 << 20,
             base_table_size: 2 << 20,
             base_level_size: 10 << 20,
-            table_size_multiplier: 2,
             level_size_multiplier: 10,
+            table_size_multiplier: 2,
             max_levels: 7,
-            // agate options
-            num_memtables: 20,
-            in_memory: false,
-            sync_writes: false,
-            read_only: false,
+
             value_threshold: 1 << 10,
-            value_log_file_size: 1 << (30 - 1),
-            value_log_max_entries: 1000000,
+            num_memtables: 20,
             block_size: 4 << 10,
             bloom_false_positive: 0.01,
+
             num_level_zero_tables: 5,
             num_level_zero_tables_stall: 15,
+
+            value_log_file_size: 1 << (30 - 1),
+            value_log_max_entries: 1000000,
+
+            num_compactors: 4,
+            checksum_mode: opt::ChecksumVerificationMode::NoVerification,
         }
         // TODO: add other options
     }
