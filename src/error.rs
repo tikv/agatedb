@@ -1,22 +1,28 @@
-use std::{io, ops::Range, result, sync::PoisonError};
+use std::{
+    io,
+    ops::Range,
+    result,
+    sync::{Arc, PoisonError},
+};
 
+use crossbeam_channel::SendError;
 use thiserror::Error;
 
 use crate::value::ValuePointer;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InvalidValuePointerError {
     pub vptr: ValuePointer,
     pub kvlen: usize,
     pub range: Range<u32>,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone)]
 pub enum Error {
     #[error("Invalid Configuration: {0}")]
     Config(String),
     #[error("IO error: {0}")]
-    Io(#[source] Box<io::Error>),
+    Io(#[source] Arc<io::Error>),
     #[error("Empty key")]
     EmptyKey,
     #[error("Too long: {0}")]
@@ -55,12 +61,14 @@ pub enum Error {
     JoinError(String),
     #[error("Txn is too big to fit into one request")]
     TxnTooBig,
+    #[error("Send error {0}")]
+    SendError(String),
 }
 
 impl From<io::Error> for Error {
     #[inline]
     fn from(e: io::Error) -> Error {
-        Error::Io(Box::new(e))
+        Error::Io(Arc::new(e))
     }
 }
 
@@ -89,6 +97,13 @@ impl<T: Sized> From<PoisonError<T>> for Error {
     #[inline]
     fn from(e: PoisonError<T>) -> Error {
         Error::PoisonError(e.to_string())
+    }
+}
+
+impl<T: Sized> From<SendError<T>> for Error {
+    #[inline]
+    fn from(e: SendError<T>) -> Error {
+        Error::SendError(e.to_string())
     }
 }
 

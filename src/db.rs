@@ -3,36 +3,67 @@ mod opt;
 use std::{
     collections::VecDeque,
     fs,
-    path::{Path, PathBuf},
-    sync::{atomic::AtomicUsize, Arc, RwLock},
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize},
+        Arc, RwLock,
+    },
 };
 
-use log::debug;
+use crossbeam_channel::{bounded, select, Receiver, Sender};
+use log::{debug, info};
 pub use opt::AgateOptions;
 use skiplist::Skiplist;
+use yatp::task::callback::Handle;
 
 use super::{
     memtable::{MemTable, MemTables},
     Result,
 };
 use crate::{
+    closer::Closer,
     entry::Entry,
+    levels::LevelsController,
+    manifest::ManifestFile,
+    ops::oracle::Oracle,
     util::make_comparator,
     value::{Request, Value},
+    value_log::ValueLog,
     wal::Wal,
+    Error,
 };
 
 const MEMTABLE_FILE_EXT: &str = ".mem";
+const KV_WRITE_CH_CAPACITY: usize = 1000;
+
+struct Closers {
+    writes: Closer,
+}
 
 pub struct Core {
+    closers: Closers,
+
     mts: RwLock<MemTables>,
-    opts: AgateOptions,
+
     next_mem_fid: AtomicUsize,
+
+    pub(crate) opts: AgateOptions,
+    pub(crate) manifest: Arc<ManifestFile>,
+    pub(crate) lvctl: LevelsController,
+    pub(crate) vlog: Arc<Option<ValueLog>>,
+    write_channel: (Sender<Request>, Receiver<Request>),
+
+    block_writes: AtomicBool,
+    is_closed: AtomicBool,
+
+    pub(crate) orc: Arc<Oracle>,
 }
 
 #[derive(Clone)]
 pub struct Agate {
-    core: Arc<Core>,
+    pub(crate) core: Arc<Core>,
+    closer: Closer,
+    pub(crate) pool: Arc<yatp::ThreadPool<yatp::task::callback::TaskCell>>,
 }
 
 impl Agate {
@@ -46,6 +77,10 @@ impl Agate {
         unimplemented!()
     }
     */
+
+    fn new(_core: Arc<Core>) -> Self {
+        unimplemented!()
+    }
 }
 
 impl Core {
@@ -145,7 +180,7 @@ impl Core {
     }
 
     /// Calling ensure_room_for_write requires locking whole memtable
-    pub fn ensure_room_for_write(&mut self) -> Result<()> {
+    pub fn ensure_room_for_write(&self) -> Result<()> {
         // we do not need to force flush memtable in in-memory mode as WAL is None.
         let mut mts = self.mts.write()?;
         let mut force_flush = false;
@@ -174,6 +209,174 @@ impl Core {
 
         Ok(())
     }
+
+    /// Write requests should be only called in one thread. By calling this
+    /// function, requests will be written into the LSM tree.
+    ///
+    // TODO: ensure only one thread calls this function by using Mutex.
+    pub fn write_requests(&self, mut requests: Vec<Request>) -> Result<()> {
+        if requests.is_empty() {
+            return Ok(());
+        }
+
+        let dones: Vec<_> = requests.iter().map(|x| x.done.clone()).collect();
+
+        let f = || {
+            if let Some(ref vlog) = *self.vlog {
+                vlog.write(&mut requests)?;
+            }
+
+            // TODO: Process subscriptions.
+
+            let mut cnt = 0;
+
+            // Writing to LSM.
+            for req in requests {
+                if req.entries.is_empty() {
+                    continue;
+                }
+
+                cnt += req.entries.len();
+
+                while let Err(_) = self.ensure_room_for_write() {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+
+                self.write_to_lsm(req)?;
+            }
+
+            debug!("{} entries written", cnt);
+            Ok(())
+        };
+
+        let result = f();
+
+        for done in dones {
+            if let Some(done) = done {
+                done.send(result.clone()).unwrap();
+            }
+        }
+
+        result
+    }
+
+    pub(crate) fn send_to_write_channel(
+        &self,
+        entries: Vec<Entry>,
+    ) -> Result<Receiver<Result<()>>> {
+        if self.block_writes.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Error::CustomError(
+                "Writes are blocked, possibly due to dropping all data or close".to_string(),
+            ));
+        }
+
+        let mut count = 0;
+        let mut size = 0;
+        for entry in &entries {
+            size += entry.estimate_size(self.opts.value_threshold) as u64;
+            count += 1;
+        }
+        if count >= self.opts.max_batch_count || size >= self.opts.max_batch_size {
+            return Err(Error::TxnTooBig);
+        }
+
+        let (tx, rx) = bounded(1);
+        // TODO: Get request from request pool.
+        let req = Request {
+            entries,
+            ptrs: vec![],
+            done: Some(tx),
+        };
+        self.write_channel.0.send(req)?;
+        Ok(rx)
+    }
+
+    fn do_writes(
+        &self,
+        closer: Closer,
+        core: Arc<Self>,
+        pool: Arc<yatp::ThreadPool<yatp::task::callback::TaskCell>>,
+    ) -> Result<()> {
+        info!("Start doing writes.");
+
+        let (pending_tx, pending_rx) = bounded(1);
+
+        const STATUS_WRITE: usize = 0;
+        const STATUS_CLOSED: usize = 1;
+
+        let mut reqs = Vec::with_capacity(10);
+
+        let status = loop {
+            let req;
+
+            // We wait until there is at least one request.
+            select! {
+                recv(core.write_channel.1) -> req_recv => {
+                    req = req_recv.unwrap();
+                }
+                recv(closer.get_receiver()) -> _ => {
+                    break STATUS_CLOSED;
+                }
+            }
+
+            reqs.push(req);
+
+            let status = loop {
+                if reqs.len() >= 3 * KV_WRITE_CH_CAPACITY {
+                    pending_tx.send(()).unwrap();
+                    break STATUS_WRITE;
+                }
+
+                select! {
+                    // Either push to pending, or continue to pick from write_channel.
+                    recv(core.write_channel.1) -> req => {
+                        let req = req.unwrap();
+                        reqs.push(req);
+                    }
+                    send(pending_tx, ()) -> _ => {
+                        break STATUS_WRITE;
+                    }
+                    recv(closer.get_receiver()) -> _ => {
+                        break STATUS_CLOSED;
+                    }
+                }
+            };
+
+            if status == STATUS_CLOSED {
+                break STATUS_CLOSED;
+            } else if status == STATUS_WRITE {
+                let rx = pending_rx.clone();
+                let reqs = std::mem::replace(&mut reqs, Vec::with_capacity(10));
+                let core = core.clone();
+                pool.spawn(move |_: &mut Handle<'_>| {
+                    if let Err(err) = core.write_requests(reqs) {
+                        log::error!("failed to write: {:?}", err);
+                    }
+                    rx.recv().ok();
+                })
+            }
+        };
+
+        if status == STATUS_CLOSED {
+            // All the pending request are drained.
+            // Don't close the write_channel, because it has be used in several places.
+            loop {
+                select! {
+                    recv(core.write_channel.1) -> req => {
+                        reqs.push(req.unwrap());
+                    }
+                    default => {
+                        if let Err(err) = core.write_requests(reqs) {
+                            log::error!("failed to write: {:?}", err);
+                        }
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        unreachable!()
+    }
 }
 
 impl Agate {
@@ -183,22 +386,6 @@ impl Agate {
 
     pub fn write_to_lsm(&self, request: Request) -> Result<()> {
         self.core.write_to_lsm(request)
-    }
-
-    pub fn open<P: AsRef<Path>>(mut opts: AgateOptions, path: P) -> Result<Self> {
-        opts.fix_options()?;
-
-        opts.dir = path.as_ref().to_path_buf();
-
-        if !opts.in_memory && !opts.dir.exists() {
-            fs::create_dir_all(&opts.dir)?;
-            // TODO: create wal path, acquire database path lock
-        }
-
-        // TODO: open or create manifest
-        Ok(Agate {
-            core: Arc::new(Core::new(opts)?),
-        })
     }
 }
 
