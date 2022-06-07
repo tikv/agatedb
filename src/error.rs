@@ -1,6 +1,11 @@
+use std::{
+    io,
+    ops::Range,
+    result,
+    sync::{Arc, PoisonError},
+};
+
 use crossbeam_channel::SendError;
-use std::sync::Arc;
-use std::{io, ops::Range, result, sync::PoisonError};
 use thiserror::Error;
 
 use crate::value::ValuePointer;

@@ -1,6 +1,5 @@
 use super::*;
-use crate::entry::Entry;
-use crate::opt;
+use crate::{entry::Entry, opt};
 
 #[derive(Clone)]
 pub struct AgateOptions {

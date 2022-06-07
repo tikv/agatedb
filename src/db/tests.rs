@@ -1,11 +1,12 @@
 use bytes::{Bytes, BytesMut};
+use tempdir::TempDir;
 use tempfile::tempdir;
 
 use super::*;
-use crate::entry::Entry;
-use crate::format::{append_ts, key_with_ts};
-
-use tempdir::TempDir;
+use crate::{
+    entry::Entry,
+    format::{append_ts, key_with_ts},
+};
 
 #[test]
 fn test_open_mem_tables() {

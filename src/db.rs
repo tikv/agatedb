@@ -1,15 +1,5 @@
 mod opt;
 
-use super::opt::build_table_options;
-use crate::format::get_ts;
-use crate::levels::LevelsController;
-use crate::util::has_any_prefixes;
-use crate::value_log::ValueLog;
-use crate::{Table, TableBuilder, TableOptions};
-use bytes::Bytes;
-use crossbeam_channel::{Receiver, Sender};
-use yatp::task::callback::Handle;
-
 use std::{
     collections::VecDeque,
     fs,
@@ -17,20 +7,28 @@ use std::{
     sync::{atomic::AtomicUsize, Arc, RwLock},
 };
 
-use crate::ops::oracle::Oracle;
+use bytes::Bytes;
+use crossbeam_channel::{Receiver, Sender};
 use log::debug;
 pub use opt::AgateOptions;
 use skiplist::Skiplist;
+use yatp::task::callback::Handle;
 
 use super::{
     manifest::ManifestFile,
     memtable::{MemTable, MemTables},
+    opt::build_table_options,
     Error, Result,
 };
 use crate::{
-    util::make_comparator,
+    format::get_ts,
+    levels::LevelsController,
+    ops::oracle::Oracle,
+    util::{has_any_prefixes, make_comparator},
     value::{self, Request, Value},
+    value_log::ValueLog,
     wal::Wal,
+    Table, TableBuilder, TableOptions,
 };
 
 const MEMTABLE_FILE_EXT: &str = ".mem";
