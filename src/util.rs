@@ -1,4 +1,12 @@
-use std::{cmp, fs::File, path::Path, ptr, sync::atomic::AtomicBool};
+use std::{
+    cmp,
+    collections::hash_map::DefaultHasher,
+    fs::File,
+    hash::{Hash, Hasher},
+    path::Path,
+    ptr,
+    sync::atomic::AtomicBool,
+};
 
 use bytes::Bytes;
 pub use skiplist::{FixedLengthSuffixComparator as Comparator, KeyComparator};
@@ -94,6 +102,12 @@ pub fn panic_if_fail() {
     if FAILED.load(std::sync::atomic::Ordering::SeqCst) {
         panic!("failed");
     }
+}
+
+pub fn default_hash(h: &impl Hash) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    h.hash(&mut hasher);
+    hasher.finish()
 }
 
 #[cfg(test)]

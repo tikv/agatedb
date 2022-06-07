@@ -1,3 +1,5 @@
+use skiplist::MAX_NODE_SIZE;
+
 use super::*;
 use crate::opt;
 
@@ -117,6 +119,15 @@ pub struct AgateOptions {
     ///
     /// The default value of `managed_txns` is false.
     pub managed_txns: bool,
+
+    /// Max entries in batch.
+    ///
+    /// The default value of `max_batch_count` is `max_batch_size` / `MAX_NODE_SIZE`.
+    pub max_batch_count: u64,
+    /// Max batch size in bytes.
+    ///
+    /// The default value of `max_batch_size` is (15 * `mem_table_size`) / 100.
+    pub max_batch_size: u64,
 }
 
 impl Default for AgateOptions {
@@ -154,6 +165,9 @@ impl Default for AgateOptions {
             detect_conflicts: true,
 
             managed_txns: false,
+
+            max_batch_count: 0,
+            max_batch_size: 0,
         }
         // TODO: add other options
     }
@@ -165,6 +179,9 @@ impl AgateOptions {
             // TODO: find a way to check if path is set, if set, then panic with ConfigError
             self.sync_writes = false;
         }
+
+        self.max_batch_size = (15 * self.mem_table_size) / 100;
+        self.max_batch_count = self.max_batch_size / MAX_NODE_SIZE as u64;
 
         Ok(())
     }

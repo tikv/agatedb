@@ -70,7 +70,7 @@ impl CommitInfo {
 }
 
 pub struct Oracle {
-    is_managed: bool,
+    pub(crate) is_managed: bool,
     /// Determines if the txns should be checked for conflicts.
     detect_conflicts: bool,
 
@@ -173,7 +173,7 @@ impl Oracle {
         }
     }
 
-    pub(crate) fn new_commit_ts(&mut self, txn: &mut Transaction) -> (u64, bool) {
+    pub(crate) fn new_commit_ts(&self, txn: &mut Transaction) -> (u64, bool) {
         let mut commit_info = self.commit_info.lock().unwrap();
 
         if commit_info.has_conflict(txn) {
@@ -206,7 +206,7 @@ impl Oracle {
         }
     }
 
-    fn done_read(&self, txn: &mut Transaction) {
+    pub(crate) fn done_read(&self, txn: &mut Transaction) {
         if !txn.done_read {
             txn.done_read = true;
             self.read_mark.done(txn.read_ts);
@@ -265,11 +265,11 @@ mod tests {
     #[test]
     fn test_detect_confict() {
         let opts = AgateOptions::default();
-        let mut oracle = Oracle::new(&opts);
+        let oracle = Oracle::new(&opts);
 
         oracle.increment_next_ts();
 
-        let mut txn = Transaction::default();
+        let mut txn = Transaction::new(&opts);
         txn.read_ts = 1;
         txn.conflict_keys = [11u64, 22, 33].iter().cloned().collect();
 
@@ -296,9 +296,9 @@ mod tests {
             managed_txns: true,
             ..Default::default()
         };
-        let mut oracle = Oracle::new(&opts);
+        let oracle = Oracle::new(&opts);
 
-        let mut txn = Transaction::default();
+        let mut txn = Transaction::new(&opts);
 
         assert_eq!(oracle.new_commit_ts(&mut txn), (0, false));
         assert_eq!(oracle.commit_info.lock().unwrap().committed_txns.len(), 1);

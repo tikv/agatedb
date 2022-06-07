@@ -53,6 +53,8 @@ pub enum Error {
     PoisonError(String),
     #[error("Join Error")]
     JoinError(String),
+    #[error("Txn is too big to fit into one request")]
+    TxnTooBig,
 }
 
 impl From<io::Error> for Error {
