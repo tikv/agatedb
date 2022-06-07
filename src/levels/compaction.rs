@@ -98,12 +98,12 @@ impl KeyRange {
 
     /// Returns `true` if current key range is infinite
     pub fn is_inf(&self) -> bool {
-        return matches!(self, KeyRange::Inf);
+        matches!(self, KeyRange::Inf)
     }
 
     /// Returns `true` if current key range is empty
     pub fn is_empty(&self) -> bool {
-        return matches!(self, KeyRange::Empty);
+        matches!(self, KeyRange::Empty)
     }
 }
 

@@ -24,14 +24,18 @@ jobs:
       - uses: actions/cache@v2
         with:
           path: |
-            ~/.cargo/registry
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
             ~/.cargo/git
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
             target
           key: ${{ runner.os }}-cargo-test
       - uses: actions-rs/toolchain@v1
         name: Setup Cargo Toolchain 🛎️
         with:
-          components: rustfmt, clippy
+          components: rustfmt, clippy, llvm-tools-preview
           toolchain: nightly
           default: true
       - name: Check Code Format 🔧
@@ -40,8 +44,14 @@ jobs:
           git diff --quiet
       - name: Linting The Code 🩹
         run: make clippy
-      - name: Running Tests 🚀
-        run: make test
+      - uses: taiki-e/install-action@cargo-llvm-cov      
+      - name: Running Tests With Code Coverage 🚀
+        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+      - name: Upload Coverage To Codecov ⬆️
+        uses: codecov/codecov-action@v1 
+        with:
+          files: lcov.info
+          fail_ci_if_error: true
   sanitizer_test:
     name: Test with Sanitizer
     runs-on: ubuntu-latest
@@ -54,8 +64,12 @@ jobs:
       - uses: actions/cache@v2
         with:
           path: |
-            ~/.cargo/registry
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
             ~/.cargo/git
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
             target
           key: ${{ runner.os }}-${{ matrix.sanitizer }}-cargo-sanitizer-test
       - uses: actions-rs/toolchain@v1

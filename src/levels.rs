@@ -607,7 +607,7 @@ impl Core {
 
         let mut out = vec![];
 
-        for table in this_level.tables.iter() {
+        for table in &this_level.tables {
             if table.size() >= 2 * compact_def.targets.file_size[0] {
                 // File already big, don't include it.
                 continue;
@@ -668,7 +668,7 @@ impl Core {
         } else {
             let mut kr = KeyRange::default();
             // Start from the oldest file first.
-            for table in this_level.tables.iter() {
+            for table in &this_level.tables {
                 let dkr = get_key_range_single(table);
                 if kr.overlaps_with(&dkr) {
                     out.push(table.clone());
@@ -928,7 +928,8 @@ impl Core {
             if level < start_level {
                 continue;
             }
-            match handler.read()?.get(key) {
+            let v = handler.read()?.get(key);
+            match v {
                 Ok(value) => {
                     if value.value.is_empty() && value.meta == 0 {
                         continue;
