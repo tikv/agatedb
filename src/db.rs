@@ -227,6 +227,7 @@ impl Core {
                 if value.version == version {
                     return Ok(value);
                 }
+                // max_vs.version == 0 means it is not assigned a value yet.
                 if max_value.version == 0 || max_value.version < value.version {
                     max_value = value;
                 }
@@ -484,87 +485,3 @@ impl Agate {
 
 #[cfg(test)]
 pub(crate) mod tests;
-// {
-//     use super::*;
-//     use crate::format::key_with_ts;
-//     use bytes::BytesMut;
-//     use tempdir::TempDir;
-//     use crate::entry::Entry;
-
-//     #[test]
-//     fn test_build() {
-//         with_agate_test(|_| {});
-//     }
-
-//     pub fn helper_dump_dir(path: &Path) {
-//         for entry in fs::read_dir(path).unwrap() {
-//             let entry = entry.unwrap();
-//             let path = entry.path();
-//             if path.is_file() {
-//                 println!("{:?}", path);
-//             }
-//         }
-//     }
-
-//     fn with_agate_test(f: impl FnOnce(Agate) -> ()) {
-//         let tmp_dir = TempDir::new("agatedb").unwrap();
-//         let agate = AgateOptions::default()
-//             .create()
-//             .in_memory(false)
-//             .value_log_file_size(4096)
-//             .open(&tmp_dir)
-//             .unwrap();
-//         f(agate);
-//         helper_dump_dir(tmp_dir.path());
-//         tmp_dir.close().unwrap();
-//     }
-
-//     #[test]
-//     fn test_simple_get_put() {
-//         with_agate_test(|agate| {
-//             let key = key_with_ts(BytesMut::from("2333"), 0);
-//             let value = Bytes::from("2333333333333333");
-//             let req = Request {
-//                 entries: vec![Entry::new(key.clone(), value.clone())],
-//                 ptrs: vec![],
-//                 done: None,
-//             };
-//             agate.write_to_lsm(req).unwrap();
-//             let value = agate.get(&key).unwrap();
-//             assert_eq!(value.value, Bytes::from("2333333333333333"));
-//         });
-//     }
-
-//     fn generate_requests(n: usize) -> Vec<Request> {
-//         (0..n)
-//             .map(|i| Request {
-//                 entries: vec![Entry::new(
-//                     key_with_ts(BytesMut::from(format!("{:08x}", i).as_str()), 0),
-//                     Bytes::from(i.to_string()),
-//                 )],
-//                 ptrs: vec![],
-//                 done: None,
-//             })
-//             .collect()
-//     }
-
-//     fn verify_requests(n: usize, agate: &Agate) {
-//         for i in 0..n {
-//             let value = agate
-//                 .get(&key_with_ts(
-//                     BytesMut::from(format!("{:08x}", i).as_str()),
-//                     0,
-//                 ))
-//                 .unwrap();
-//             assert_eq!(value.value, i.to_string());
-//         }
-//     }
-
-//     #[test]
-//     fn test_flush_memtable() {
-//         with_agate_test(|agate| {
-//             agate.write_requests(generate_requests(2000)).unwrap();
-//             verify_requests(2000, &agate);
-//         });
-//     }
-// }
