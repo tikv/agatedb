@@ -9,7 +9,7 @@ use bytes::*;
 use skiplist::*;
 use yatp::task::callback::Handle;
 
-const ARENA_SIZE: u32 = 1 << 20;
+const ARENA_SIZE: usize = 1 << 20;
 
 fn new_value(v: usize) -> Bytes {
     Bytes::from(format!("{:05}", v))
@@ -63,7 +63,7 @@ fn test_basic() {
     }
 }
 
-fn test_concurrent_basic(n: usize, cap: u32, value_len: usize) {
+fn test_concurrent_basic(n: usize, cap: usize, value_len: usize) {
     let pool = yatp::Builder::new("concurrent_basic").build_callback_pool();
     let comp = FixedLengthSuffixComparator::new(8);
     let list = Skiplist::with_capacity(comp, cap);

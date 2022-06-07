@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    iter::FromIterator,
     path::{Path, PathBuf},
     sync::{atomic::AtomicU32, Arc, RwLock},
 };
@@ -153,20 +154,18 @@ impl ValueLog {
     /// Gets sorted valid vlog files' ID set.
     fn sorted_fids(&self) -> Vec<u32> {
         let core = self.core.read().unwrap();
-        let mut to_be_deleted = HashSet::new();
-        for fid in &core.files_to_delete {
-            to_be_deleted.insert(*fid);
-        }
-        let mut result = vec![];
-        for fid in core.files_map.keys() {
-            if !to_be_deleted.contains(fid) {
-                result.push(*fid);
-            }
-        }
+        let to_be_deleted: HashSet<u32> = HashSet::from_iter(core.files_to_delete.iter().cloned());
+        let mut result = core
+            .files_map
+            .keys()
+            .into_iter()
+            .filter(|k| !to_be_deleted.contains(k))
+            .cloned()
+            .collect::<Vec<u32>>();
         // Hold read lock as short as we can
         drop(core);
 
-        // cargo clippy suggests using `sort_ubstable`
+        // cargo clippy suggests using `sort_unstable`
         result.sort_unstable();
         result
     }
