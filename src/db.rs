@@ -221,7 +221,6 @@ impl Core {
 
             if let Some(value_data) = table.get(key) {
                 value.decode(value_data.clone());
-                eprintln!("found value in skiplist, value {:?}, version {}", value, version);
                 if value.meta == 0 && value.value.is_empty() {
                     continue;
                 }
@@ -234,7 +233,6 @@ impl Core {
             }
         }
 
-        eprintln!("get key from lvctl {:?}", key);
         // max_value will be used in level controller
         self.lvctl.get(&key, max_value, 0)
     }
@@ -254,7 +252,6 @@ impl Core {
         for entry in request.entries.into_iter() {
             if self.opts.skip_vlog(&entry) {
                 // deletion, tombstone, and small values
-                eprintln!("entry version: {}", entry.version);
                 mut_table.put(
                     entry.key,
                     Value {
@@ -308,8 +305,6 @@ impl Core {
             return Ok(());
         }
 
-        eprintln!("send flush task");
-
         match self
             .flush_channel
             .0
@@ -354,7 +349,6 @@ impl Core {
 
     /// handle_flush_task must run serially.
     fn handle_flush_task(&self, ft: FlushTask) -> Result<()> {
-        eprintln!("flush task table id {}", ft.mt.id());
         if ft.mt.skl.is_empty() {
             return Ok(());
         }
@@ -394,7 +388,6 @@ impl Core {
                         let mut mts = self.mts.write()?;
                         assert_eq!(flush_id, mts.table_imm(0).id());
                         mts.pop_imm();
-                        eprintln!("flush memtable to disk success {}", flush_id);
                     }
                     Err(err) => {
                         eprintln!("error while flushing memtable to disk: {:?}", err);
