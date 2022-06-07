@@ -2,7 +2,7 @@ use std::{
     collections::VecDeque,
     mem::{self, ManuallyDrop, MaybeUninit},
     ptr,
-    sync::{atomic::AtomicBool, RwLock, Arc},
+    sync::{atomic::AtomicBool, Arc, RwLock},
 };
 
 use bytes::Bytes;
@@ -38,31 +38,6 @@ pub struct MemTable {
 }
 
 impl MemTable {
-    /*
-    pub fn with_capacity(table_size: u32, max_count: usize) -> MemTable {
-        let c = make_comparator();
-        MemTable {
-            mutable: Skiplist::with_capacity(c, table_size),
-            immutable: VecDeque::with_capacity(max_count - 1),
-        }
-    }
-
-    pub fn view(&self) -> MemTableView {
-        // Maybe flush is better.
-        assert!(self.immutable.len() + 1 <= 20);
-        let mut array: [MaybeUninit<Skiplist<Flsc>>; 20] =
-            unsafe { MaybeUninit::uninit().assume_init() };
-        array[0] = MaybeUninit::new(self.mutable.clone());
-        for (i, s) in self.immutable.iter().enumerate() {
-            array[i + 1] = MaybeUninit::new(s.clone());
-        }
-        MemTableView {
-            tables: unsafe { ManuallyDrop::new(mem::transmute(array)) },
-            len: self.immutable.len() + 1,
-        }
-    }
-    */
-
     pub fn new(id: usize, skl: Skiplist<Comparator>, wal: Option<Wal>, opt: AgateOptions) -> Self {
         Self {
             skl,
@@ -175,7 +150,6 @@ impl Drop for MemTable {
     fn drop(&mut self) {
         crate::util::no_fail(self.drop_no_fail(), "MemTable::drop");
     }
-    
 }
 
 pub struct MemTablesView {

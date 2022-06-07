@@ -2,8 +2,8 @@ use bytes::{Bytes, BytesMut};
 use tempfile::tempdir;
 
 use super::*;
-use crate::format::{append_ts, key_with_ts};
 use crate::entry::Entry;
+use crate::format::{append_ts, key_with_ts};
 
 use tempdir::TempDir;
 

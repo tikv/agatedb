@@ -17,9 +17,9 @@ use std::{
     sync::{atomic::AtomicUsize, Arc, RwLock},
 };
 
-pub use opt::AgateOptions;
 use crate::ops::oracle::Oracle;
 use log::debug;
+pub use opt::AgateOptions;
 use skiplist::Skiplist;
 
 use super::{
@@ -249,7 +249,7 @@ impl Core {
 
         let memtables = self.mts.read()?;
         let mut_table = memtables.table_mut();
-        
+
         for entry in request.entries.into_iter() {
             if self.opts.skip_vlog(&entry) {
                 // deletion, tombstone, and small values
