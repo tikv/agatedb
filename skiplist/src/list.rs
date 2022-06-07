@@ -2,7 +2,7 @@ use std::{
     mem, ptr,
     ptr::NonNull,
     sync::{
-        atomic::{AtomicU32, AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering},
         Arc,
     },
     u32,
@@ -22,16 +22,15 @@ pub struct Node {
     key: Bytes,
     value: Bytes,
     height: usize,
-    tower: [AtomicU32; MAX_HEIGHT as usize],
+    tower: [AtomicUsize; MAX_HEIGHT],
 }
 
 impl Node {
-    fn alloc(arena: &Arena, key: Bytes, value: Bytes, height: usize) -> u32 {
-        let align = mem::align_of::<Node>();
+    fn alloc(arena: &Arena, key: Bytes, value: Bytes, height: usize) -> usize {
         let size = mem::size_of::<Node>();
         // Not all values in Node::tower will be utilized.
-        let not_used = (MAX_HEIGHT as usize - height as usize - 1) * mem::size_of::<AtomicU32>();
-        let node_offset = arena.alloc(align, size - not_used);
+        let not_used = (MAX_HEIGHT as usize - height as usize - 1) * mem::size_of::<AtomicUsize>();
+        let node_offset = arena.alloc(size - not_used);
         unsafe {
             let node_ptr: *mut Node = arena.get_mut(node_offset);
             let node = &mut *node_ptr;
@@ -43,7 +42,7 @@ impl Node {
         node_offset
     }
 
-    fn next_offset(&self, height: usize) -> u32 {
+    fn next_offset(&self, height: usize) -> usize {
         self.tower[height].load(Ordering::SeqCst)
     }
 }
@@ -61,7 +60,7 @@ pub struct Skiplist<C> {
 }
 
 impl<C> Skiplist<C> {
-    pub fn with_capacity(c: C, arena_size: u32) -> Skiplist<C> {
+    pub fn with_capacity(c: C, arena_size: usize) -> Skiplist<C> {
         let arena = Arena::with_capacity(arena_size);
         let head_offset = Node::alloc(&arena, Bytes::new(), Bytes::new(), MAX_HEIGHT - 1);
         let head = unsafe { NonNull::new_unchecked(arena.get_mut(head_offset)) };
@@ -339,7 +338,7 @@ impl<C: KeyComparator> Skiplist<C> {
         }
     }
 
-    pub fn mem_size(&self) -> u32 {
+    pub fn mem_size(&self) -> usize {
         self.core.arena.len()
     }
 }

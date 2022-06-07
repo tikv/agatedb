@@ -1,11 +1,7 @@
 
 SANITIZER_FLAGS=-Zsanitizer=address
 
-unset-override:
-	@# unset first in case of any previous overrides
-	@if rustup override list | grep `pwd` > /dev/null; then rustup override unset; fi
-
-pre-format: unset-override
+pre-format:
 	@rustup component add rustfmt
 	@cargo install -q cargo-sort 
 

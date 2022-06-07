@@ -1,0 +1,14 @@
+comment:
+  layout: "diff"
+  behavior: default
+
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 3%
+    patch:
+      default:
+        target: auto
+        threshold: 3%
