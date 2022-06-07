@@ -25,8 +25,11 @@ jobs:
         with:
           path: |
             ~/.cargo/bin
-            ~/.cargo/registry
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
             ~/.cargo/git
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
             target
           key: ${{ runner.os }}-cargo-test
       - uses: actions-rs/toolchain@v1
@@ -61,8 +64,12 @@ jobs:
       - uses: actions/cache@v2
         with:
           path: |
-            ~/.cargo/registry
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
             ~/.cargo/git
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
             target
           key: ${{ runner.os }}-${{ matrix.sanitizer }}-cargo-sanitizer-test
       - uses: actions-rs/toolchain@v1
