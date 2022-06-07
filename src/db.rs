@@ -62,7 +62,7 @@ impl Core {
         let path = Self::memtable_file_path(opts, file_id);
         let c = make_comparator();
         // TODO: refactor skiplist to use `u64`
-        let skl = Skiplist::with_capacity(c, opts.arena_size() as u32);
+        let skl = Skiplist::with_capacity(c, opts.arena_size() as usize);
 
         // We don't need to create the WAL for the skiplist in in-memory mode so return the memtable.
         if opts.in_memory {
