@@ -56,7 +56,7 @@ fn test_ensure_room_for_write() {
     // 2*value_log_file_size - MAX_HEADER_SIZE.
     opts.value_log_file_size = 25;
 
-    let mut core = Core::new(opts).unwrap();
+    let core = Core::new(opts).unwrap();
 
     {
         let mts = core.mts.read().unwrap();
@@ -106,7 +106,7 @@ pub fn helper_dump_dir(path: &Path) {
     }
 }
 
-fn with_agate_test(f: impl FnOnce(Agate) -> ()) {
+fn with_agate_test(f: impl FnOnce(Agate)) {
     let tmp_dir = TempDir::new("agatedb").unwrap();
     let agate = AgateOptions::default()
         .create()
@@ -125,7 +125,7 @@ fn test_simple_get_put() {
         let key = key_with_ts(BytesMut::from("2333"), 0);
         let value = Bytes::from("2333333333333333");
         let req = Request {
-            entries: vec![Entry::new(key.clone(), value.clone())],
+            entries: vec![Entry::new(key.clone(), value)],
             ptrs: vec![],
             done: None,
         };

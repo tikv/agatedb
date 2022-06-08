@@ -344,8 +344,7 @@ impl ValueLog {
                 vptr: value_ptr,
                 kvlen: kv.len(),
                 range: header.key_len..header.key_len + header.value_len,
-            }
-            .into());
+            });
         }
         Ok(original_buf)
     }

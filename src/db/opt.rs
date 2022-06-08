@@ -110,10 +110,10 @@ pub struct AgateOptions {
 
     pub detect_conflicts: bool,
 
-    pub(crate) managed_txns: bool,
+    pub managed_txns: bool,
 
-    pub(crate) max_batch_count: u64,
-    pub(crate) max_batch_size: u64,
+    pub max_batch_count: u64,
+    pub max_batch_size: u64,
 }
 
 impl Default for AgateOptions {
@@ -212,13 +212,14 @@ impl AgateOptions {
         self.dir = path.as_ref().to_path_buf();
         self.value_dir = self.dir.clone();
 
-        if !self.in_memory {
-            if !self.dir.exists() {
-                if !self.create_if_not_exists {
-                    return Err(Error::Config(format!("{:?} doesn't exist", self.dir)));
-                }
-                fs::create_dir_all(&self.dir)?;
+        if !self.in_memory && !self.dir.exists() {
+            if !self.create_if_not_exists {
+                return Err(Error::Config(format!("{:?} doesn't exist", self.dir)));
             }
+            fs::create_dir_all(&self.dir)?;
+        }
+
+        if !self.in_memory {
             // TODO: create wal path, acquire database path lock
         }
 

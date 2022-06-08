@@ -106,7 +106,7 @@ impl Core {
         // TODO: let orc = Arc::new(Oracle::new(opts.managed_txns, opts.detect_conflicts));
         let orc = Arc::new(Oracle::default());
         let manifest = Arc::new(ManifestFile::open_or_create_manifest_file(&opts)?);
-        let lvctl = LevelsController::new(opts.clone(), manifest.clone(), orc.clone())?;
+        let lvctl = LevelsController::new(opts.clone(), manifest, orc)?;
 
         let (imm_tables, mut next_mem_fid) = Self::open_mem_tables(&opts)?;
         let mt = Self::open_mem_table(&opts, next_mem_fid)?;
@@ -173,7 +173,7 @@ impl Core {
             }
         }
 
-        fids.sort();
+        fids.sort_unstable();
 
         for fid in &fids {
             let memtable = Self::open_mem_table(opts, *fid)?;
@@ -233,7 +233,7 @@ impl Core {
         }
 
         // max_value will be used in level controller
-        self.lvctl.get(&key, max_value, 0)
+        self.lvctl.get(key, max_value, 0)
     }
 
     /// `write_to_lsm` will only be called in write thread (or write coroutine).
@@ -288,10 +288,8 @@ impl Core {
         let mut mts = self.mts.write()?;
         let mut force_flush = false;
 
-        if !force_flush && !self.opts.in_memory {
-            if mts.table_mut().should_flush_wal()? {
-                force_flush = true;
-            }
+        if !force_flush && !self.opts.in_memory && mts.table_mut().should_flush_wal()? {
+            force_flush = true;
         }
 
         let mem_size = mts.table_mut().skl.mem_size();
@@ -307,7 +305,7 @@ impl Core {
         match self
             .flush_channel
             .0
-            .try_send(Some(FlushTask::new(mts.table_mut().clone())))
+            .try_send(Some(FlushTask::new(mts.table_mut())))
         {
             Ok(_) => {
                 let memtable = self.new_mem_table()?;
@@ -360,18 +358,16 @@ impl Core {
         }
 
         let file_id = self.lvctl.reserve_file_id();
-        let table;
-
-        if self.opts.in_memory {
+        let table = if self.opts.in_memory {
             let data = builder.finish();
-            table = Table::open_in_memory(data, file_id, table_opts)?;
+            Table::open_in_memory(data, file_id, table_opts)?
         } else {
-            table = Table::create(
+            Table::create(
                 &crate::table::new_filename(file_id, &self.opts.dir),
                 builder.finish(),
                 table_opts,
-            )?;
-        }
+            )?
+        };
 
         self.lvctl.add_l0_table(table)?;
 
@@ -405,6 +401,7 @@ impl Core {
     /// function, requests will be written into the LSM tree.
     ///
     /// TODO: ensure only one thread calls this function by using Mutex.
+    #[allow(clippy::needless_collect)]
     pub fn write_requests(&self, mut requests: Vec<Request>) -> Result<()> {
         if requests.is_empty() {
             return Ok(());
@@ -412,7 +409,7 @@ impl Core {
 
         let dones: Vec<_> = requests.iter().map(|x| x.done.clone()).collect();
 
-        let f = || {
+        let write = || {
             // TODO: process subscriptions
 
             if let Some(ref vlog) = *self.vlog {
@@ -428,7 +425,7 @@ impl Core {
                 }
                 cnt += req.entries.len();
 
-                while let Err(_) = self.ensure_room_for_write() {
+                while self.ensure_room_for_write().is_err() {
                     std::thread::sleep(std::time::Duration::from_millis(10));
                     // eprintln!("wait for room... {:?}", err)
                 }
@@ -441,12 +438,10 @@ impl Core {
             Ok(())
         };
 
-        let result = f();
+        let result = write();
 
-        for done in dones {
-            if let Some(done) = done {
-                done.send(result.clone()).unwrap();
-            }
+        for done in dones.into_iter().flatten() {
+            done.send(result.clone()).unwrap();
         }
 
         result
