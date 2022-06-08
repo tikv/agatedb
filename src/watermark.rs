@@ -29,14 +29,14 @@ struct Mark {
     done: bool,
 }
 
-struct Core {
+struct WaterMarkInner {
     done_until: AtomicU64,
     last_index: AtomicU64,
     pub name: String,
     mark_ch: Receiver<Mark>,
 }
 
-impl Core {
+impl WaterMarkInner {
     /// Processes the `mark_ch`. This is not thread-safe, so only run one thread for `process`.
     /// One is sufficient, because all thread ops use purely memory and cpu.
     ///
@@ -164,7 +164,7 @@ impl Core {
 /// number of threads needed.
 #[derive(Clone)]
 pub struct WaterMark {
-    core: Arc<Core>,
+    core: Arc<WaterMarkInner>,
     tx: Sender<Mark>,
 }
 
@@ -172,7 +172,7 @@ impl WaterMark {
     pub fn new(name: String) -> Self {
         let (tx, rx) = bounded(100);
         Self {
-            core: Arc::new(Core {
+            core: Arc::new(WaterMarkInner {
                 mark_ch: rx,
                 name,
                 done_until: AtomicU64::new(0),
