@@ -138,7 +138,7 @@ impl WaterMarkInner {
                     } else {
                         match &mark.index {
                             Index::Single(index) => process_one(*index, mark.done),
-                            Index::Multiple(index) => for index in index {
+                            Index::Multiple(indices) => for index in indices {
                                 process_one(*index, mark.done);
                             }
                         }
