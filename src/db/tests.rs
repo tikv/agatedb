@@ -106,11 +106,11 @@ pub fn helper_dump_dir(path: &Path) {
     }
 }
 
-fn with_agate_test(f: impl FnOnce(Agate)) {
+fn with_agate_test(in_memory: bool, f: impl FnOnce(Agate)) {
     let tmp_dir = TempDir::new("agatedb").unwrap();
     let agate = AgateOptions::default()
         .create()
-        .in_memory(false)
+        .in_memory(in_memory)
         .value_log_file_size(4096)
         .open(&tmp_dir)
         .unwrap();
@@ -121,7 +121,7 @@ fn with_agate_test(f: impl FnOnce(Agate)) {
 
 #[test]
 fn test_simple_get_put() {
-    with_agate_test(|agate| {
+    with_agate_test(false, |agate| {
         let key = key_with_ts(BytesMut::from("2333"), 0);
         let value = Bytes::from("2333333333333333");
         let req = Request {
@@ -162,9 +162,16 @@ fn verify_requests(n: usize, agate: &Agate) {
 
 #[test]
 fn test_flush_memtable() {
-    with_agate_test(|agate| {
+    with_agate_test(false, |agate| {
         agate.write_requests(generate_requests(2000)).unwrap();
-        std::thread::sleep(std::time::Duration::from_secs(3));
         verify_requests(2000, &agate);
+    });
+}
+
+#[test]
+fn test_in_memory_agate() {
+    with_agate_test(true, |agate| {
+        agate.write_requests(generate_requests(10)).unwrap();
+        verify_requests(10, &agate);
     });
 }
