@@ -36,7 +36,7 @@ jobs:
         name: Setup Cargo Toolchain 🛎️
         with:
           components: rustfmt, clippy, llvm-tools-preview
-          toolchain: nightly
+          toolchain: stable
           default: true
       - name: Check Code Format 🔧
         run: |
@@ -84,4 +84,5 @@ jobs:
           command: test
           args: --all-features -Zbuild-std --target x86_64-unknown-linux-gnu
         env:
+          TSAN_OPTIONS: "suppressions=.github/workflows/tsan"
           RUSTFLAGS: "-Zsanitizer=${{ matrix.sanitizer }}"
