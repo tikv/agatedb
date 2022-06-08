@@ -63,6 +63,10 @@ pub enum Error {
     TxnTooBig,
     #[error("Send error {0}")]
     SendError(String),
+    #[error("Key not found")]
+    KeyNotFound(()),
+    #[error("This transaction has been discarded. Create a new one")]
+    DiscardedTxn,
 }
 
 impl From<io::Error> for Error {

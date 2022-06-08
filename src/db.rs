@@ -210,6 +210,10 @@ impl Core {
         Ok(())
     }
 
+    pub(crate) fn get_mem_tables(&self) -> Vec<Arc<MemTable>> {
+        unimplemented!()
+    }
+
     /// Write requests should be only called in one thread. By calling this
     /// function, requests will be written into the LSM tree.
     ///
@@ -219,6 +223,7 @@ impl Core {
             return Ok(());
         }
 
+        #[allow(clippy::needless_collect)]
         let dones: Vec<_> = requests.iter().map(|x| x.done.clone()).collect();
 
         let f = || {
@@ -238,7 +243,7 @@ impl Core {
 
                 cnt += req.entries.len();
 
-                while let Err(_) = self.ensure_room_for_write() {
+                while self.ensure_room_for_write().is_err() {
                     std::thread::sleep(std::time::Duration::from_millis(10));
                 }
 
@@ -251,10 +256,8 @@ impl Core {
 
         let result = f();
 
-        for done in dones {
-            if let Some(done) = done {
-                done.send(result.clone()).unwrap();
-            }
+        for done in dones.into_iter().flatten() {
+            done.send(result.clone()).unwrap();
         }
 
         result

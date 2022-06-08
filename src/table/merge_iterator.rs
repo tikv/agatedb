@@ -3,8 +3,10 @@ use enum_dispatch::enum_dispatch;
 
 use super::{concat_iterator::ConcatIterator, TableIterator};
 use crate::{
+    iterator::SkiplistIterator,
     iterator_trait::AgateIterator,
-    util::{KeyComparator, COMPARATOR},
+    ops::transaction::PendingWritesIterator,
+    util::{Comparator, KeyComparator, COMPARATOR},
     Value,
 };
 
@@ -16,6 +18,8 @@ pub enum Iterators {
     Merge(MergeIterator),
     Concat(ConcatIterator),
     Table(TableIterator),
+    Txn(PendingWritesIterator),
+    Skiplist(SkiplistIterator<Comparator>),
     #[cfg(test)]
     Vec(tests::VecIterator),
 }

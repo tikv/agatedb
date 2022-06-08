@@ -12,6 +12,7 @@ use skiplist::KeyComparator;
 use crate::{
     entry::Entry,
     format::{append_ts, user_key},
+    iterator::{is_deleted_or_expired, Item},
     key_with_ts,
     util::{default_hash, COMPARATOR},
     AgateIterator, Error, Result, Value,
@@ -115,9 +116,7 @@ impl Transaction {
             ));
         }
         if self.discarded {
-            return Err(Error::CustomError(
-                "This transaction has been discarded. Create a new one.".to_string(),
-            ));
+            return Err(Error::DiscardedTxn);
         }
         if e.key.is_empty() {
             return Err(Error::EmptyKey);
@@ -193,8 +192,61 @@ impl Transaction {
     }
 
     /// Looks for key and returns corresponding Item.
-    pub(crate) fn get(&self, _key: &Bytes) -> Result<Value> {
-        unimplemented!()
+    pub(crate) fn get(self: Arc<Self>, key: &Bytes) -> Result<Item> {
+        if key.is_empty() {
+            return Err(Error::EmptyKey);
+        } else if self.discarded {
+            return Err(Error::DiscardedTxn);
+        }
+
+        // TODO: Check if the key is banned.
+
+        let mut item = Item::new(self.clone());
+
+        if self.update {
+            if let Some(entry) = self.pending_writes.get(key) {
+                if key == &entry.key {
+                    if is_deleted_or_expired(entry.meta, entry.expires_at) {
+                        return Err(Error::KeyNotFound(()));
+                    }
+                    item.meta = entry.meta;
+                    item.set_value(entry.value.clone());
+                    item.user_meta = entry.user_meta;
+                    item.key = entry.key.clone();
+                    item.version = self.read_ts;
+                    item.expires_at = entry.expires_at;
+
+                    // Get from cache, no need to update reads.
+                    return Ok(item);
+                }
+            }
+
+            self.add_read_key(key);
+        }
+
+        let mut key_with_ts = BytesMut::new();
+        key_with_ts.extend_from_slice(key);
+        append_ts(&mut key_with_ts, self.read_ts);
+
+        let seek = key_with_ts.freeze();
+
+        let vs = self.agate.get(&seek)?;
+
+        if vs.value.is_empty() && vs.meta == 0 {
+            return Err(Error::KeyNotFound(()));
+        }
+
+        if is_deleted_or_expired(vs.meta, vs.expires_at) {
+            return Err(Error::KeyNotFound(()));
+        }
+
+        item.key = key.clone();
+        item.version = vs.version;
+        item.meta = vs.meta;
+        item.user_meta = vs.user_meta;
+        item.vptr = vs.value;
+        item.expires_at = vs.expires_at;
+        Ok(item)
     }
 
     pub(crate) fn add_read_key(&self, key: &Bytes) {
