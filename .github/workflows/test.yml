@@ -84,5 +84,5 @@ jobs:
           command: test
           args: --all-features -Zbuild-std --target x86_64-unknown-linux-gnu
         env:
-          TSAN_OPTIONS="suppressions=$(pwd)/.github/workflows/tsan"
+          TSAN_OPTIONS: "suppressions=$(pwd)/.github/workflows/tsan"
           RUSTFLAGS: "-Zsanitizer=${{ matrix.sanitizer }}"
