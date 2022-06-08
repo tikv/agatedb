@@ -36,7 +36,7 @@ jobs:
         name: Setup Cargo Toolchain 🛎️
         with:
           components: rustfmt, clippy, llvm-tools-preview
-          toolchain: nightly
+          toolchain: stable
           default: true
       - name: Check Code Format 🔧
         run: |
@@ -76,7 +76,7 @@ jobs:
         name: Setup Cargo Toolchain 🛎️
         with:
           components: rustfmt, clippy, rust-src
-          toolchain: nightly
+          toolchain: stable
           default: true
       - uses: actions-rs/cargo@v1
         name: Running Tests with ${{ matrix.sanitizer }} sanitizer 🚀

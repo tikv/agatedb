@@ -99,7 +99,7 @@ impl Core {
             }
         }
 
-        fids.sort();
+        fids.sort_unstable();
 
         for fid in &fids {
             let memtable = Self::open_mem_table(opts, *fid)?;
