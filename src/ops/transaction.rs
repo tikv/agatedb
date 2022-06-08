@@ -9,13 +9,12 @@ use std::{
 use bytes::{Bytes, BytesMut};
 use skiplist::KeyComparator;
 
-use super::oracle::Oracle;
 use crate::{
     entry::Entry,
     format::{append_ts, user_key},
     key_with_ts,
     util::{default_hash, COMPARATOR},
-    AgateIterator, AgateOptions, Error, Result, Value,
+    AgateIterator, Error, Result, Value,
 };
 
 const MAX_KEY_LENGTH: usize = 65000;
@@ -45,9 +44,7 @@ pub struct Transaction {
     // Update is used to conditionally keep track of reads.
     pub(crate) update: bool,
 
-    // TODO: Use Agate rather than AgateOptions and Oracle.
-    pub(crate) opts: AgateOptions,
-    pub(crate) orc: Arc<Oracle>,
+    pub(crate) agate: Arc<crate::db::Core>,
 }
 
 pub struct PendingWritesIterator {
@@ -59,7 +56,7 @@ pub struct PendingWritesIterator {
 }
 
 impl Transaction {
-    pub(crate) fn new(opts: &AgateOptions) -> Transaction {
+    pub(crate) fn new(core: Arc<crate::db::Core>) -> Transaction {
         Transaction {
             read_ts: 0,
             commit_ts: 0,
@@ -73,8 +70,7 @@ impl Transaction {
             discarded: false,
             done_read: false,
             update: false,
-            opts: opts.clone(),
-            orc: Arc::new(Oracle::new(opts)),
+            agate: core,
         }
     }
 
@@ -98,10 +94,11 @@ impl Transaction {
 
     fn check_size(&mut self, entry: &Entry) -> Result<()> {
         let count = self.count + 1;
-        let opt = &self.opts;
-        let size = self.size + entry.estimate_size(opt.value_threshold) as usize + 10;
+        let size = self.size + entry.estimate_size(self.agate.opts.value_threshold) as usize + 10;
 
-        if count >= opt.max_batch_count as usize || size >= opt.max_batch_size as usize {
+        if count >= self.agate.opts.max_batch_count as usize
+            || size >= self.agate.opts.max_batch_size as usize
+        {
             return Err(Error::TxnTooBig);
         }
 
@@ -137,7 +134,7 @@ impl Transaction {
                 &e.key[..MAX_KEY_LENGTH]
             )));
         }
-        let value_log_file_size = self.opts.value_log_file_size as usize;
+        let value_log_file_size = self.agate.opts.value_log_file_size as usize;
         if e.value.len() > value_log_file_size {
             return Err(Error::TooLong(format!(
                 "value's length > {}: {:?}..",
@@ -145,17 +142,17 @@ impl Transaction {
                 &e.value[..value_log_file_size]
             )));
         }
-        if self.opts.in_memory && e.value.len() > self.opts.value_threshold {
+        if self.agate.opts.in_memory && e.value.len() > self.agate.opts.value_threshold {
             return Err(Error::TooLong(format!(
                 "value's length > {}: {:?}..",
-                self.opts.value_threshold,
-                &e.value[..self.opts.value_threshold]
+                self.agate.opts.value_threshold,
+                &e.value[..self.agate.opts.value_threshold]
             )));
         }
 
         self.check_size(&e)?;
 
-        if self.opts.detect_conflicts {
+        if self.agate.opts.detect_conflicts {
             self.conflict_keys.insert(default_hash(&e.key));
         }
 
@@ -221,18 +218,18 @@ impl Transaction {
         }
 
         self.discarded = true;
-        if !self.orc.is_managed {
-            self.orc.clone().done_read(self);
+        if !self.agate.orc.is_managed {
+            self.agate.orc.clone().done_read(self);
         }
     }
 
     fn commit_and_send(&mut self) -> Result<()> {
-        let orc = self.orc.clone();
+        let orc = self.agate.orc.clone();
         // Ensure that the order in which we get the commit timestamp is the same as
         // the order in which we push these updates to the write channel. So, we
         // acquire a write_ch_lock before getting a commit timestamp, and only release
         // it after pushing the entries to it.
-        let _write_ch_lock = orc.write_ch_lock.lock().unwrap();
+        let write_ch_lock = orc.write_ch_lock.lock().unwrap();
 
         let (commit_ts, conflict) = orc.new_commit_ts(self);
         if conflict {
@@ -292,11 +289,17 @@ impl Transaction {
             entries.push(e);
         }
 
-        // TODO: Send to write channel.
+        let done = self.agate.send_to_write_channel(entries);
 
-        orc.done_commit(commit_ts);
+        if let Err(err) = done {
+            orc.done_commit(commit_ts);
+            return Err(err);
+        }
 
-        Ok(())
+        drop(write_ch_lock);
+
+        let done = done.unwrap();
+        done.recv().unwrap()
     }
 
     fn commit_precheck(&self) -> Result<()> {
@@ -313,7 +316,7 @@ impl Transaction {
         // uses Transaction::commit instead of Transaction::commit_at in managed mode.
         // This should happen only in managed mode. In normal mode, keep_together will
         // always be true.
-        if keep_together && self.opts.managed_txns && self.commit_ts == 0 {
+        if keep_together && self.agate.opts.managed_txns && self.commit_ts == 0 {
             return Err(Error::CustomError("commit_ts cannot be zero.".to_string()));
         }
 
