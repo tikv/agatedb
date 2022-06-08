@@ -213,22 +213,30 @@ impl TableInner {
         let mut read_pos = self.table_size;
 
         // read checksum length from last 4 bytes
-        read_pos -= 4;
+        read_pos = read_pos
+            .checked_sub(4)
+            .ok_or_else(|| Error::TableRead("Size of table less than 4.".into()))?;
         let mut buf = self.read(read_pos, 4)?;
         let checksum_len = buf.get_u32() as usize;
 
         // read checksum
-        read_pos -= checksum_len;
+        read_pos = read_pos
+            .checked_sub(checksum_len)
+            .ok_or_else(|| Error::TableRead("Checksum length overflow.".into()))?;
         let buf = self.read(read_pos, checksum_len)?;
         let chksum = Checksum::decode(buf)?;
 
         // read index size from footer
-        read_pos -= 4;
+        read_pos = read_pos
+            .checked_sub(4)
+            .ok_or_else(|| Error::TableRead("Cannot read length of index.".into()))?;
         let mut buf = self.read(read_pos, 4)?;
         self.index_len = buf.get_u32() as usize;
 
         // read index
-        read_pos -= self.index_len;
+        read_pos = read_pos
+            .checked_sub(self.index_len)
+            .ok_or_else(|| Error::TableRead("Index length overflow.".into()))?;
         self.index_start = read_pos;
         let data = self.read(read_pos, self.index_len)?;
         checksum::verify_checksum(&data, &chksum)?;
