@@ -82,6 +82,6 @@ jobs:
         name: Running Tests with ${{ matrix.sanitizer }} sanitizer 🚀
         with:
           command: test
-          args: --all-features -Zbuild-std --target x86_64-unknown-linux-gnu
+          args: --all-features --target x86_64-unknown-linux-gnu
         env:
           RUSTFLAGS: "-Zsanitizer=${{ matrix.sanitizer }}"
