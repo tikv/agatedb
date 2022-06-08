@@ -401,9 +401,9 @@ fn test_table_checksum() {
     opts.checksum_mode = ChecksumVerificationMode::OnTableAndBlockRead;
 
     let kv_pairs = generate_table_data(b"k", 10000, opts.clone());
-    let table_data = Bytes::from(build_table_data(kv_pairs, opts.clone()));
+    let table_data = build_table_data(kv_pairs, opts.clone());
 
-    let table = Table::open_in_memory(table_data.clone(), 233, opts.clone()).unwrap();
+    let table = Table::open_in_memory(table_data.clone(), 233, opts).unwrap();
 
     let mut pos = table_data.len() - 4;
     let checksum_length = table_data.slice(pos..pos + 4).get_u32() as usize;
