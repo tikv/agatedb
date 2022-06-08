@@ -164,7 +164,7 @@ impl WaterMarkInner {
 /// number of threads needed.
 #[derive(Clone)]
 pub struct WaterMark {
-    core: Arc<WaterMarkInner>,
+    inner: Arc<WaterMarkInner>,
     tx: Sender<Mark>,
 }
 
@@ -172,7 +172,7 @@ impl WaterMark {
     pub fn new(name: String) -> Self {
         let (tx, rx) = bounded(100);
         Self {
-            core: Arc::new(WaterMarkInner {
+            inner: Arc::new(WaterMarkInner {
                 mark_ch: rx,
                 name,
                 done_until: AtomicU64::new(0),
@@ -184,16 +184,16 @@ impl WaterMark {
 
     /// Initializes a [`WaterMark`] struct. MUST be called before using it.
     pub fn init(&self, pool: std::thread::Builder, closer: Closer) -> JoinHandle<()> {
-        let core = self.core.clone();
+        let inner = self.inner.clone();
         pool.spawn(move || {
-            core.process(closer);
+            inner.process(closer);
         })
         .unwrap()
     }
 
     /// Sets the last index to the given value.
     pub fn begin(&self, index: u64) {
-        self.core.last_index.store(index, Ordering::SeqCst);
+        self.inner.last_index.store(index, Ordering::SeqCst);
         self.tx
             .send(Mark {
                 index: Index::Single(index),
@@ -205,7 +205,7 @@ impl WaterMark {
 
     /// Works like `begin` but accepts multiple indices.
     pub fn begin_many(&self, indices: Vec<u64>) {
-        self.core
+        self.inner
             .last_index
             .store(*indices.last().unwrap(), Ordering::SeqCst);
         self.tx
@@ -242,18 +242,18 @@ impl WaterMark {
     /// Returns the maximum index that has the property that all indices
     /// less than or equal to it are done.
     pub fn done_until(&self) -> u64 {
-        self.core.done_until.load(Ordering::SeqCst)
+        self.inner.done_until.load(Ordering::SeqCst)
     }
 
     /// Sets the maximum index that has the property that all indices
     /// less than or equal to it are done.
     pub fn set_done_until(&self, val: u64) {
-        self.core.done_until.store(val, Ordering::SeqCst);
+        self.inner.done_until.store(val, Ordering::SeqCst);
     }
 
     /// Returns the last index for which `begin` has been called.
     pub fn last_index(&self) -> u64 {
-        self.core.last_index.load(Ordering::SeqCst)
+        self.inner.last_index.load(Ordering::SeqCst)
     }
 
     /// Waits until the given index is marked as done.
