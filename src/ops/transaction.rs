@@ -15,7 +15,7 @@ use crate::{
     iterator::{is_deleted_or_expired, Item},
     key_with_ts,
     util::{default_hash, COMPARATOR},
-    AgateIterator, Error, Result, Value,
+    Agate, AgateIterator, Error, Result, Value,
 };
 
 const MAX_KEY_LENGTH: usize = 65000;
@@ -484,5 +484,73 @@ impl AgateIterator for PendingWritesIterator {
 
     fn valid(&self) -> bool {
         self.next_idx < self.entries.len()
+    }
+}
+
+impl crate::db::Core {
+    pub fn new_transaction(self: &Arc<Self>, update: bool, is_managed: bool) -> Transaction {
+        let mut txn = Transaction::new(self.clone());
+
+        txn.update = if self.opts.read_only { false } else { update };
+        txn.count = 1;
+        txn.size = TXN_KEY.len() + 10;
+
+        // TODO: Allocate transaction conflict_keys and pending_writes on demand.
+
+        if !is_managed {
+            txn.read_ts = self.orc.read_ts();
+        }
+
+        txn
+    }
+}
+
+impl Agate {
+    /// Creates a new transaction. Agate supports concurrent execution of transactions, providing
+    /// serializable snapshot isolation, avoiding write skews. Agate achieves this by tracking the
+    /// keys read and ensuring that these read keys weren't concurrently modified by another
+    /// transaction at commit time.
+    ///
+    /// For read-only transactions, set `update` to false. In this mode, we don't track the rows read for
+    /// any changes. Thus, any long running iterations done in this mode wouldn't pay this overhead.
+    ///
+    /// Running transactions concurrently is OK. However, a transaction itself isn't thread safe, and
+    /// should only be run serially. It doesn't matter if a transaction is created by one thread and
+    /// passed down to other, as long as the transaction APIs are called serially.
+    pub fn new_transaction(&self, update: bool) -> Transaction {
+        self.core.new_transaction(update, false)
+    }
+
+    /// Executes a function creating and managing a read-only transaction for the user.
+    /// If `view` is used with managed transactions, it would assume a read timestamp of `std::u64::MAX`.
+    pub fn view(&self, f: impl FnOnce(&mut Transaction) -> Result<()>) -> Result<()> {
+        // TODO: Check closed.
+
+        let mut txn = if self.core.opts.managed_txns {
+            self.new_transaction_at(std::u64::MAX, false)
+        } else {
+            self.new_transaction(false)
+        };
+
+        f(&mut txn)?;
+
+        Ok(())
+    }
+
+    /// Executes a function, creating and managing a read-write transaction for the user.
+    /// `update` cannot be used with managed transactions.
+    pub fn update(&self, f: impl FnOnce(&mut Transaction) -> Result<()>) -> Result<()> {
+        // TODO: Check closed.
+
+        if self.core.opts.managed_txns {
+            panic!("Update can only be used with managed_txns is false.");
+        }
+
+        let mut txn = self.new_transaction(true);
+
+        f(&mut txn)?;
+        txn.commit()?;
+
+        Ok(())
     }
 }

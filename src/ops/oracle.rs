@@ -128,7 +128,7 @@ impl Oracle {
         self.pool.shutdown();
     }
 
-    fn read_ts(&self) -> u64 {
+    pub(crate) fn read_ts(&self) -> u64 {
         if self.is_managed {
             panic!("read_ts should not be used in managed mode");
         } else {

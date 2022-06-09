@@ -120,6 +120,6 @@ mod test {
     fn test_unix_time() {
         let start = SystemTime::now();
         let since_the_epoch = start.duration_since(UNIX_EPOCH).unwrap();
-        assert_eq!(since_the_epoch.as_millis() as u64 / 10, unix_time() / 10);
+        assert_eq!(since_the_epoch.as_millis() as u64 / 100, unix_time() / 100);
     }
 }
