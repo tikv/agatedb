@@ -1,8 +1,9 @@
 use std::{
     collections::HashSet,
     sync::{Arc, Mutex},
-    thread::JoinHandle,
 };
+
+use yatp::{task::callback::TaskCell, Builder, ThreadPool};
 
 use super::transaction::Transaction;
 use crate::{closer::Closer, watermark::WaterMark, AgateOptions};
@@ -88,23 +89,22 @@ pub struct Oracle {
     /// Used to stop watermarks.
     closer: Closer,
 
-    // TODO: Try to find a better way.
-    txn_handle: JoinHandle<()>,
-    read_handle: JoinHandle<()>,
+    pool: ThreadPool<TaskCell>,
 }
 
 impl Oracle {
     pub fn new(opts: &AgateOptions) -> Self {
-        let txn_pool = std::thread::Builder::new().name("oracle_txn_watermark".into());
-        let read_pool = std::thread::Builder::new().name("oracle_read_watermark".into());
+        let pool = Builder::new("oracle_watermark")
+            .max_thread_count(2)
+            .build_callback_pool();
 
         let closer = Closer::new();
 
         let txn_mark = Arc::new(WaterMark::new("txn_ts".into()));
         let read_mark = Arc::new(WaterMark::new("pending_reads".into()));
 
-        let txn_handle = txn_mark.init(txn_pool, closer.clone());
-        let read_handle = read_mark.init(read_pool, closer.clone());
+        txn_mark.init(&pool, closer.clone());
+        read_mark.init(&pool, closer.clone());
 
         Self {
             is_managed: opts.managed_txns,
@@ -119,15 +119,13 @@ impl Oracle {
 
             closer,
 
-            txn_handle,
-            read_handle,
+            pool,
         }
     }
 
-    pub fn stop(self) {
+    pub fn stop(&mut self) {
         self.closer.close();
-        self.txn_handle.join().unwrap();
-        self.read_handle.join().unwrap();
+        self.pool.shutdown();
     }
 
     fn read_ts(&self) -> u64 {
@@ -222,6 +220,12 @@ impl Oracle {
     }
 }
 
+impl Drop for Oracle {
+    fn drop(&mut self) {
+        self.stop()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,20 +233,31 @@ mod tests {
     #[test]
     fn test_basic() {
         let opts = AgateOptions::default();
-        let oracle = Oracle::new(&opts);
+        let mut oracle = Oracle::new(&opts);
         oracle.stop();
     }
 
     #[test]
     fn test_read_ts() {
         let opts = AgateOptions::default();
-        let oracle = Oracle::new(&opts);
+        let mut oracle = Oracle::new(&opts);
 
+        oracle.increment_next_ts();
         for i in 0..100 {
+            let read_ts = oracle.read_ts();
+            assert_eq!(read_ts, i);
+
+            oracle.read_mark.done(read_ts);
+
+            let commit_ts = oracle.next_ts();
+            assert_eq!(commit_ts, i + 1);
             oracle.increment_next_ts();
-            oracle.done_commit(i);
-            assert_eq!(oracle.read_ts(), i);
+            oracle.txn_mark.begin(commit_ts);
+
+            oracle.done_commit(commit_ts);
         }
+
+        oracle.txn_mark.wait_for_mark(100);
 
         oracle.stop();
     }
