@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use bytes::{Bytes, BytesMut};
 use tempfile::tempdir;
 
@@ -45,21 +47,14 @@ fn test_ensure_room_for_write() {
     let mut opts = AgateOptions::default();
     let tmp_dir = tempdir().unwrap();
     opts.dir = tmp_dir.path().to_path_buf();
+    opts.value_dir = opts.dir.clone();
 
     // Wal::zero_next_entry will need MAX_HEADER_SIZE bytes free space.
     // So we should put bytes more than value_log_file_size but less than
     // 2*value_log_file_size - MAX_HEADER_SIZE.
     opts.value_log_file_size = 25;
 
-    let mt = Core::open_mem_table(&opts, 1).unwrap();
-
-    let mts = MemTables::new(mt, VecDeque::new());
-
-    let mut core = Core {
-        mts: RwLock::new(mts),
-        opts,
-        next_mem_fid: AtomicUsize::new(2),
-    };
+    let core = Core::new(&opts).unwrap();
 
     {
         let mts = core.mts.read().unwrap();

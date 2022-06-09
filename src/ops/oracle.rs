@@ -229,18 +229,18 @@ impl Drop for Oracle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::Core;
 
     #[test]
     fn test_basic() {
         let opts = AgateOptions::default();
-        let mut oracle = Oracle::new(&opts);
-        oracle.stop();
+        let _oracle = Oracle::new(&opts);
     }
 
     #[test]
     fn test_read_ts() {
         let opts = AgateOptions::default();
-        let mut oracle = Oracle::new(&opts);
+        let oracle = Oracle::new(&opts);
 
         oracle.increment_next_ts();
         for i in 0..100 {
@@ -258,55 +258,53 @@ mod tests {
         }
 
         oracle.txn_mark.wait_for_mark(100);
-
-        oracle.stop();
     }
 
     #[test]
     fn test_detect_confict() {
-        let opts = AgateOptions::default();
-        let oracle = Oracle::new(&opts);
+        let opts = AgateOptions {
+            in_memory: true,
+            ..Default::default()
+        };
 
-        oracle.increment_next_ts();
+        let core = Arc::new(Core::new(&opts).unwrap());
+        core.orc.increment_next_ts();
 
-        let mut txn = Transaction::new(&opts);
-        txn.read_ts = 1;
+        let mut txn = Transaction::new(core.clone());
         txn.conflict_keys = [11u64, 22, 33].iter().cloned().collect();
 
         // No conflict.
-        assert_eq!(oracle.new_commit_ts(&mut txn), (1, false));
+        assert_eq!(core.orc.new_commit_ts(&mut txn), (1, false));
 
         txn.read_ts = 0;
         txn.reads = Mutex::new(vec![11, 23]);
 
         // Has conflict.
-        assert_eq!(oracle.new_commit_ts(&mut txn), (0, true));
+        assert_eq!(core.orc.new_commit_ts(&mut txn), (0, true));
 
         txn.reads = Mutex::new(vec![23]);
 
         // No conflict.
-        assert_eq!(oracle.new_commit_ts(&mut txn), (2, false));
-
-        oracle.stop();
+        assert_eq!(core.orc.new_commit_ts(&mut txn), (2, false));
     }
 
     #[test]
     fn test_cleanup() {
         let opts = AgateOptions {
+            in_memory: true,
             managed_txns: true,
             ..Default::default()
         };
-        let oracle = Oracle::new(&opts);
 
-        let mut txn = Transaction::new(&opts);
+        let core = Arc::new(Core::new(&opts).unwrap());
 
-        assert_eq!(oracle.new_commit_ts(&mut txn), (0, false));
-        assert_eq!(oracle.commit_info.lock().unwrap().committed_txns.len(), 1);
+        let mut txn = Transaction::new(core.clone());
 
-        oracle.set_discard_ts(1);
+        assert_eq!(core.orc.new_commit_ts(&mut txn), (0, false));
+        assert_eq!(core.orc.commit_info.lock().unwrap().committed_txns.len(), 1);
 
-        assert_eq!(oracle.commit_info.lock().unwrap().committed_txns.len(), 0);
+        core.orc.set_discard_ts(1);
 
-        oracle.stop();
+        assert_eq!(core.orc.commit_info.lock().unwrap().committed_txns.len(), 0);
     }
 }

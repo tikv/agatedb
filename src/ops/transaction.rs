@@ -87,7 +87,11 @@ impl Transaction {
         let mut entries: Vec<_> = self.pending_writes.values().cloned().collect();
         entries.sort_by(|x, y| {
             let cmp = COMPARATOR.compare_key(&x.key, &y.key);
-            if reversed { cmp.reverse() } else { cmp }
+            if reversed {
+                cmp.reverse()
+            } else {
+                cmp
+            }
         });
 
         Some(PendingWritesIterator::new(self.read_ts, reversed, entries))

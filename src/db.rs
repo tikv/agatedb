@@ -84,8 +84,33 @@ impl Agate {
 }
 
 impl Core {
-    fn new(_opts: AgateOptions) -> Result<Self> {
-        unimplemented!()
+    pub(crate) fn new(opts: &AgateOptions) -> Result<Self> {
+        let orc = Arc::new(Oracle::new(opts));
+        let manifest = Arc::new(ManifestFile::open_or_create_manifest_file(opts)?);
+        let lvctl = LevelsController::new(opts, manifest.clone(), orc.clone())?;
+
+        let (imm_tables, mut next_mem_fid) = Self::open_mem_tables(opts)?;
+        let mt = Self::open_mem_table(opts, next_mem_fid)?;
+        next_mem_fid += 1;
+
+        let core = Self {
+            closers: Closers {
+                writes: Closer::new(),
+            },
+            mts: RwLock::new(MemTables::new(Arc::new(mt), imm_tables)),
+            next_mem_fid: AtomicUsize::new(next_mem_fid),
+            opts: opts.clone(),
+            manifest,
+            lvctl,
+            vlog: Arc::new(ValueLog::new(opts.clone())?),
+            write_channel: bounded(KV_WRITE_CH_CAPACITY),
+            block_writes: AtomicBool::new(false),
+            is_closed: AtomicBool::new(false),
+            orc,
+        };
+
+        // TODO: Initialize other structures.
+        Ok(core)
     }
 
     fn memtable_file_path(opts: &AgateOptions, file_id: usize) -> PathBuf {
@@ -199,7 +224,7 @@ impl Core {
 
         let memtable = self.new_mem_table()?;
 
-        mts.use_new_table(memtable);
+        mts.use_new_table(Arc::new(memtable));
 
         debug!(
             "memtable flushed, total={}, mt.size={}",
