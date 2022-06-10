@@ -31,25 +31,25 @@ pub struct Item {
     pub(crate) version: u64,
     pub(crate) expires_at: u64,
 
-    txn: Arc<Transaction>,
-
     pub(crate) status: PrefetchStatus,
     pub(crate) meta: u8,
     pub(crate) user_meta: u8,
+
+    agate: Arc<crate::db::Core>,
 }
 
 impl Item {
-    pub(crate) fn new(txn: Arc<Transaction>) -> Self {
+    pub(crate) fn new(agate: Arc<crate::db::Core>) -> Self {
         Self {
             key: Bytes::new(),
             vptr: Bytes::new(),
             value: RefCell::new(Bytes::new()),
             version: 0,
             expires_at: 0,
-            txn,
             status: PrefetchStatus::No,
             meta: 0,
             user_meta: 0,
+            agate,
         }
     }
 
@@ -79,7 +79,7 @@ impl Item {
 
         let mut vptr = ValuePointer::default();
         vptr.decode(&self.vptr);
-        let vlog = (*self.txn.agate.vlog).as_ref().unwrap();
+        let vlog = (*self.agate.vlog).as_ref().unwrap();
         let raw_buffer = vlog.read(vptr);
         if let Ok(mut raw_buffer) = raw_buffer {
             let entry = Wal::decode_entry(&mut raw_buffer).unwrap();
@@ -291,7 +291,7 @@ impl Iterator {
         if self.opt.all_versions {
             // Return deleted or expired values also, otherwise user can't figure out
             // whether the key was deleted.
-            let mut item = Item::new(self.txn.clone());
+            let mut item = Item::new(self.txn.agate.clone());
             Self::fill_item(&mut item, key, &self.table_iter.value(), &self.opt);
             self.item = Some(item);
             self.table_iter.next();
@@ -320,7 +320,7 @@ impl Iterator {
             return false;
         }
 
-        let mut item = Item::new(self.txn.clone());
+        let mut item = Item::new(self.txn.agate.clone());
         Self::fill_item(&mut item, key, &self.table_iter.value(), &self.opt);
 
         self.table_iter.next();

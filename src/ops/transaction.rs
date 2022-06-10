@@ -196,7 +196,7 @@ impl Transaction {
     }
 
     /// Looks for key and returns corresponding Item.
-    pub(crate) fn get(self: Arc<Self>, key: &Bytes) -> Result<Item> {
+    pub(crate) fn get(&self, key: &Bytes) -> Result<Item> {
         if key.is_empty() {
             return Err(Error::EmptyKey);
         } else if self.discarded {
@@ -205,7 +205,7 @@ impl Transaction {
 
         // TODO: Check if the key is banned.
 
-        let mut item = Item::new(self.clone());
+        let mut item = Item::new(self.agate.clone());
 
         if self.update {
             if let Some(entry) = self.pending_writes.get(key) {
