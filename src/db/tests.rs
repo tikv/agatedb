@@ -105,7 +105,14 @@ pub fn helper_dump_dir(path: &Path) {
     }
 }
 
-fn run_agate_test<F>(opts: Option<AgateOptions>, test_fn: F)
+pub fn with_payload(mut buf: BytesMut, payload: usize, fill_char: u8) -> Bytes {
+    let mut payload_buf = vec![];
+    payload_buf.resize(payload, fill_char);
+    buf.extend_from_slice(&payload_buf);
+    buf.freeze()
+}
+
+pub fn run_agate_test<F>(opts: Option<AgateOptions>, test_fn: F)
 where
     F: FnOnce(Agate),
 {
