@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use bytes::{Bytes, BytesMut};
+use tempdir::TempDir;
 use tempfile::tempdir;
 
 use super::*;
@@ -102,4 +103,44 @@ pub fn helper_dump_dir(path: &Path) {
     for path in result {
         println!("{:?}", path);
     }
+}
+
+fn run_agate_test<F>(opts: Option<AgateOptions>, test_fn: F)
+where
+    F: FnOnce(Agate),
+{
+    let tmp_dir = TempDir::new("agatedb").unwrap();
+
+    let mut opts = if let Some(opts) = opts {
+        opts
+    } else {
+        generate_test_agate_options()
+    };
+
+    if !opts.in_memory {
+        opts.dir = tmp_dir.as_ref().to_path_buf();
+        opts.value_dir = tmp_dir.as_ref().to_path_buf();
+    }
+
+    let agate = opts.open().unwrap();
+
+    test_fn(agate);
+
+    tmp_dir.close().unwrap();
+}
+
+#[test]
+fn test_simple_get_put() {
+    run_agate_test(None, |agate| {
+        let key = key_with_ts(BytesMut::from("2333"), 0);
+        let value = Bytes::from("2333333333333333");
+        let req = Request {
+            entries: vec![Entry::new(key.clone(), value)],
+            ptrs: vec![],
+            done: None,
+        };
+        agate.write_to_lsm(req).unwrap();
+        let value = agate.get(&key).unwrap();
+        assert_eq!(value.value, Bytes::from("2333333333333333"));
+    });
 }

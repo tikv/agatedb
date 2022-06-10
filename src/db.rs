@@ -10,6 +10,7 @@ use std::{
     },
 };
 
+use bytes::{Bytes, BytesMut};
 use crossbeam_channel::{bounded, select, Receiver, Sender};
 use log::{debug, info};
 pub use opt::AgateOptions;
@@ -23,11 +24,12 @@ use super::{
 use crate::{
     closer::Closer,
     entry::Entry,
+    get_ts,
     levels::LevelsController,
     manifest::ManifestFile,
     ops::oracle::Oracle,
     util::make_comparator,
-    value::{Request, Value},
+    value::{self, Request, Value},
     value_log::ValueLog,
     wal::Wal,
     Error,
@@ -78,8 +80,33 @@ impl Agate {
     }
     */
 
-    fn new(_core: Arc<Core>) -> Self {
-        unimplemented!()
+    fn new(core: Arc<Core>) -> Self {
+        // TODOL Flush.
+
+        let closer = Closer::new();
+        let pool = Arc::new(
+            yatp::Builder::new("agatedb")
+                .max_thread_count(core.opts.num_compactors * 8 + 2)
+                .min_thread_count(core.opts.num_compactors * 5 + 2)
+                .build_callback_pool(),
+        );
+
+        let agate = Self {
+            core,
+            closer: closer.clone(),
+            pool,
+        };
+
+        let core = agate.core.clone();
+        let pool = agate.pool.clone();
+        agate.pool.spawn(move |_: &mut Handle<'_>| {
+            core.do_writes(core.closers.writes.clone(), core.clone(), pool)
+                .unwrap()
+        });
+
+        agate.core.lvctl.start_compact(closer, agate.pool.clone());
+
+        agate
     }
 }
 
@@ -190,8 +217,37 @@ impl Core {
         false
     }
 
-    pub(crate) fn get(&self, _key: &[u8]) -> Result<Value> {
-        unimplemented!()
+    pub(crate) fn get(&self, key: &Bytes) -> Result<Value> {
+        if self.is_closed() {
+            return Err(Error::DBClosed);
+        }
+
+        let view = self.mts.read()?.view();
+
+        let mut max_value = Value::default();
+        let version = get_ts(key);
+
+        for table in view.tables() {
+            let mut value = Value::default();
+
+            if let Some((key, value_data)) = table.get_with_key(key) {
+                value.decode(value_data.clone());
+                value.version = get_ts(key);
+
+                if value.meta == 0 && value.value.is_empty() {
+                    continue;
+                }
+                if value.version == version {
+                    return Ok(value);
+                }
+                if max_value.version < value.version {
+                    max_value = value;
+                }
+            }
+        }
+
+        // max_value will be used in level controller.
+        self.lvctl.get(key, max_value, 0)
     }
 
     /// `write_to_lsm` will only be called in write thread (or write coroutine).
@@ -200,8 +256,46 @@ impl Core {
     /// 1. read lock of memtable list (only block flush)
     /// 2. write lock of mutable memtable WAL (won't block mut-table read).
     /// 3. level controller lock (TBD)
-    pub(crate) fn write_to_lsm(&self, _request: Request) -> Result<()> {
-        unimplemented!()
+    pub(crate) fn write_to_lsm(&self, request: Request) -> Result<()> {
+        // TODO: Check entries and pointers.
+
+        let memtables = self.mts.read()?;
+        let mut_table = memtables.table_mut();
+
+        for (idx, entry) in request.entries.into_iter().enumerate() {
+            if self.opts.skip_vlog(&entry) {
+                // deletion, tombstone, and small values
+                mut_table.put(
+                    entry.key,
+                    Value {
+                        value: entry.value,
+                        meta: entry.meta & (!value::VALUE_POINTER),
+                        user_meta: entry.user_meta,
+                        expires_at: entry.expires_at,
+                        version: 0,
+                    },
+                )?;
+            } else {
+                let mut vptr_buf = BytesMut::new();
+                request.ptrs[idx].encode(&mut vptr_buf);
+                // Write pointer to memtable.
+                mut_table.put(
+                    entry.key,
+                    Value {
+                        value: vptr_buf.freeze(),
+                        meta: entry.meta | value::VALUE_POINTER,
+                        user_meta: entry.user_meta,
+                        expires_at: entry.expires_at,
+                        version: 0,
+                    },
+                )?;
+            }
+        }
+
+        if self.opts.sync_writes {
+            mut_table.sync_wal()?;
+        }
+        Ok(())
     }
 
     /// Calling ensure_room_for_write requires locking whole memtable
@@ -408,7 +502,7 @@ impl Core {
 }
 
 impl Agate {
-    pub fn get(&self, key: &[u8]) -> Result<Value> {
+    pub fn get(&self, key: &Bytes) -> Result<Value> {
         self.core.get(key)
     }
 

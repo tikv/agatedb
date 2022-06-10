@@ -186,6 +186,28 @@ impl AgateOptions {
         Ok(())
     }
 
+    pub fn open(&mut self) -> Result<Agate> {
+        self.fix_options()?;
+
+        if !self.in_memory {
+            if !self.dir.exists() {
+                if self.read_only {
+                    return Err(Error::Config(format!("{:?} doesn't exist", self.dir)));
+                }
+                fs::create_dir_all(&self.dir)?;
+            }
+            if !self.value_dir.exists() {
+                if self.read_only {
+                    return Err(Error::Config(format!("{:?} doesn't exist", self.value_dir)));
+                }
+                fs::create_dir_all(&self.value_dir)?;
+            }
+            // TODO: Acquire database path lock.
+        }
+
+        Ok(Agate::new(Arc::new(Core::new(self)?)))
+    }
+
     pub fn skip_vlog(&self, entry: &Entry) -> bool {
         entry.value.len() < self.value_threshold
     }
