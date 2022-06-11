@@ -105,15 +105,10 @@ pub struct AgateOptions {
     ///
     /// The default value of `checksum_mode` is [`ChecksumVerificationMode`].
     pub checksum_mode: opt::ChecksumVerificationMode,
-
+    /// Create the directory if the provided open path doesn't exists.
+    /// 
+    /// The default value of `create_if_not_exists` is false
     pub create_if_not_exists: bool,
-
-    pub detect_conflicts: bool,
-
-    pub managed_txns: bool,
-
-    pub max_batch_count: u64,
-    pub max_batch_size: u64,
 }
 
 impl Default for AgateOptions {
@@ -148,10 +143,6 @@ impl Default for AgateOptions {
             num_compactors: 4,
             checksum_mode: opt::ChecksumVerificationMode::NoVerification,
             create_if_not_exists: false,
-            detect_conflicts: true,
-            managed_txns: false,
-            max_batch_count: 0,
-            max_batch_size: 0,
         }
         // TODO: add other options
     }
