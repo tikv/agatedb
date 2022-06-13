@@ -151,7 +151,7 @@ impl Oracle {
         commit_info.next_txn_ts
     }
 
-    fn increment_next_ts(&self) {
+    pub(crate) fn increment_next_ts(&self) {
         let mut commit_info = self.commit_info.lock().unwrap();
         commit_info.next_txn_ts += 1
     }
@@ -268,7 +268,6 @@ mod tests {
         };
 
         let core = Arc::new(Core::new(&opts).unwrap());
-        core.orc.increment_next_ts();
 
         let mut txn = Transaction::new(core.clone());
         txn.conflict_keys = [11u64, 22, 33].iter().cloned().collect();

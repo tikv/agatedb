@@ -1,4 +1,7 @@
-use std::{cell::RefCell, sync::Arc};
+use std::{
+    cell::RefCell,
+    sync::{atomic::Ordering, Arc},
+};
 
 use bytes::{Bytes, BytesMut};
 use skiplist::{IterRef, KeyComparator, Skiplist};
@@ -120,7 +123,7 @@ pub struct IteratorOptions {
     pub internal_access: bool,
 
     /// If set, use the prefix for bloom filter lookup.
-    prefix_is_key: bool,
+    pub prefix_is_key: bool,
     /// Only iterate over this given prefix.
     pub prefix: Bytes,
 }
@@ -176,12 +179,12 @@ impl<C: KeyComparator> AgateIterator for SkiplistIterator<C> {
     }
 }
 
-pub struct Iterator {
+pub struct Iterator<'a> {
     pub(crate) table_iter: Box<TableIterators>,
-    txn: Arc<Transaction>,
+    txn: &'a Transaction,
     read_ts: u64,
 
-    opt: IteratorOptions,
+    pub(crate) opt: IteratorOptions,
     item: Option<Item>,
 
     /// Used to skip over multiple versions of the same key.
@@ -198,7 +201,7 @@ impl Transaction {
     /// the transaction at the time iterator was created. If writes are performed after an
     /// iterator is created, then that iterator will not be able to see those writes. Only
     /// writes performed before an iterator was created can be viewed.
-    pub fn new_iterator(self: &Arc<Self>, opt: &IteratorOptions) -> Iterator {
+    pub fn new_iterator(&self, opt: &IteratorOptions) -> Iterator {
         if self.discarded {
             panic!("Transaction has already been discarded.")
         }
@@ -226,7 +229,7 @@ impl Transaction {
 
         Iterator {
             table_iter: MergeIterator::from_iterators(iters, false),
-            txn: self.clone(),
+            txn: self,
             read_ts: self.read_ts,
             opt: opt.clone(),
             item: None,
@@ -235,7 +238,7 @@ impl Transaction {
     }
 }
 
-impl Iterator {
+impl<'a> Iterator<'a> {
     /// Returns pointer to the current key-value pair.
     /// This item is only valid until `next` gets called.
     pub fn item(&self) -> &Item {
@@ -383,5 +386,11 @@ impl Iterator {
     /// keep track of whether the cursor started with a `seek`.
     pub fn rewind(&mut self) {
         self.seek(&Bytes::new());
+    }
+}
+
+impl<'a> Drop for Iterator<'a> {
+    fn drop(&mut self) {
+        self.txn.num_iterators.fetch_sub(1, Ordering::SeqCst);
     }
 }

@@ -137,6 +137,7 @@ impl Core {
         };
 
         // TODO: Initialize other structures.
+        core.orc.increment_next_ts();
         Ok(core)
     }
 
@@ -330,7 +331,13 @@ impl Core {
     }
 
     pub(crate) fn get_mem_tables(&self) -> Vec<Arc<MemTable>> {
-        unimplemented!()
+        let mut tables = vec![];
+        let mts = self.mts.read().unwrap();
+        tables.push(mts.table_mut());
+        for idx in 0..mts.nums_of_memtable() - 1 {
+            tables.push(mts.table_imm(idx));
+        }
+        tables
     }
 
     /// Write requests should be only called in one thread. By calling this

@@ -110,6 +110,19 @@ pub fn default_hash(h: &impl Hash) -> u64 {
     hasher.finish()
 }
 
+/// `assert_bytes_eq` will first convert `left` and `right` into `bytes::Bytes`, and call `assert_eq!`.
+/// When asserting eq, `Bytes` is more readable than `&[u8]` in output, as it will show characters as-is
+/// and only escape control characters. For example, it will show `aaa` instead of `[97, 97, 97]`.
+#[macro_export]
+macro_rules! assert_bytes_eq {
+    ($left:expr, $right:expr) => {
+        assert_eq!(
+            Bytes::copy_from_slice($left),
+            Bytes::copy_from_slice($right)
+        )
+    };
+}
+
 #[cfg(test)]
 mod test {
     use std::time::{SystemTime, UNIX_EPOCH};

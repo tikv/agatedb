@@ -355,7 +355,10 @@ impl Transaction {
         drop(write_ch_lock);
 
         let done = done.unwrap();
-        done.recv().unwrap()
+        let ret = done.recv().unwrap();
+        orc.done_commit(commit_ts);
+
+        ret
     }
 
     fn commit_precheck(&self) -> Result<()> {
