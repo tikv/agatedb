@@ -62,7 +62,7 @@ fn test_ensure_room_for_write() {
         let mts = core.mts.read().unwrap();
         assert_eq!(mts.nums_of_memtable(), 1);
 
-        let mt = mts.table_mut();
+        let mt = mts.mut_table();
 
         let key = key_with_ts(BytesMut::new(), 1);
         let value = Value::new(Bytes::new());

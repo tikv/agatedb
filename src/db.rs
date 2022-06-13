@@ -246,7 +246,7 @@ impl Core {
         // TODO: check entries and pointers
 
         let memtables = self.mts.read()?;
-        let mut_table = memtables.table_mut();
+        let mut_table = memtables.mut_table();
 
         for entry in request.entries.into_iter() {
             if self.opts.skip_vlog(&entry) {
@@ -288,11 +288,11 @@ impl Core {
         let mut mts = self.mts.write()?;
         let mut force_flush = false;
 
-        if !force_flush && !self.opts.in_memory && mts.table_mut().should_flush_wal()? {
+        if !force_flush && !self.opts.in_memory && mts.mut_table().should_flush_wal()? {
             force_flush = true;
         }
 
-        let mem_size = mts.table_mut().skl.mem_size();
+        let mem_size = mts.mut_table().skl.mem_size();
 
         if !force_flush && mem_size as u64 >= self.opts.mem_table_size {
             force_flush = true;
@@ -305,7 +305,7 @@ impl Core {
         match self
             .flush_channel
             .0
-            .try_send(Some(FlushTask::new(mts.table_mut())))
+            .try_send(Some(FlushTask::new(mts.mut_table())))
         {
             Ok(_) => {
                 let memtable = self.new_mem_table()?;
@@ -381,7 +381,7 @@ impl Core {
                 match self.handle_flush_task(ft) {
                     Ok(_) => {
                         let mut mts = self.mts.write()?;
-                        assert_eq!(flush_id, mts.table_imm(0).id());
+                        assert_eq!(flush_id, mts.imm_table(0).id());
                         mts.pop_imm();
                     }
                     Err(err) => {

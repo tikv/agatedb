@@ -105,6 +105,7 @@ pub struct AgateOptions {
     ///
     /// The default value of `checksum_mode` is [`ChecksumVerificationMode`].
     pub checksum_mode: opt::ChecksumVerificationMode,
+
     /// Create the directory if the provided open path doesn't exists.
     ///
     /// The default value of `create_if_not_exists` is false

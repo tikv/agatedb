@@ -200,11 +200,11 @@ impl MemTables {
     }
 
     /// Get mutable memtable
-    pub fn table_mut(&self) -> Arc<MemTable> {
+    pub fn mut_table(&self) -> Arc<MemTable> {
         self.mutable.clone()
     }
 
-    pub fn table_imm(&self, idx: usize) -> Arc<MemTable> {
+    pub fn imm_table(&self, idx: usize) -> Arc<MemTable> {
         self.immutable[idx].clone()
     }
 
