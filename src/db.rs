@@ -324,12 +324,14 @@ impl Core {
     }
 
     /// build L0 table from memtable
-    fn build_l0_table(ft: FlushTask, table_opts: TableOptions) -> TableBuilder {
-        let mut iter = ft.mt.skl.iter_ref();
+    fn build_l0_table(flush_task: FlushTask, table_opts: TableOptions) -> TableBuilder {
+        let mut iter = flush_task.mt.skl.iter_ref();
         let mut builder = TableBuilder::new(table_opts);
         iter.seek_to_first();
         while iter.valid() {
-            if !ft.drop_prefixes.is_empty() && has_any_prefixes(iter.key(), &ft.drop_prefixes) {
+            if !flush_task.drop_prefixes.is_empty()
+                && has_any_prefixes(iter.key(), &flush_task.drop_prefixes)
+            {
                 continue;
             }
             // TODO: reduce encode / decode by using something like flatbuffer
@@ -345,12 +347,12 @@ impl Core {
     }
 
     /// handle_flush_task must run serially.
-    fn handle_flush_task(&self, ft: FlushTask) -> Result<()> {
-        if ft.mt.skl.is_empty() {
+    fn handle_flush_task(&self, flush_task: FlushTask) -> Result<()> {
+        if flush_task.mt.skl.is_empty() {
             return Ok(());
         }
         let table_opts = build_table_options(&self.opts);
-        let builder = Self::build_l0_table(ft, table_opts.clone());
+        let builder = Self::build_l0_table(flush_task, table_opts.clone());
 
         if builder.is_empty() {
             builder.finish();
@@ -375,10 +377,10 @@ impl Core {
     }
 
     fn flush_memtable(&self) -> Result<()> {
-        for ft in self.flush_channel.1.clone() {
-            if let Some(ft) = ft {
-                let flush_id = ft.mt.id();
-                match self.handle_flush_task(ft) {
+        for task in self.flush_channel.1.clone() {
+            if let Some(task) = task {
+                let flush_id = task.mt.id();
+                match self.handle_flush_task(task) {
                     Ok(_) => {
                         let mut mts = self.mts.write()?;
                         assert_eq!(flush_id, mts.imm_table(0).id());
