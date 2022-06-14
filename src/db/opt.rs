@@ -172,8 +172,7 @@ impl AgateOptions {
 
     pub fn arena_size(&self) -> u64 {
         // TODO: take other options into account
-        // TODO: don't just multiply 2
-        self.mem_table_size as u64 * 2
+        self.mem_table_size as u64
     }
 
     pub fn open<P: AsRef<Path>>(&mut self, path: P) -> Result<Agate> {
