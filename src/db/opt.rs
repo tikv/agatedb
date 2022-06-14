@@ -1,7 +1,8 @@
 use super::*;
 use crate::{entry::Entry, opt};
+use getset::Setters;
 
-#[derive(Clone)]
+#[derive(Clone, Setters)]
 pub struct AgateOptions {
     /* Required options. */
     /// The path of the directory where key data will be stored in.
@@ -18,6 +19,7 @@ pub struct AgateOptions {
     /// mmap buffer over to disk to survive hard reboots.
     ///
     /// The default value of `sync_writes` is false.
+    #[getset(set = "pub")]
     pub sync_writes: bool,
     /// Sets how many versions to keep per key at most.
     ///
@@ -31,6 +33,7 @@ pub struct AgateOptions {
     /// created. In case of a crash all data will be lost.
     ///
     /// The default value of `in_memory` is false.
+    #[getset(set = "pub")]
     pub in_memory: bool,
 
     /* Fine tuning options. */
@@ -67,6 +70,7 @@ pub struct AgateOptions {
     /// Sets the maximum number of tables to keep in memory before stalling.
     ///
     /// The default value of `num_memtables` is 20.
+    #[getset(set = "pub")]
     pub num_memtables: usize,
 
     /// Sets the size of any block in SSTable.
@@ -91,10 +95,12 @@ pub struct AgateOptions {
     /// Sets the maximum size of a single value log file.
     ///
     /// The default value of `value_log_file_size` is 1 << (30 - 1) bytes.
+    #[getset(set = "pub")]
     pub value_log_file_size: u64,
     /// Sets the maximum number of entries a value log file can hold approximately.
     ///
     /// The default value of `value_log_max_entries` is 1000000.
+    #[getset(set = "pub")]
     pub value_log_max_entries: u32,
 
     /// Sets the number of compaction workers to run concurrently.
@@ -121,6 +127,7 @@ pub struct AgateOptions {
     /// Create the directory if the provided open path doesn't exists.
     ///
     /// The default value of `create_if_not_exists` is false
+    #[getset(set = "pub")]
     pub create_if_not_exists: bool,
 }
 
@@ -185,36 +192,6 @@ impl AgateOptions {
         self.mem_table_size as u64
     }
 
-    pub fn create(&mut self) -> &mut AgateOptions {
-        self.create_if_not_exists = true;
-        self
-    }
-
-    pub fn num_memtables(&mut self, num_memtables: usize) -> &mut AgateOptions {
-        self.num_memtables = num_memtables;
-        self
-    }
-
-    pub fn in_memory(&mut self, in_memory: bool) -> &mut AgateOptions {
-        self.in_memory = in_memory;
-        self
-    }
-
-    pub fn sync_writes(&mut self, sync_writes: bool) -> &mut AgateOptions {
-        self.sync_writes = sync_writes;
-        self
-    }
-
-    pub fn value_log_file_size(&mut self, value_log_file_size: u64) -> &mut AgateOptions {
-        self.value_log_file_size = value_log_file_size;
-        self
-    }
-
-    pub fn value_log_max_entries(&mut self, value_log_max_entries: u32) -> &mut AgateOptions {
-        self.value_log_max_entries = value_log_max_entries;
-        self
-    }
-
     pub fn open<P: AsRef<Path>>(&mut self, path: P) -> Result<Agate> {
         self.fix_options()?;
 
@@ -234,5 +211,27 @@ impl AgateOptions {
 
         // TODO: open or create manifest
         Ok(Agate::new(Arc::new(Core::new(self.clone())?)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_options_set() {
+        let mut opt = AgateOptions::default();
+        opt.set_create_if_not_exists(true)
+            .set_in_memory(true)
+            .set_value_log_file_size(256)
+            .set_num_memtables(3)
+            .set_value_log_max_entries(96)
+            .set_sync_writes(true);
+        assert!(opt.create_if_not_exists);
+        assert!(opt.in_memory);
+        assert_eq!(opt.value_log_file_size, 256);
+        assert_eq!(opt.num_memtables, 3);
+        assert_eq!(opt.value_log_max_entries, 96);
+        assert!(opt.sync_writes);
     }
 }
