@@ -196,3 +196,25 @@ impl AgateOptions {
         Ok(Agate::new(Arc::new(Core::new(self.clone())?)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_option_set() {
+        let mut opt = AgateOptions::default();
+        opt.set_create_if_not_exists(true)
+            .set_in_memory(true)
+            .set_value_log_file_size(256)
+            .set_num_memtables(3)
+            .set_value_log_max_entries(96)
+            .set_sync_writes(true);
+        assert!(opt.create_if_not_exists);
+        assert!(opt.in_memory);
+        assert_eq!(opt.value_log_file_size, 256);
+        assert_eq!(opt.num_memtables, 3);
+        assert_eq!(opt.value_log_max_entries, 96);
+        assert!(opt.sync_writes);
+    }
+}
