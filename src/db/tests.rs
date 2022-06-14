@@ -183,7 +183,6 @@ fn test_flush_l1() {
         for request in requests.chunks(100) {
             agate.write_requests(request.to_vec()).unwrap();
         }
-        println!("verifying requests...");
         verify_requests(10000, &agate);
     });
 }
