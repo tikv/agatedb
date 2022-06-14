@@ -109,9 +109,9 @@ pub fn helper_dump_dir(path: &Path) {
 fn with_agate_test(in_memory: bool, f: impl FnOnce(Agate)) {
     let tmp_dir = TempDir::new("agatedb").unwrap();
     let agate = AgateOptions::default()
-        .create()
-        .in_memory(in_memory)
-        .value_log_file_size(4096)
+        .set_create_if_not_exists(true)
+        .set_in_memory(in_memory)
+        .set_value_log_file_size(4096)
         .open(&tmp_dir)
         .unwrap();
     f(agate);
