@@ -1,8 +1,8 @@
 use std::ops::{Deref, DerefMut};
 
 use builder::Builder;
+use bytes::BytesMut;
 use iterator::IteratorError;
-use rand::prelude::*;
 use tempfile::{tempdir, TempDir};
 
 use super::*;
@@ -397,29 +397,31 @@ fn test_table_big_values() {
 
 #[test]
 fn test_table_checksum() {
-    let mut rng = thread_rng();
     let mut opts = get_test_table_options();
     opts.checksum_mode = ChecksumVerificationMode::OnTableAndBlockRead;
+
     let kv_pairs = generate_table_data(b"k", 10000, opts.clone());
-    let table_data = build_table_data(kv_pairs, opts.clone()).to_vec();
-    for _ in 0..10 {
-        let mut table_data = table_data.clone();
-        let x = rng.gen_range(0, table_data.len());
-        let y = rng.gen_range(0, table_data.len());
-        let start = x.min(y);
-        let end = x.max(y);
+    let table_data = build_table_data(kv_pairs, opts.clone());
 
-        rng.fill_bytes(&mut table_data[start..end]);
+    let table = Table::open_in_memory(table_data.clone(), 233, opts).unwrap();
 
-        let result = Table::open_in_memory(Bytes::from(table_data), 233, opts.clone());
-        assert!(result.is_err());
-        if !matches!(result, Err(Error::InvalidChecksum(_))) {
-            println!(
-                "expected invalid checksum error, found {:?}",
-                result.err().unwrap()
-            );
-        }
-    }
+    let mut pos = table_data.len() - 4;
+    let checksum_length = table_data.slice(pos..pos + 4).get_u32() as usize;
+
+    pos -= checksum_length;
+    let checksum = table_data.slice(pos..pos + checksum_length);
+
+    pos -= 4;
+    let index_length = table_data.slice(pos..pos + 4).get_u32() as usize;
+
+    pos -= index_length;
+    let data = table_data.slice(pos..pos + index_length);
+
+    let mut bytes = BytesMut::new();
+    table.inner.index.encode(&mut bytes).unwrap();
+    assert_eq!(data, bytes.freeze());
+
+    checksum::verify_checksum(&data, &Checksum::decode(checksum).unwrap()).unwrap();
 }
 
 fn test_iterator_error_eof() {
