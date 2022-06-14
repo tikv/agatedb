@@ -19,6 +19,7 @@ mod util;
 mod value;
 mod value_log;
 mod wal;
+mod watermark;
 
 pub use db::{Agate, AgateOptions};
 pub use error::{Error, Result};
