@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use bytes::Bytes;
 
@@ -12,7 +12,7 @@ pub struct Transaction {
 
     update: bool,
     pending_writes: HashMap<Bytes, Entry>,
-    agate: Agate,
+    agate: Arc<crate::db::Core>,
 }
 
 impl Agate {
@@ -22,7 +22,7 @@ impl Agate {
             commit_ts: 0,
             update,
             pending_writes: HashMap::default(),
-            agate: self.clone(),
+            agate: self.core.clone(),
         }
     }
 }

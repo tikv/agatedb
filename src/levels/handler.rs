@@ -176,7 +176,8 @@ impl LevelHandler {
 
             if crate::util::same_key(key, it.key()) {
                 let version = get_ts(it.key());
-                if max_vs.version < version {
+                // max_vs.version == 0 means it is not assigned a value yet.
+                if max_vs.version == 0 || max_vs.version < version {
                     let mut vs = it.value();
                     vs.version = version;
                     max_vs = vs;

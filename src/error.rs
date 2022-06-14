@@ -1,22 +1,21 @@
-use std::{io, ops::Range, result, sync::PoisonError};
+use std::{
+    io,
+    ops::Range,
+    result,
+    sync::{Arc, PoisonError},
+};
 
+use crossbeam_channel::SendError;
 use thiserror::Error;
 
 use crate::value::ValuePointer;
 
-#[derive(Debug)]
-pub struct InvalidValuePointerError {
-    pub vptr: ValuePointer,
-    pub kvlen: usize,
-    pub range: Range<u32>,
-}
-
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone)]
 pub enum Error {
     #[error("Invalid Configuration: {0}")]
     Config(String),
     #[error("IO error: {0}")]
-    Io(#[source] Box<io::Error>),
+    Io(#[source] Arc<io::Error>),
     #[error("Empty key")]
     EmptyKey,
     #[error("Too long: {0}")]
@@ -37,8 +36,12 @@ pub enum Error {
     DBClosed,
     #[error("Error when reading from log: {0}")]
     LogRead(String),
-    #[error("Invalid VP: {0:?}")]
-    InvalidValuePointer(Box<InvalidValuePointerError>),
+    #[error("Invalid VP: {vptr:?}, kvlen {kvlen}, {range:?}")]
+    InvalidValuePointer {
+        vptr: ValuePointer,
+        kvlen: usize,
+        range: Range<u32>,
+    },
     #[error("Invalid Log Offset: {0} > {1}")]
     InvalidLogOffset(u32, u32),
     #[error("VLog Not Found: id={0}")]
@@ -53,19 +56,16 @@ pub enum Error {
     PoisonError(String),
     #[error("Join Error")]
     JoinError(String),
+    #[error("Send error {0}")]
+    SendError(String),
+    #[error("No room for write")]
+    WriteNoRoom(()),
 }
 
 impl From<io::Error> for Error {
     #[inline]
     fn from(e: io::Error) -> Error {
-        Error::Io(Box::new(e))
-    }
-}
-
-impl From<InvalidValuePointerError> for Error {
-    #[inline]
-    fn from(e: InvalidValuePointerError) -> Error {
-        Error::InvalidValuePointer(Box::new(e))
+        Error::Io(Arc::new(e))
     }
 }
 
@@ -87,6 +87,13 @@ impl<T: Sized> From<PoisonError<T>> for Error {
     #[inline]
     fn from(e: PoisonError<T>) -> Error {
         Error::PoisonError(e.to_string())
+    }
+}
+
+impl<T: Sized> From<SendError<T>> for Error {
+    #[inline]
+    fn from(e: SendError<T>) -> Error {
+        Error::SendError(e.to_string())
     }
 }
 
