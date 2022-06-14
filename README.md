@@ -1,5 +1,7 @@
 # AgateDB
 
+[![Coverage Status](https://codecov.io/gh/tikv/agatedb/branch/master/graph/badge.svg)](https://codecov.io/gh/tikv/agatedb)
+
 AgateDB is an embeddable, persistent and fast key-value (KV) database written
 in pure Rust. It is designed as an experimental engine for the [TiKV][1]
 project, and will bring aggressive optimizations for TiKV specifically.
