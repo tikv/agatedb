@@ -798,10 +798,14 @@ mod normal_db {
     fn test_conflict() {
         let key = Bytes::from("foo");
         let set_count = Arc::new(AtomicU8::new(0));
+        let test_count = Arc::new(AtomicU8::new(0));
 
         let key_clone = key.clone();
         let set_count_clone = set_count.clone();
+        let test_count_clone = test_count.clone();
         let test_and_set = move |agate: Agate| {
+            test_count_clone.fetch_add(1, Ordering::SeqCst);
+
             let mut txn = agate.new_transaction(true);
 
             if let Err(Error::KeyNotFound(_)) = txn.get(&key_clone) {
@@ -814,7 +818,10 @@ mod normal_db {
 
         let key_clone = key;
         let set_count_clone = set_count.clone();
+        let test_count_clone = test_count.clone();
         let test_and_set_itr = move |agate: Agate| {
+            test_count_clone.fetch_add(1, Ordering::SeqCst);
+
             let mut txn = agate.new_transaction(true);
 
             let found = {
@@ -831,7 +838,7 @@ mod normal_db {
             }
         };
 
-        fn run_test<F>(set_count: Arc<AtomicU8>, f: F)
+        fn run_test<F>(set_count: Arc<AtomicU8>, test_count: Arc<AtomicU8>, f: F)
         where
             F: FnOnce(Agate) + Clone + Send + 'static,
         {
@@ -839,24 +846,30 @@ mod normal_db {
 
             for _ in 0..10 {
                 set_count.store(0, Ordering::SeqCst);
-                let pool = Builder::new("test_conflict").build_callback_pool();
+                test_count.store(0, Ordering::SeqCst);
+
+                let mut handles = vec![];
 
                 run_agate_test(None, |agate| {
                     for _ in 0..num_go {
                         let agate_clone = agate.clone();
                         let f_clone = f.clone();
-                        pool.spawn(move |_: &mut Handle<'_>| {
+                        handles.push(std::thread::spawn(|| {
                             f_clone(agate_clone);
-                        });
+                        }));
                     }
                 });
 
-                pool.shutdown();
+                handles
+                    .into_iter()
+                    .for_each(|handle| handle.join().unwrap());
+
+                assert_eq!(test_count.load(Ordering::SeqCst), num_go);
                 assert_eq!(set_count.load(Ordering::SeqCst), 1);
             }
         }
 
-        run_test(set_count.clone(), test_and_set);
-        run_test(set_count, test_and_set_itr);
+        run_test(set_count.clone(), test_count.clone(), test_and_set);
+        run_test(set_count, test_count, test_and_set_itr);
     }
 }
