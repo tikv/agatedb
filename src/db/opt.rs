@@ -202,7 +202,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_option_set() {
+    fn test_options_set() {
         let mut opt = AgateOptions::default();
         opt.set_create_if_not_exists(true)
             .set_in_memory(true)
