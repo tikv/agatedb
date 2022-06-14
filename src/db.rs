@@ -21,6 +21,7 @@ use super::{
     Error, Result,
 };
 use crate::{
+    closer::Closer,
     format::get_ts,
     levels::LevelsController,
     ops::oracle::Oracle,
@@ -44,6 +45,7 @@ pub struct Core {
 
 pub struct Agate {
     pub(crate) core: Arc<Core>,
+    closer: Closer,
     pool: Arc<yatp::ThreadPool<yatp::task::callback::TaskCell>>,
 }
 
@@ -75,9 +77,11 @@ impl Agate {
 
     fn new(core: Arc<Core>) -> Self {
         let flush_core = core.clone();
+        let closer = Closer::new();
 
         let agate = Self {
             core,
+            closer: closer.clone(),
             pool: Arc::new(yatp::Builder::new("agatedb").build_callback_pool()),
         };
 
@@ -86,10 +90,17 @@ impl Agate {
             .spawn(move |_: &mut Handle<'_>| flush_core.flush_memtable().unwrap());
 
         agate
+            .core
+            .clone()
+            .lvctl
+            .start_compact(closer, agate.pool.clone());
+
+        agate
     }
 
     fn close(&self) {
         self.core.flush_channel.0.send(None).unwrap();
+        self.closer.close();
     }
 }
 
