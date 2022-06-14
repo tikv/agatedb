@@ -18,7 +18,6 @@ pub struct Transaction {
     pending_writes: HashMap<Bytes, Entry>,
 
     // TODO: Add Agate.
-    // agate: Agate,
     pub(crate) reads: Mutex<Vec<u64>>,
     pub(crate) conflict_keys: HashSet<u64>,
     pub(crate) done_read: bool,

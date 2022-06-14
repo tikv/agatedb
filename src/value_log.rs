@@ -8,7 +8,7 @@ use std::{
 use bytes::{Bytes, BytesMut};
 
 use crate::{
-    error::InvalidValuePointerError,
+    error,
     value::{self, Request, ValuePointer},
     wal::{Header, Wal},
     AgateOptions, Error, Result,
@@ -340,12 +340,11 @@ impl ValueLog {
         let kv = buf;
 
         if (kv.len() as u32) < header.key_len + header.value_len {
-            return Err(InvalidValuePointerError {
+            return Err(error::Error::InvalidValuePointer {
                 vptr: value_ptr,
                 kvlen: kv.len(),
                 range: header.key_len..header.key_len + header.value_len,
-            }
-            .into());
+            });
         }
         Ok(original_buf)
     }

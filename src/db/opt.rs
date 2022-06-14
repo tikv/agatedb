@@ -1,5 +1,5 @@
 use super::*;
-use crate::opt;
+use crate::{entry::Entry, opt};
 
 #[derive(Clone)]
 pub struct AgateOptions {
@@ -117,6 +117,11 @@ pub struct AgateOptions {
     ///
     /// The default value of `managed_txns` is false.
     pub managed_txns: bool,
+
+    /// Create the directory if the provided open path doesn't exists.
+    ///
+    /// The default value of `create_if_not_exists` is false
+    pub create_if_not_exists: bool,
 }
 
 impl Default for AgateOptions {
@@ -154,6 +159,8 @@ impl Default for AgateOptions {
             detect_conflicts: true,
 
             managed_txns: false,
+
+            create_if_not_exists: false,
         }
         // TODO: add other options
     }
@@ -176,5 +183,56 @@ impl AgateOptions {
     pub fn arena_size(&self) -> u64 {
         // TODO: take other options into account
         self.mem_table_size as u64
+    }
+
+    pub fn create(&mut self) -> &mut AgateOptions {
+        self.create_if_not_exists = true;
+        self
+    }
+
+    pub fn num_memtables(&mut self, num_memtables: usize) -> &mut AgateOptions {
+        self.num_memtables = num_memtables;
+        self
+    }
+
+    pub fn in_memory(&mut self, in_memory: bool) -> &mut AgateOptions {
+        self.in_memory = in_memory;
+        self
+    }
+
+    pub fn sync_writes(&mut self, sync_writes: bool) -> &mut AgateOptions {
+        self.sync_writes = sync_writes;
+        self
+    }
+
+    pub fn value_log_file_size(&mut self, value_log_file_size: u64) -> &mut AgateOptions {
+        self.value_log_file_size = value_log_file_size;
+        self
+    }
+
+    pub fn value_log_max_entries(&mut self, value_log_max_entries: u32) -> &mut AgateOptions {
+        self.value_log_max_entries = value_log_max_entries;
+        self
+    }
+
+    pub fn open<P: AsRef<Path>>(&mut self, path: P) -> Result<Agate> {
+        self.fix_options()?;
+
+        self.dir = path.as_ref().to_path_buf();
+        self.value_dir = self.dir.clone();
+
+        if !self.in_memory && !self.dir.exists() {
+            if !self.create_if_not_exists {
+                return Err(Error::Config(format!("{:?} doesn't exist", self.dir)));
+            }
+            fs::create_dir_all(&self.dir)?;
+        }
+
+        if !self.in_memory {
+            // TODO: create wal path, acquire database path lock
+        }
+
+        // TODO: open or create manifest
+        Ok(Agate::new(Arc::new(Core::new(self.clone())?)))
     }
 }
