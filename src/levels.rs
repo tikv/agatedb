@@ -35,7 +35,7 @@ use crate::{
     AgateIterator, AgateOptions, Error, Result, Table, TableBuilder,
 };
 
-pub(crate) struct Core {
+pub(crate) struct LevelsControllerInner {
     next_file_id: AtomicU64,
 
     // `levels[i].level == i` should be ensured.
@@ -49,14 +49,14 @@ pub(crate) struct Core {
 }
 
 pub struct LevelsController {
-    pub(crate) core: Arc<Core>,
+    pub(crate) inner: Arc<LevelsControllerInner>,
 }
 
-impl Core {
+impl LevelsControllerInner {
     fn new(opts: AgateOptions, manifest: Arc<ManifestFile>, orc: Arc<Oracle>) -> Result<Self> {
         assert!(opts.num_level_zero_tables_stall > opts.num_level_zero_tables);
 
-        let mut core = Core {
+        let mut inner = LevelsControllerInner {
             next_file_id: AtomicU64::new(0),
             levels: Vec::with_capacity(opts.max_levels),
             opts: opts.clone(),
@@ -66,18 +66,18 @@ impl Core {
         };
 
         {
-            let mut cpt_status_lock = core.cpt_status.write().unwrap();
+            let mut cpt_status_lock = inner.cpt_status.write().unwrap();
             cpt_status_lock.levels.reserve(opts.max_levels);
 
             for i in 0..opts.max_levels {
                 let level_handler = LevelHandler::new(opts.clone(), i);
-                core.levels.push(Arc::new(RwLock::new(level_handler)));
+                inner.levels.push(Arc::new(RwLock::new(level_handler)));
                 cpt_status_lock.levels.push(LevelCompactStatus::default());
             }
         }
 
         if opts.in_memory {
-            return Ok(core);
+            return Ok(inner);
         }
 
         // TODO: Revert to manifest.
@@ -102,17 +102,17 @@ impl Core {
             tables[table_manifest.level as usize].push(table);
         }
 
-        core.next_file_id.store(max_file_id + 1, Ordering::SeqCst);
+        inner.next_file_id.store(max_file_id + 1, Ordering::SeqCst);
 
         for (i, tables) in tables.into_iter().enumerate() {
-            core.levels[i].write().unwrap().init_tables(tables);
+            inner.levels[i].write().unwrap().init_tables(tables);
         }
 
-        // TODO: Validate core.
+        // TODO: Validate inner.
 
         util::sync_dir(&opts.dir)?;
 
-        Ok(core)
+        Ok(inner)
     }
 
     /// Calculates the [`Targets`] for levels in the LSM tree.
@@ -174,11 +174,11 @@ impl Core {
         let targets = self.level_targets();
         let mut prios = vec![];
 
-        let mut add_priority = |level, score| {
+        let mut add_priority = |level, sLevelsControllerInner| {
             let pri = CompactionPriority {
                 level,
-                score,
-                adjusted: score,
+                sLevelsControllerInner,
+                adjusted: sLevelsControllerInner,
                 targets: targets.clone(),
                 drop_prefixes: vec![],
             };
@@ -212,11 +212,11 @@ impl Core {
 
         assert_eq!(prios.len(), self.levels.len());
 
-        // TODO: Adjust score.
+        // TODO: Adjust sLevelsControllerInner.
 
         // Remove last level.
         prios.pop();
-        let mut x: Vec<CompactionPriority> = prios.into_iter().filter(|x| x.score > 1.0).collect();
+        let mut x: Vec<CompactionPriority> = prios.into_iter().filter(|x| x.sLevelsControllerInner > 1.0).collect();
         x.sort_by(|x, y| y.adjusted.partial_cmp(&x.adjusted).unwrap());
         x
     }
@@ -653,7 +653,7 @@ impl Core {
 
         if compact_def.prios.adjusted > 0.0 && compact_def.prios.adjusted < 1.0 {
             return Err(Error::CustomError(
-                "score less than 1.0, not compact to Lbase".to_string(),
+                "sLevelsControllerInner less than 1.0, not compact to Lbase".to_string(),
             ));
         }
 
@@ -963,20 +963,20 @@ impl Core {
 impl LevelsController {
     pub fn new(opts: AgateOptions, manifest: Arc<ManifestFile>, orc: Arc<Oracle>) -> Result<Self> {
         Ok(Self {
-            core: Arc::new(Core::new(opts, manifest, orc)?),
+            inner: Arc::new(LevelsControllerInner::new(opts, manifest, orc)?),
         })
     }
 
     pub fn add_l0_table(&self, table: Table) -> Result<()> {
-        self.core.add_l0_table(table)
+        self.inner.add_l0_table(table)
     }
 
     pub fn get(&self, key: &Bytes, max_value: Value, start_level: usize) -> Result<Value> {
-        self.core.get(key, max_value, start_level)
+        self.inner.get(key, max_value, start_level)
     }
 
     pub fn reserve_file_id(&self) -> u64 {
-        self.core.reserve_file_id()
+        self.inner.reserve_file_id()
     }
 
     pub fn start_compact(
@@ -984,7 +984,7 @@ impl LevelsController {
         closer: Closer,
         pool: Arc<yatp::ThreadPool<yatp::task::callback::TaskCell>>,
     ) {
-        for i in 0..self.core.opts.num_compactors {
+        for i in 0..self.inner.opts.num_compactors {
             self.run_compactor(i, closer.clone(), pool.clone());
         }
     }
@@ -995,7 +995,7 @@ impl LevelsController {
         closer: Closer,
         pool: Arc<yatp::ThreadPool<yatp::task::callback::TaskCell>>,
     ) {
-        let core = self.core.clone();
+        let inner = self.inner.clone();
         let pool_c = pool.clone();
 
         pool.spawn(move |_: &mut Handle<'_>| {
@@ -1011,7 +1011,7 @@ impl LevelsController {
                 };
 
             let run_once = || {
-                let mut prios = core.pick_compact_levels();
+                let mut prios = inner.pick_compact_levels();
                 if idx == 0 {
                     prios = move_l0_to_front(prios);
                 }
@@ -1023,7 +1023,7 @@ impl LevelsController {
                         break;
                     }
 
-                    if let Err(_err) = core.do_compact(idx, p, pool_c.clone()) {
+                    if let Err(_err) = inner.do_compact(idx, p, pool_c.clone()) {
                         // TODO: Handle error.
                     }
                 }
@@ -1044,7 +1044,7 @@ impl LevelsController {
     pub(crate) fn append_iterators(&self, iters: &mut Vec<TableIterators>, opts: &IteratorOptions) {
         // Iterate the levels from 0 on upward, to avoid missing
         // data when there's a compaction.
-        for level in &self.core.levels {
+        for level in &self.inner.levels {
             level.read().unwrap().append_iterators(iters, opts);
         }
     }

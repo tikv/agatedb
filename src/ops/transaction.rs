@@ -22,7 +22,7 @@ impl Agate {
             commit_ts: 0,
             update,
             pending_writes: HashMap::default(),
-            agate: self.core.clone(),
+            agate: self.inner.clone(),
         }
     }
 }
