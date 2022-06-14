@@ -27,12 +27,10 @@ struct CommitInfo {
 
 impl CommitInfo {
     fn cleanup_committed_transactions(&mut self, is_managed: bool, read_mark: Arc<WaterMark>) {
-        let max_read_ts = {
-            if is_managed {
-                self.discard_ts
-            } else {
-                read_mark.done_until()
-            }
+        let max_read_ts = if is_managed {
+            self.discard_ts
+        } else {
+            read_mark.done_until()
         };
 
         assert!(max_read_ts >= self.last_cleanup_ts);
@@ -69,6 +67,9 @@ impl CommitInfo {
     }
 }
 
+/// Supplies read timestamp and commit timestamp for transaction.
+/// If `detect_conflicts` is set to true, it will check if current transaction is
+/// conflict with others when it attempts to commit.
 pub struct Oracle {
     is_managed: bool,
     /// Determines if the txns should be checked for conflicts.
@@ -263,7 +264,7 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_confict() {
+    fn test_detect_conflict() {
         let opts = AgateOptions::default();
         let mut oracle = Oracle::new(&opts);
 
