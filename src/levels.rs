@@ -633,7 +633,7 @@ impl Core {
             .ranges
             .push(KeyRange::Inf);
         for table in compact_def.top.iter() {
-            assert!(!cpt_status.tables.insert(table.id()));
+            assert!(cpt_status.tables.insert(table.id()));
         }
 
         // Make the output always one file to decreases the L0 table stalls and
