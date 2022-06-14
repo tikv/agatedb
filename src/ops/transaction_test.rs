@@ -799,30 +799,32 @@ mod normal_db {
         let key = Bytes::from("foo");
         let set_count = Arc::new(AtomicU8::new(0));
 
+        let key_clone = key.clone();
         let set_count_clone = set_count.clone();
-        let test_and_set = |agate: Agate| {
+        let test_and_set = move |agate: Agate| {
             let mut txn = agate.new_transaction(true);
 
-            if let Err(Error::KeyNotFound(_)) = txn.get(&key) {
-                txn.set(key.clone(), Bytes::from("AA")).unwrap();
+            if let Err(Error::KeyNotFound(_)) = txn.get(&key_clone) {
+                txn.set(key_clone.clone(), Bytes::from("AA")).unwrap();
                 if txn.commit().is_ok() {
                     assert_eq!(set_count_clone.fetch_add(1, Ordering::SeqCst), 0);
                 }
             }
         };
 
+        let key_clone = key;
         let set_count_clone = set_count.clone();
-        let test_and_set_itr = |agate: Agate| {
+        let test_and_set_itr = move |agate: Agate| {
             let mut txn = agate.new_transaction(true);
 
             let found = {
                 let mut it = txn.new_iterator(&IteratorOptions::default());
-                it.seek(&key);
+                it.seek(&key_clone);
                 it.valid()
             };
 
             if !found {
-                txn.set(key.clone(), Bytes::from("AA")).unwrap();
+                txn.set(key_clone.clone(), Bytes::from("AA")).unwrap();
                 if txn.commit().is_ok() {
                     assert_eq!(set_count_clone.fetch_add(1, Ordering::SeqCst), 0);
                 }
@@ -831,16 +833,25 @@ mod normal_db {
 
         fn run_test<F>(set_count: Arc<AtomicU8>, f: F)
         where
-            F: FnOnce(Agate) + Copy,
+            F: FnOnce(Agate) + Clone + Send + 'static,
         {
+            let num_go = 16;
+
             for _ in 0..10 {
                 set_count.store(0, Ordering::SeqCst);
+                let pool = Builder::new("test_conflict").build_callback_pool();
 
-                run_agate_test(None, |agatedb| {
-                    // TODO: Concurrently.
-                    f(agatedb);
+                run_agate_test(None, |agate| {
+                    for _ in 0..num_go {
+                        let agate_clone = agate.clone();
+                        let f_clone = f.clone();
+                        pool.spawn(move |_: &mut Handle<'_>| {
+                            f_clone(agate_clone);
+                        });
+                    }
                 });
 
+                pool.shutdown();
                 assert_eq!(set_count.load(Ordering::SeqCst), 1);
             }
         }
