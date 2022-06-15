@@ -48,7 +48,8 @@ pub struct Agate {
     closer: Closer,
     pool: Arc<yatp::ThreadPool<yatp::task::callback::TaskCell>>,
 
-    // TODO: Only a stopgap.
+    // TODO: replace flush thread with yatp pool, so we can control the total
+    // cpu usage by control the unified yatp pool.
     flush_handle: Option<JoinHandle<()>>,
 }
 
