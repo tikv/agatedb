@@ -15,8 +15,6 @@ use crate::{
     AgateOptions, Result,
 };
 
-const MEMTABLE_VIEW_MAX: usize = 20;
-
 /// MemTableInner guards WAL and max_version.
 /// These data will only be modified on memtable put.
 /// Therefore, separating wal and max_version enables
