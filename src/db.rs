@@ -98,6 +98,10 @@ impl Agate {
 
 impl Drop for Agate {
     fn drop(&mut self) {
+        // Flush thread need close before compaction threads because the flush
+        // thread may stack in add_l0_table when there are too many sst files
+        // in level0 and at the same time all compaction threads exit.
+        // TODO: remove such closing order dependency
         self.core.flush_channel.0.send(None).unwrap();
         self.flush_handle.take().unwrap().join().unwrap();
         self.closer.close();
