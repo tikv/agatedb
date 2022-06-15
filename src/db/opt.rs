@@ -1,6 +1,7 @@
+use getset::Setters;
+
 use super::*;
 use crate::{entry::Entry, opt};
-use getset::Setters;
 
 #[derive(Clone, Setters)]
 pub struct AgateOptions {

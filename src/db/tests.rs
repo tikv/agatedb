@@ -56,10 +56,10 @@ fn test_ensure_room_for_write() {
     // 2*value_log_file_size - MAX_HEADER_SIZE.
     opts.value_log_file_size = 25;
 
-    let core = Core::new(opts).unwrap();
+    let inner = Core::new(opts).unwrap();
 
     {
-        let mts = core.mts.read().unwrap();
+        let mts = inner.mts.read().unwrap();
         assert_eq!(mts.nums_of_memtable(), 1);
 
         let mt = mts.mut_table();
@@ -72,9 +72,9 @@ fn test_ensure_room_for_write() {
         mt.put(key, value).unwrap();
     }
 
-    core.ensure_room_for_write().unwrap();
+    inner.ensure_room_for_write().unwrap();
 
-    let mts = core.mts.read().unwrap();
+    let mts = inner.mts.read().unwrap();
     assert_eq!(mts.nums_of_memtable(), 2);
 }
 

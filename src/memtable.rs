@@ -19,11 +19,11 @@ use crate::{
 
 const MEMTABLE_VIEW_MAX: usize = 20;
 
-/// MemTableCore guards WAL and max_version.
+/// MemTableInner guards WAL and max_version.
 /// These data will only be modified on memtable put.
 /// Therefore, separating wal and max_version enables
 /// concurrent read/write of MemTable.
-struct MemTableCore {
+struct MemTableInner {
     wal: Option<Wal>,
     max_version: u64,
 }
@@ -31,7 +31,7 @@ struct MemTableCore {
 pub struct MemTable {
     pub(crate) skl: Skiplist<Comparator>,
     opt: AgateOptions,
-    core: RwLock<MemTableCore>,
+    inner: RwLock<MemTableInner>,
 
     save_after_close: AtomicBool,
     id: usize,
@@ -42,7 +42,7 @@ impl MemTable {
         Self {
             skl,
             opt,
-            core: RwLock::new(MemTableCore {
+            inner: RwLock::new(MemTableInner {
                 wal,
                 max_version: 0,
             }),
@@ -52,9 +52,9 @@ impl MemTable {
     }
 
     pub fn update_skip_list(&self) -> Result<()> {
-        let mut core = self.core.write()?;
-        let mut max_version = core.max_version;
-        if let Some(ref mut wal) = core.wal {
+        let mut inner = self.inner.write()?;
+        let mut max_version = inner.max_version;
+        if let Some(ref mut wal) = inner.wal {
             let mut it = wal.iter()?;
             while let Some(entry) = it.next()? {
                 let ts = get_ts(entry.key);
@@ -71,13 +71,13 @@ impl MemTable {
                 self.skl.put(Bytes::copy_from_slice(entry.key), v);
             }
         }
-        core.max_version = max_version;
+        inner.max_version = max_version;
         Ok(())
     }
 
     pub fn put(&self, key: Bytes, value: Value) -> Result<()> {
-        let mut core = self.core.write()?;
-        if let Some(ref mut wal) = core.wal {
+        let mut inner = self.inner.write()?;
+        if let Some(ref mut wal) = inner.wal {
             let entry = Entry {
                 key: key.clone(),
                 value: value.value.clone(),
@@ -100,22 +100,22 @@ impl MemTable {
         self.skl.put(key, value);
 
         // update max version
-        core.max_version = ts;
+        inner.max_version = ts;
 
         Ok(())
     }
 
     pub fn sync_wal(&self) -> Result<()> {
-        let mut core = self.core.write()?;
-        if let Some(ref mut wal) = core.wal {
+        let mut inner = self.inner.write()?;
+        if let Some(ref mut wal) = inner.wal {
             wal.sync()?;
         }
         Ok(())
     }
 
     pub(crate) fn should_flush_wal(&self) -> Result<bool> {
-        let core = self.core.read()?;
-        if let Some(ref wal) = core.wal {
+        let inner = self.inner.read()?;
+        if let Some(ref wal) = inner.wal {
             Ok(wal.should_flush())
         } else {
             Ok(false)
@@ -132,8 +132,8 @@ impl MemTable {
             .save_after_close
             .load(std::sync::atomic::Ordering::SeqCst)
         {
-            let mut core = self.core.write()?;
-            let wal = core.wal.take();
+            let mut inner = self.inner.write()?;
+            let wal = inner.wal.take();
             if let Some(wal) = wal {
                 wal.close_and_save();
             }
