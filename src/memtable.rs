@@ -1,7 +1,5 @@
 use std::{
     collections::VecDeque,
-    mem::{self, ManuallyDrop, MaybeUninit},
-    ptr,
     sync::{atomic::AtomicBool, Arc, RwLock},
 };
 
@@ -16,8 +14,6 @@ use crate::{
     wal::Wal,
     AgateOptions, Result,
 };
-
-const MEMTABLE_VIEW_MAX: usize = 20;
 
 /// MemTableInner guards WAL and max_version.
 /// These data will only be modified on memtable put.
@@ -153,23 +149,12 @@ impl Drop for MemTable {
 }
 
 pub struct MemTablesView {
-    tables: ManuallyDrop<[Skiplist<Comparator>; MEMTABLE_VIEW_MAX]>,
-    len: usize,
+    tables: Vec<Skiplist<Comparator>>,
 }
 
 impl MemTablesView {
     pub fn tables(&self) -> &[Skiplist<Comparator>] {
-        &self.tables[0..self.len]
-    }
-}
-
-impl Drop for MemTablesView {
-    fn drop(&mut self) {
-        for i in 0..self.len {
-            unsafe {
-                ptr::drop_in_place(&mut self.tables[i]);
-            }
-        }
+        &self.tables[..]
     }
 }
 
@@ -186,17 +171,16 @@ impl MemTables {
     /// Get view of all current memtables
     pub fn view(&self) -> MemTablesView {
         // Maybe flush is better.
-        assert!(self.immutable.len() < MEMTABLE_VIEW_MAX);
-        let mut array: [MaybeUninit<Skiplist<Comparator>>; MEMTABLE_VIEW_MAX] =
-            unsafe { MaybeUninit::uninit().assume_init() };
-        array[0] = MaybeUninit::new(self.mutable.skl.clone());
-        for (i, s) in self.immutable.iter().enumerate() {
-            array[i + 1] = MaybeUninit::new(s.skl.clone());
+        let len = self.immutable.len() + 1;
+
+        let mut tables: Vec<Skiplist<Comparator>> = Vec::with_capacity(len);
+
+        tables.push(self.mutable.skl.clone());
+        for s in self.immutable.iter() {
+            tables.push(s.skl.clone());
         }
-        MemTablesView {
-            tables: unsafe { ManuallyDrop::new(mem::transmute(array)) },
-            len: self.immutable.len() + 1,
-        }
+
+        MemTablesView { tables }
     }
 
     /// Get mutable memtable
