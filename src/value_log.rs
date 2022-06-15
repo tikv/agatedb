@@ -18,7 +18,7 @@ fn vlog_file_path(dir: impl AsRef<Path>, fid: u32) -> PathBuf {
     dir.as_ref().join(format!("{:06}.vlog", fid))
 }
 
-struct Core {
+struct ValueLogInner {
     /// `files_map` stores mapping from value log ID to WAL object.
     ///
     /// As we would concurrently read WAL, we need to wrap it with `RwLock`.
@@ -31,7 +31,7 @@ struct Core {
     num_entries_written: u32,
 }
 
-impl Core {
+impl ValueLogInner {
     fn new() -> Self {
         Self {
             files_map: HashMap::new(),
@@ -51,9 +51,9 @@ impl Core {
     }
 }
 
-impl Drop for Core {
+impl Drop for ValueLogInner {
     fn drop(&mut self) {
-        crate::util::no_fail(self.drop_no_fail(), "ValueLog::Core::drop");
+        crate::util::no_fail(self.drop_no_fail(), "ValueLog::ValueLogInner::drop");
     }
 }
 
@@ -62,7 +62,7 @@ pub struct ValueLog {
     /// value log directory
     dir_path: PathBuf,
     /// value log file mapping, use `RwLock` to support concurrent read
-    core: Arc<RwLock<Core>>,
+    inner: Arc<RwLock<ValueLogInner>>,
     /// offset of next write
     writeable_log_offset: AtomicU32,
     opts: AgateOptions,
@@ -72,22 +72,22 @@ impl ValueLog {
     /// Create value logs from agatedb options.
     /// If agate is created with in-memory mode, this function will return `None`.
     pub fn new(opts: AgateOptions) -> Result<Option<Self>> {
-        let core = if opts.in_memory {
+        let inner = if opts.in_memory {
             None
         } else {
-            let core = Self {
-                core: Arc::new(RwLock::new(Core::new())),
+            let inner = Self {
+                inner: Arc::new(RwLock::new(ValueLogInner::new())),
                 dir_path: opts.value_dir.clone(),
                 opts,
                 writeable_log_offset: AtomicU32::new(0),
             };
             // TODO: garbage collection
             // TODO: discard stats
-            core.open()?;
-            Some(core)
+            inner.open()?;
+            Some(inner)
         };
 
-        Ok(core)
+        Ok(inner)
     }
 
     fn file_path(&self, fid: u32) -> PathBuf {
@@ -100,7 +100,7 @@ impl ValueLog {
     /// Returns Error when there are duplicated files or vlog file with invalid file name.
     fn populate_files_map(&self) -> Result<()> {
         let dir = std::fs::read_dir(&self.dir_path)?;
-        let mut core = self.core.write().unwrap();
+        let mut inner = self.inner.write().unwrap();
         for file in dir {
             let file = file?;
             match file.file_name().into_string() {
@@ -111,14 +111,14 @@ impl ValueLog {
                         })?;
                         let wal = Wal::open(file.path(), self.opts.clone())?;
                         let wal = Arc::new(RwLock::new(wal));
-                        if core.files_map.insert(fid, wal).is_some() {
+                        if inner.files_map.insert(fid, wal).is_some() {
                             return Err(Error::InvalidFilename(format!(
                                 "duplicated vlog found {}",
                                 fid
                             )));
                         }
-                        if core.max_fid < fid {
-                            core.max_fid = fid;
+                        if inner.max_fid < fid {
+                            inner.max_fid = fid;
                         }
                     }
                 }
@@ -135,27 +135,27 @@ impl ValueLog {
 
     /// Creates a new vlog file.
     fn create_vlog_file(&self) -> Result<(u32, Arc<RwLock<Wal>>)> {
-        let mut core = self.core.write().unwrap();
-        let fid = core.max_fid + 1;
+        let mut inner = self.inner.write().unwrap();
+        let fid = inner.max_fid + 1;
         let path = self.file_path(fid);
         let wal = Wal::open(path, self.opts.clone())?;
         // TODO: only create new files
         let wal = Arc::new(RwLock::new(wal));
-        assert!(core.files_map.insert(fid, wal.clone()).is_none());
-        assert!(core.max_fid < fid);
-        core.max_fid = fid;
+        assert!(inner.files_map.insert(fid, wal.clone()).is_none());
+        assert!(inner.max_fid < fid);
+        inner.max_fid = fid;
         // TODO: add vlog header
         self.writeable_log_offset
             .store(0, std::sync::atomic::Ordering::SeqCst);
-        core.num_entries_written = 0;
+        inner.num_entries_written = 0;
         Ok((fid, wal))
     }
 
     /// Gets sorted valid vlog files' ID set.
     fn sorted_fids(&self) -> Vec<u32> {
-        let core = self.core.read().unwrap();
-        let to_be_deleted: HashSet<u32> = HashSet::from_iter(core.files_to_delete.iter().cloned());
-        let mut result = core
+        let inner = self.inner.read().unwrap();
+        let to_be_deleted: HashSet<u32> = HashSet::from_iter(inner.files_to_delete.iter().cloned());
+        let mut result = inner
             .files_map
             .keys()
             .into_iter()
@@ -163,7 +163,7 @@ impl ValueLog {
             .cloned()
             .collect::<Vec<u32>>();
         // Hold read lock as short as we can
-        drop(core);
+        drop(inner);
 
         // cargo clippy suggests using `sort_unstable`
         result.sort_unstable();
@@ -188,21 +188,21 @@ impl ValueLog {
     pub fn write(&self, requests: &mut [Request]) -> Result<()> {
         let result = self.write_inner(requests);
         if self.opts.sync_writes {
-            let core = self.core.read().unwrap();
-            let current_log_id = core.max_fid;
-            let current_log_ptr = core.files_map.get(&current_log_id).unwrap().clone();
+            let inner = self.inner.read().unwrap();
+            let current_log_id = inner.max_fid;
+            let current_log_ptr = inner.files_map.get(&current_log_id).unwrap().clone();
             let mut current_log = current_log_ptr.write().unwrap();
-            drop(core);
+            drop(inner);
             current_log.sync()?;
         }
         result
     }
 
     pub fn write_inner(&self, requests: &mut [Request]) -> Result<()> {
-        let core = self.core.read().unwrap();
-        let mut current_log_id = core.max_fid;
-        let mut current_log = core.files_map.get(&current_log_id).unwrap().clone();
-        drop(core);
+        let inner = self.inner.read().unwrap();
+        let mut current_log_id = inner.max_fid;
+        let mut current_log = inner.files_map.get(&current_log_id).unwrap().clone();
+        drop(inner);
 
         // `write` is called serially. There won't be two routines concurrently
         // calling this function. Therefore, we could bypass a lot of lock schemes
@@ -241,9 +241,9 @@ impl ValueLog {
 
         // `to_disk` returns `true` if we need a new vLog.
         let to_disk = |current_log: &RwLock<Wal>| -> Result<bool> {
-            let core = self.core.read().unwrap();
+            let inner = self.inner.read().unwrap();
             if self.w_offset() as u64 > self.opts.value_log_file_size
-                || core.num_entries_written > self.opts.value_log_max_entries
+                || inner.num_entries_written > self.opts.value_log_max_entries
             {
                 let mut current_log = current_log.write().unwrap();
                 current_log.done_writing(self.w_offset())?;
@@ -291,8 +291,8 @@ impl ValueLog {
                 current_log = log;
             }
 
-            let mut core = self.core.write().unwrap();
-            core.num_entries_written += written;
+            let mut inner = self.inner.write().unwrap();
+            inner.num_entries_written += written;
         }
 
         if to_disk(&current_log)? {
@@ -302,10 +302,10 @@ impl ValueLog {
     }
 
     fn get_file(&self, value_ptr: &ValuePointer) -> Result<Arc<RwLock<Wal>>> {
-        let core = self.core.read().unwrap();
-        let file = core.files_map.get(&value_ptr.file_id).cloned();
+        let inner = self.inner.read().unwrap();
+        let file = inner.files_map.get(&value_ptr.file_id).cloned();
         if let Some(file) = file {
-            let max_fid = core.max_fid;
+            let max_fid = inner.max_fid;
             if value_ptr.file_id == max_fid {
                 let current_offset = self.w_offset();
                 if value_ptr.offset >= current_offset {

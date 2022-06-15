@@ -46,12 +46,12 @@ pub struct Manifest {
     pub deletions: usize,
 }
 
-struct Core {
+struct ManifestFileInner {
     file: Option<File>,
     manifest: Manifest,
 }
 
-impl Core {
+impl ManifestFileInner {
     fn rewrite(&mut self, dir: &Path) -> Result<()> {
         self.file.take();
         let (file, net_creations) = ManifestFile::help_rewrite(dir, &self.manifest)?;
@@ -68,7 +68,7 @@ impl Core {
 pub struct ManifestFile {
     directory: PathBuf,
     deletions_rewrite_threshold: usize,
-    core: Mutex<Core>,
+    inner: Mutex<ManifestFileInner>,
 }
 
 impl Manifest {
@@ -154,7 +154,7 @@ impl ManifestFile {
             Ok(Self {
                 directory: PathBuf::new(),
                 deletions_rewrite_threshold: 0,
-                core: Mutex::new(Core {
+                inner: Mutex::new(ManifestFileInner {
                     file: None,
                     manifest: Manifest::default(),
                 }),
@@ -192,7 +192,7 @@ impl ManifestFile {
             Ok(ManifestFile {
                 directory: dir.as_ref().to_path_buf(),
                 deletions_rewrite_threshold: deletions_threshold,
-                core: Mutex::new(Core {
+                inner: Mutex::new(ManifestFileInner {
                     file: Some(file),
                     manifest,
                 }),
@@ -209,7 +209,7 @@ impl ManifestFile {
             Ok(ManifestFile {
                 directory: dir.as_ref().to_path_buf(),
                 deletions_rewrite_threshold: deletions_threshold,
-                core: Mutex::new(Core {
+                inner: Mutex::new(ManifestFileInner {
                     file: Some(file),
                     manifest,
                 }),
@@ -269,8 +269,8 @@ impl ManifestFile {
     /// MANIFEST file, we'll either replay all the changes or none of them.
     pub fn add_changes(&self, changes_param: Vec<ManifestChange>) -> Result<()> {
         {
-            let core = self.core.lock().unwrap();
-            if core.file.is_none() {
+            let inner = self.inner.lock().unwrap();
+            if inner.file.is_none() {
                 return Ok(());
             }
         }
@@ -282,30 +282,30 @@ impl ManifestFile {
         let mut buf = BytesMut::new();
         changes.encode(&mut buf)?;
 
-        let mut core = self.core.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
 
-        apply_change_set(&mut core.manifest, &changes)?;
+        apply_change_set(&mut inner.manifest, &changes)?;
 
-        if core.manifest.deletions > self.deletions_rewrite_threshold
-            && core.manifest.deletions
-                > MANIFEST_DELETIONS_RATIO * (core.manifest.creations - core.manifest.deletions)
+        if inner.manifest.deletions > self.deletions_rewrite_threshold
+            && inner.manifest.deletions
+                > MANIFEST_DELETIONS_RATIO * (inner.manifest.creations - inner.manifest.deletions)
         {
-            core.rewrite(&self.directory)?;
+            inner.rewrite(&self.directory)?;
         } else {
             let mut len_crc_buf = vec![0; 8];
             (&mut len_crc_buf[..4]).put_u32(buf.len() as u32);
             (&mut len_crc_buf[4..]).put_u32(crc32::checksum_castagnoli(&buf));
             len_crc_buf.extend_from_slice(&buf);
 
-            core.file.as_mut().unwrap().write_all(&len_crc_buf)?;
+            inner.file.as_mut().unwrap().write_all(&len_crc_buf)?;
         }
 
-        core.file.as_mut().unwrap().sync_data()?;
+        inner.file.as_mut().unwrap().sync_data()?;
         Ok(())
     }
 
     pub fn manifest_cloned(&self) -> Manifest {
-        self.core.lock().unwrap().manifest.clone()
+        self.inner.lock().unwrap().manifest.clone()
     }
 }
 
