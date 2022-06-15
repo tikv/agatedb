@@ -216,7 +216,10 @@ impl LevelsControllerInner {
 
         // Remove last level.
         prios.pop();
-        let mut x: Vec<CompactionPriority> = prios.into_iter().filter(|x| x.sLevelsControllerInner > 1.0).collect();
+        let mut x: Vec<CompactionPriority> = prios
+            .into_iter()
+            .filter(|x| x.sLevelsControllerInner > 1.0)
+            .collect();
         x.sort_by(|x, y| y.adjusted.partial_cmp(&x.adjusted).unwrap());
         x
     }
