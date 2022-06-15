@@ -173,10 +173,9 @@ impl AgateOptions {
     }
 
     pub fn arena_size(&self) -> u64 {
-        // When arena reach it's capacity, it will grow it size, this will copy whole data
-        // to the new allocated memory space and the cost is trivial. So we adjust the arena
-        // capacity to a bit of larger than the memtable size to prevent arena's grow in most
-        // cases.
+        // When arena reach it's capacity, it will grow, this will copy whole data to the new
+        // allocated memory space and the cost is trivial. So we adjust the arena capacity to
+        // a bit of larger than the memtable size to prevent arena's grow in most cases.
         let extra_size = cmp::min((self.mem_table_size as f64 * 0.1) as u64, 1024 * 1024);
         self.mem_table_size + extra_size
     }
