@@ -174,11 +174,11 @@ impl LevelsControllerInner {
         let targets = self.level_targets();
         let mut prios = vec![];
 
-        let mut add_priority = |level, sLevelsControllerInner| {
+        let mut add_priority = |level, score| {
             let pri = CompactionPriority {
                 level,
-                sLevelsControllerInner,
-                adjusted: sLevelsControllerInner,
+                score,
+                adjusted: score,
                 targets: targets.clone(),
                 drop_prefixes: vec![],
             };
@@ -212,13 +212,13 @@ impl LevelsControllerInner {
 
         assert_eq!(prios.len(), self.levels.len());
 
-        // TODO: Adjust sLevelsControllerInner.
+        // TODO: Adjust score.
 
         // Remove last level.
         prios.pop();
         let mut x: Vec<CompactionPriority> = prios
             .into_iter()
-            .filter(|x| x.sLevelsControllerInner > 1.0)
+            .filter(|x| x.score > 1.0)
             .collect();
         x.sort_by(|x, y| y.adjusted.partial_cmp(&x.adjusted).unwrap());
         x
@@ -656,7 +656,7 @@ impl LevelsControllerInner {
 
         if compact_def.prios.adjusted > 0.0 && compact_def.prios.adjusted < 1.0 {
             return Err(Error::CustomError(
-                "sLevelsControllerInner less than 1.0, not compact to Lbase".to_string(),
+                "score less than 1.0, not compact to Lbase".to_string(),
             ));
         }
 
