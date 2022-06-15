@@ -5,6 +5,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::{atomic::AtomicUsize, Arc, RwLock},
+    thread::JoinHandle,
 };
 
 use bytes::Bytes;
@@ -12,7 +13,6 @@ use crossbeam_channel::{Receiver, Sender};
 use log::debug;
 pub use opt::AgateOptions;
 use skiplist::Skiplist;
-use yatp::task::callback::Handle;
 
 use super::{
     manifest::ManifestFile,
@@ -47,6 +47,9 @@ pub struct Agate {
     pub(crate) core: Arc<Core>,
     closer: Closer,
     pool: Arc<yatp::ThreadPool<yatp::task::callback::TaskCell>>,
+
+    // TODO: Only a stopgap.
+    flush_handle: Option<JoinHandle<()>>,
 }
 
 struct FlushTask {
@@ -78,35 +81,26 @@ impl Agate {
     fn new(core: Arc<Core>) -> Self {
         let flush_core = core.clone();
         let closer = Closer::new();
+        let pool = Arc::new(yatp::Builder::new("agatedb").build_callback_pool());
 
-        let agate = Self {
+        let flush_handle = std::thread::spawn(move || flush_core.flush_memtable().unwrap());
+
+        core.lvctl.start_compact(closer.clone(), pool.clone());
+
+        Self {
             core,
-            closer: closer.clone(),
-            pool: Arc::new(yatp::Builder::new("agatedb").build_callback_pool()),
-        };
-
-        agate
-            .pool
-            .spawn(move |_: &mut Handle<'_>| flush_core.flush_memtable().unwrap());
-
-        agate
-            .core
-            .clone()
-            .lvctl
-            .start_compact(closer, agate.pool.clone());
-
-        agate
-    }
-
-    fn close(&self) {
-        self.core.flush_channel.0.send(None).unwrap();
-        self.closer.close();
+            closer,
+            pool,
+            flush_handle: Some(flush_handle),
+        }
     }
 }
 
 impl Drop for Agate {
     fn drop(&mut self) {
-        self.close();
+        self.core.flush_channel.0.send(None).unwrap();
+        self.flush_handle.take().unwrap().join().unwrap();
+        self.closer.close();
         self.pool.shutdown();
     }
 }
