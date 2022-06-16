@@ -1,9 +1,12 @@
 use skiplist::MAX_NODE_SIZE;
 
 use super::*;
-use crate::opt;
+use getset::Setters;
 
-#[derive(Clone)]
+use crate::{entry::Entry, opt};
+use std::cmp;
+
+#[derive(Clone, Setters)]
 pub struct AgateOptions {
     /* Required options. */
     /// The path of the directory where key data will be stored in.
@@ -20,6 +23,7 @@ pub struct AgateOptions {
     /// mmap buffer over to disk to survive hard reboots.
     ///
     /// The default value of `sync_writes` is false.
+    #[getset(set = "pub")]
     pub sync_writes: bool,
     /// Sets how many versions to keep per key at most.
     ///
@@ -33,12 +37,14 @@ pub struct AgateOptions {
     /// created. In case of a crash all data will be lost.
     ///
     /// The default value of `in_memory` is false.
+    #[getset(set = "pub")]
     pub in_memory: bool,
 
     /* Fine tuning options. */
     /// Sets the maximum size in bytes for memtable.
     ///
     /// The default value of `mem_table_size` is 64 << 20 bytes.
+    #[getset(set = "pub")]
     pub mem_table_size: u64,
     /// Sets the maximum size in bytes for LSM table or file in the base level.
     ///
@@ -69,6 +75,7 @@ pub struct AgateOptions {
     /// Sets the maximum number of tables to keep in memory before stalling.
     ///
     /// The default value of `num_memtables` is 20.
+    #[getset(set = "pub")]
     pub num_memtables: usize,
 
     /// Sets the size of any block in SSTable.
@@ -93,10 +100,12 @@ pub struct AgateOptions {
     /// Sets the maximum size of a single value log file.
     ///
     /// The default value of `value_log_file_size` is 1 << (30 - 1) bytes.
+    #[getset(set = "pub")]
     pub value_log_file_size: u64,
     /// Sets the maximum number of entries a value log file can hold approximately.
     ///
     /// The default value of `value_log_max_entries` is 1000000.
+    #[getset(set = "pub")]
     pub value_log_max_entries: u32,
 
     /// Sets the number of compaction workers to run concurrently.
@@ -119,6 +128,12 @@ pub struct AgateOptions {
     ///
     /// The default value of `managed_txns` is false.
     pub managed_txns: bool,
+
+    /// Create the directory if the provided open path doesn't exists.
+    ///
+    /// The default value of `create_if_not_exists` is false
+    #[getset(set = "pub")]
+    pub create_if_not_exists: bool,
 
     /// Max entries in batch.
     ///
@@ -165,6 +180,8 @@ impl Default for AgateOptions {
             detect_conflicts: true,
 
             managed_txns: false,
+
+            create_if_not_exists: false,
 
             max_batch_count: 0,
             max_batch_size: 0,
@@ -213,7 +230,49 @@ impl AgateOptions {
     }
 
     pub fn arena_size(&self) -> u64 {
-        // TODO: take other options into account
-        self.mem_table_size as u64
+        // When arena reach it's capacity, it will grow, this will copy whole data to the new
+        // allocated memory space and the cost is not trivial. So we adjust the arena capacity
+        // to a bit of larger than the memtable size to prevent arena's grow in most cases.
+        let extra_size = cmp::min((self.mem_table_size as f64 * 0.1) as u64, 1024 * 1024);
+        self.mem_table_size + extra_size
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_options_set() {
+        let mut opt = AgateOptions::default();
+        opt.set_create_if_not_exists(true)
+            .set_in_memory(true)
+            .set_value_log_file_size(256)
+            .set_num_memtables(3)
+            .set_value_log_max_entries(96)
+            .set_sync_writes(true)
+            .set_mem_table_size(1024);
+        assert!(opt.create_if_not_exists);
+        assert!(opt.in_memory);
+        assert_eq!(opt.value_log_file_size, 256);
+        assert_eq!(opt.num_memtables, 3);
+        assert_eq!(opt.value_log_max_entries, 96);
+        assert!(opt.sync_writes);
+        assert_eq!(opt.mem_table_size, 1024);
+    }
+
+    #[test]
+    fn test_adjust_arena_size() {
+        // Arena size is larger than mem_table_size, but the extra size is not larger than 1MB
+        let mut opt = AgateOptions::default();
+        opt.set_mem_table_size(32 * 1024 * 1024);
+        assert!(opt.arena_size() > opt.mem_table_size);
+        assert!(opt.arena_size() <= opt.mem_table_size + 1024 * 1024);
+
+        // Arena size is larger than mem_table_size, but the extra size is not larger than 10%
+        // memtable size
+        opt.set_mem_table_size(4096);
+        assert!(opt.arena_size() > opt.mem_table_size);
+        assert!(opt.arena_size() <= (opt.mem_table_size as f64 * 1.1) as u64);
     }
 }

@@ -5,7 +5,10 @@ use tempdir::TempDir;
 use tempfile::tempdir;
 
 use super::*;
-use crate::format::{append_ts, key_with_ts};
+use crate::{
+    entry::Entry,
+    format::{append_ts, key_with_ts},
+};
 
 #[test]
 fn test_open_mem_tables() {
@@ -61,7 +64,7 @@ fn test_ensure_room_for_write() {
         let mts = core.mts.read().unwrap();
         assert_eq!(mts.nums_of_memtable(), 1);
 
-        let mt = mts.table_mut();
+        let mt = mts.mut_table();
 
         let key = key_with_ts(BytesMut::new(), 1);
         let value = Value::new(Bytes::new());
@@ -114,7 +117,7 @@ pub fn with_payload(mut buf: BytesMut, payload: usize, fill_char: u8) -> Bytes {
 
 pub fn run_agate_test<F>(opts: Option<AgateOptions>, test_fn: F)
 where
-    F: FnOnce(Agate),
+    F: FnOnce(Arc<Agate>),
 {
     let tmp_dir = TempDir::new("agatedb").unwrap();
 
@@ -129,10 +132,11 @@ where
         opts.value_dir = tmp_dir.as_ref().to_path_buf();
     }
 
-    let agate = opts.open().unwrap();
+    let agate = Arc::new(opts.open().unwrap());
 
     test_fn(agate);
 
+    helper_dump_dir(tmp_dir.path());
     tmp_dir.close().unwrap();
 }
 
@@ -149,5 +153,46 @@ fn test_simple_get_put() {
         agate.write_to_lsm(req).unwrap();
         let value = agate.get(&key).unwrap();
         assert_eq!(value.value, Bytes::from("2333333333333333"));
+    });
+}
+
+fn generate_requests(n: usize) -> Vec<Request> {
+    (0..n)
+        .map(|i| Request {
+            entries: vec![Entry::new(
+                key_with_ts(BytesMut::from(format!("{:08x}", i).as_str()), 0),
+                Bytes::from(i.to_string()),
+            )],
+            ptrs: vec![],
+            done: None,
+        })
+        .collect()
+}
+
+fn verify_requests(n: usize, agate: &Agate) {
+    for i in 0..n {
+        let value = agate
+            .get(&key_with_ts(
+                BytesMut::from(format!("{:08x}", i).as_str()),
+                0,
+            ))
+            .unwrap();
+        assert_eq!(value.value, i.to_string());
+    }
+}
+
+#[test]
+fn test_flush_memtable() {
+    run_agate_test(None, |agate| {
+        agate.write_requests(generate_requests(2000)).unwrap();
+        verify_requests(2000, &agate);
+    });
+}
+
+#[test]
+fn test_in_memory_agate() {
+    run_agate_test(None, |agate| {
+        agate.write_requests(generate_requests(10)).unwrap();
+        verify_requests(10, &agate);
     });
 }

@@ -5,7 +5,7 @@ use std::{
     fs,
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, AtomicUsize},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, RwLock,
     },
 };
@@ -17,22 +17,20 @@ pub use opt::AgateOptions;
 use skiplist::Skiplist;
 use yatp::task::callback::Handle;
 
-use super::{
-    memtable::{MemTable, MemTables},
-    Result,
-};
 use crate::{
     closer::Closer,
     entry::Entry,
     get_ts,
     levels::LevelsController,
     manifest::ManifestFile,
+    memtable::{MemTable, MemTables},
     ops::oracle::Oracle,
-    util::make_comparator,
+    opt::build_table_options,
+    util::{has_any_prefixes, make_comparator},
     value::{self, Request, Value},
     value_log::ValueLog,
     wal::Wal,
-    Error,
+    Error, Result, Table, TableBuilder, TableOptions,
 };
 
 const MEMTABLE_FILE_EXT: &str = ".mem";
@@ -54,6 +52,7 @@ pub struct Core {
     pub(crate) lvctl: LevelsController,
     pub(crate) vlog: Arc<Option<ValueLog>>,
     write_channel: (Sender<Request>, Receiver<Request>),
+    flush_channel: (Sender<Option<FlushTask>>, Receiver<Option<FlushTask>>),
 
     block_writes: AtomicBool,
     is_closed: AtomicBool,
@@ -66,6 +65,20 @@ pub struct Agate {
     pub(crate) core: Arc<Core>,
     closer: Closer,
     pub(crate) pool: Arc<yatp::ThreadPool<yatp::task::callback::TaskCell>>,
+}
+
+struct FlushTask {
+    mt: Arc<MemTable>,
+    drop_prefixes: Vec<Bytes>,
+}
+
+impl FlushTask {
+    pub fn new(mt: Arc<MemTable>) -> Self {
+        Self {
+            mt,
+            drop_prefixes: vec![],
+        }
+    }
 }
 
 impl Agate {
@@ -81,8 +94,6 @@ impl Agate {
     */
 
     fn new(core: Arc<Core>) -> Self {
-        // TODOL Flush.
-
         let closer = Closer::new();
         let pool = Arc::new(
             yatp::Builder::new("agatedb")
@@ -98,6 +109,11 @@ impl Agate {
         };
 
         let core = agate.core.clone();
+        agate
+            .pool
+            .spawn(move |_: &mut Handle<'_>| core.flush_memtable().unwrap());
+
+        let core = agate.core.clone();
         let pool = agate.pool.clone();
         agate.pool.spawn(move |_: &mut Handle<'_>| {
             core.do_writes(core.closers.writes.clone(), core.clone(), pool)
@@ -107,6 +123,20 @@ impl Agate {
         agate.core.lvctl.start_compact(closer, agate.pool.clone());
 
         agate
+    }
+
+    fn close(&self) {
+        self.core.block_writes.store(true, Ordering::SeqCst);
+        self.core.closers.writes.close();
+        self.core.flush_channel.0.send(None).unwrap();
+        self.closer.close();
+    }
+}
+
+impl Drop for Agate {
+    fn drop(&mut self) {
+        self.close();
+        self.pool.shutdown();
     }
 }
 
@@ -131,6 +161,7 @@ impl Core {
             lvctl,
             vlog: Arc::new(ValueLog::new(opts.clone())?),
             write_channel: bounded(KV_WRITE_CH_CAPACITY),
+            flush_channel: crossbeam_channel::bounded(opts.num_memtables),
             block_writes: AtomicBool::new(false),
             is_closed: AtomicBool::new(false),
             orc,
@@ -154,13 +185,13 @@ impl Core {
 
         // We don't need to create the WAL for the skiplist in in-memory mode so return the memtable.
         if opts.in_memory {
-            return Ok(MemTable::new(skl, None, opts.clone()));
+            return Ok(MemTable::new(file_id, skl, None, opts.clone()));
         }
 
         let wal = Wal::open(path, opts.clone())?;
         // TODO: delete WAL when skiplist ref count becomes zero
 
-        let mem_table = MemTable::new(skl, Some(wal), opts.clone());
+        let mem_table = MemTable::new(file_id, skl, Some(wal), opts.clone());
 
         mem_table.update_skip_list()?;
 
@@ -241,7 +272,8 @@ impl Core {
                 if value.version == version {
                     return Ok(value);
                 }
-                if max_value.version < value.version {
+                // max_vs.version == 0 means it is not assigned a value yet.
+                if max_value.version == 0 || max_value.version < value.version {
                     max_value = value;
                 }
             }
@@ -261,7 +293,7 @@ impl Core {
         // TODO: Check entries and pointers.
 
         let memtables = self.mts.read()?;
-        let mut_table = memtables.table_mut();
+        let mut_table = memtables.mut_table();
 
         for (idx, entry) in request.entries.into_iter().enumerate() {
             if self.opts.skip_vlog(&entry) {
@@ -299,33 +331,96 @@ impl Core {
         Ok(())
     }
 
-    /// Calling ensure_room_for_write requires locking whole memtable
+    /// Calling ensure_room_for_write requires locking whole memtable.
     pub fn ensure_room_for_write(&self) -> Result<()> {
         // we do not need to force flush memtable in in-memory mode as WAL is None.
         let mut mts = self.mts.write()?;
         let mut force_flush = false;
 
-        if !self.opts.in_memory && mts.table_mut().should_flush_wal()? {
+        if !force_flush && !self.opts.in_memory && mts.mut_table().should_flush_wal()? {
             force_flush = true;
         }
 
-        let mem_size = mts.table_mut().skl.mem_size() as u64;
+        let mem_size = mts.mut_table().skl.mem_size();
 
-        if !force_flush && mem_size < self.opts.mem_table_size {
+        if !force_flush && mem_size as u64 >= self.opts.mem_table_size {
+            force_flush = true;
+        }
+
+        if !force_flush {
             return Ok(());
         }
 
-        // TODO: use flush channel
+        match self
+            .flush_channel
+            .0
+            .try_send(Some(FlushTask::new(mts.mut_table())))
+        {
+            Ok(_) => {
+                let memtable = self.new_mem_table()?;
+                mts.use_new_table(Arc::new(memtable));
 
-        let memtable = self.new_mem_table()?;
+                debug!(
+                    "memtable flushed, total={}, mt.size = {}",
+                    mts.nums_of_memtable(),
+                    mem_size
+                );
 
-        mts.use_new_table(Arc::new(memtable));
+                Ok(())
+            }
+            Err(_) => Err(Error::WriteNoRoom(())),
+        }
+    }
 
-        debug!(
-            "memtable flushed, total={}, mt.size={}",
-            mts.nums_of_memtable(),
-            mem_size
-        );
+    /// build L0 table from memtable
+    fn build_l0_table(flush_task: FlushTask, table_opts: TableOptions) -> TableBuilder {
+        let mut iter = flush_task.mt.skl.iter_ref();
+        let mut builder = TableBuilder::new(table_opts);
+        iter.seek_to_first();
+        while iter.valid() {
+            if !flush_task.drop_prefixes.is_empty()
+                && has_any_prefixes(iter.key(), &flush_task.drop_prefixes)
+            {
+                continue;
+            }
+            // TODO: reduce encode / decode by using something like flatbuffer
+            let mut vs = Value::default();
+            vs.decode(iter.value().clone());
+            if vs.meta & value::VALUE_POINTER != 0 {
+                panic!("value pointer not supported");
+            }
+            builder.add(iter.key(), &vs, 0); // TODO: support vlog length
+            iter.next();
+        }
+        builder
+    }
+
+    /// handle_flush_task must run serially.
+    fn handle_flush_task(&self, flush_task: FlushTask) -> Result<()> {
+        if flush_task.mt.skl.is_empty() {
+            return Ok(());
+        }
+        let table_opts = build_table_options(&self.opts);
+        let builder = Self::build_l0_table(flush_task, table_opts.clone());
+
+        if builder.is_empty() {
+            builder.finish();
+            return Ok(());
+        }
+
+        let file_id = self.lvctl.reserve_file_id();
+        let table = if self.opts.in_memory {
+            let data = builder.finish();
+            Table::open_in_memory(data, file_id, table_opts)?
+        } else {
+            Table::create(
+                &crate::table::new_filename(file_id, &self.opts.dir),
+                builder.finish(),
+                table_opts,
+            )?
+        };
+
+        self.lvctl.add_l0_table(table)?;
 
         Ok(())
     }
@@ -333,11 +428,34 @@ impl Core {
     pub(crate) fn get_mem_tables(&self) -> Vec<Arc<MemTable>> {
         let mut tables = vec![];
         let mts = self.mts.read().unwrap();
-        tables.push(mts.table_mut());
+        tables.push(mts.mut_table());
         for idx in 0..mts.nums_of_memtable() - 1 {
-            tables.push(mts.table_imm(idx));
+            tables.push(mts.imm_table(idx));
         }
         tables
+    }
+
+    fn flush_memtable(&self) -> Result<()> {
+        for task in self.flush_channel.1.clone() {
+            if let Some(task) = task {
+                let flush_id = task.mt.id();
+                match self.handle_flush_task(task) {
+                    Ok(_) => {
+                        let mut mts = self.mts.write()?;
+                        assert_eq!(flush_id, mts.imm_table(0).id());
+                        mts.pop_imm();
+                    }
+                    Err(err) => {
+                        eprintln!("error while flushing memtable to disk: {:?}", err);
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+
+        Ok(())
     }
 
     /// Write requests should be only called in one thread. By calling this
@@ -352,12 +470,10 @@ impl Core {
         #[allow(clippy::needless_collect)]
         let dones: Vec<_> = requests.iter().map(|x| x.done.clone()).collect();
 
-        let f = || {
+        let write = || {
             if let Some(ref vlog) = *self.vlog {
                 vlog.write(&mut requests)?;
             }
-
-            // TODO: Process subscriptions.
 
             let mut cnt = 0;
 
@@ -377,10 +493,11 @@ impl Core {
             }
 
             debug!("{} entries written", cnt);
+
             Ok(())
         };
 
-        let result = f();
+        let result = write();
 
         for done in dones.into_iter().flatten() {
             done.send(result.clone()).unwrap();
@@ -515,6 +632,10 @@ impl Agate {
 
     pub fn write_to_lsm(&self, request: Request) -> Result<()> {
         self.core.write_to_lsm(request)
+    }
+
+    pub fn write_requests(&self, request: Vec<Request>) -> Result<()> {
+        self.core.write_requests(request)
     }
 }
 

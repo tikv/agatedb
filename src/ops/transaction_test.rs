@@ -175,7 +175,7 @@ mod normal_db {
 
     #[test]
     fn test_txn_read_after_write() {
-        let test = |agate: Agate| {
+        let test = |agate: Arc<Agate>| {
             let pool = Builder::new("test_txn_read_after_write")
                 .max_thread_count(10)
                 .build_callback_pool();
@@ -668,7 +668,7 @@ mod normal_db {
 
     #[test]
     fn test_iterator_all_version_with_deleted() {
-        let test = |agate: Agate| {
+        let test = |agate: Arc<Agate>| {
             let key1 = Bytes::from("key1");
             let key2 = Bytes::from("key2");
 
@@ -803,7 +803,7 @@ mod normal_db {
         let key_clone = key.clone();
         let set_count_clone = set_count.clone();
         let test_count_clone = test_count.clone();
-        let test_and_set = move |agate: Agate| {
+        let test_and_set = move |agate: Arc<Agate>| {
             test_count_clone.fetch_add(1, Ordering::SeqCst);
 
             let mut txn = agate.new_transaction(true);
@@ -819,7 +819,7 @@ mod normal_db {
         let key_clone = key;
         let set_count_clone = set_count.clone();
         let test_count_clone = test_count.clone();
-        let test_and_set_itr = move |agate: Agate| {
+        let test_and_set_itr = move |agate: Arc<Agate>| {
             test_count_clone.fetch_add(1, Ordering::SeqCst);
 
             let mut txn = agate.new_transaction(true);
@@ -840,7 +840,7 @@ mod normal_db {
 
         fn run_test<F>(set_count: Arc<AtomicU8>, test_count: Arc<AtomicU8>, f: F)
         where
-            F: FnOnce(Agate) + Clone + Send + 'static,
+            F: FnOnce(Arc<Agate>) + Clone + Send + 'static,
         {
             let num_go = 16;
 

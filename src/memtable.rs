@@ -1,7 +1,5 @@
 use std::{
     collections::VecDeque,
-    mem::{self, ManuallyDrop, MaybeUninit},
-    ptr,
     sync::{atomic::AtomicBool, Arc, RwLock},
 };
 
@@ -17,13 +15,11 @@ use crate::{
     AgateOptions, Result,
 };
 
-const MEMTABLE_VIEW_MAX: usize = 20;
-
-/// MemTableCore guards WAL and max_version.
+/// MemTableInner guards WAL and max_version.
 /// These data will only be modified on memtable put.
 /// Therefore, separating wal and max_version enables
 /// concurrent read/write of MemTable.
-struct MemTableCore {
+struct MemTableInner {
     wal: Option<Wal>,
     max_version: u64,
 }
@@ -31,28 +27,30 @@ struct MemTableCore {
 pub struct MemTable {
     pub(crate) skl: Skiplist<Comparator>,
     opt: AgateOptions,
-    core: RwLock<MemTableCore>,
+    inner: RwLock<MemTableInner>,
 
     save_after_close: AtomicBool,
+    id: usize,
 }
 
 impl MemTable {
-    pub fn new(skl: Skiplist<Comparator>, wal: Option<Wal>, opt: AgateOptions) -> Self {
+    pub fn new(id: usize, skl: Skiplist<Comparator>, wal: Option<Wal>, opt: AgateOptions) -> Self {
         Self {
             skl,
             opt,
-            core: RwLock::new(MemTableCore {
+            inner: RwLock::new(MemTableInner {
                 wal,
                 max_version: 0,
             }),
             save_after_close: AtomicBool::new(false),
+            id,
         }
     }
 
     pub fn update_skip_list(&self) -> Result<()> {
-        let mut core = self.core.write()?;
-        let mut max_version = core.max_version;
-        if let Some(ref mut wal) = core.wal {
+        let mut inner = self.inner.write()?;
+        let mut max_version = inner.max_version;
+        if let Some(ref mut wal) = inner.wal {
             let mut it = wal.iter()?;
             while let Some(entry) = it.next()? {
                 let ts = get_ts(entry.key);
@@ -69,13 +67,13 @@ impl MemTable {
                 self.skl.put(Bytes::copy_from_slice(entry.key), v);
             }
         }
-        core.max_version = max_version;
+        inner.max_version = max_version;
         Ok(())
     }
 
     pub fn put(&self, key: Bytes, value: Value) -> Result<()> {
-        let mut core = self.core.write()?;
-        if let Some(ref mut wal) = core.wal {
+        let mut inner = self.inner.write()?;
+        if let Some(ref mut wal) = inner.wal {
             let entry = Entry {
                 key: key.clone(),
                 value: value.value.clone(),
@@ -98,22 +96,22 @@ impl MemTable {
         self.skl.put(key, value);
 
         // update max version
-        core.max_version = ts;
+        inner.max_version = ts;
 
         Ok(())
     }
 
     pub fn sync_wal(&self) -> Result<()> {
-        let mut core = self.core.write()?;
-        if let Some(ref mut wal) = core.wal {
+        let mut inner = self.inner.write()?;
+        if let Some(ref mut wal) = inner.wal {
             wal.sync()?;
         }
         Ok(())
     }
 
     pub(crate) fn should_flush_wal(&self) -> Result<bool> {
-        let core = self.core.read()?;
-        if let Some(ref wal) = core.wal {
+        let inner = self.inner.read()?;
+        if let Some(ref wal) = inner.wal {
             Ok(wal.should_flush())
         } else {
             Ok(false)
@@ -130,13 +128,17 @@ impl MemTable {
             .save_after_close
             .load(std::sync::atomic::Ordering::SeqCst)
         {
-            let mut core = self.core.write()?;
-            let wal = core.wal.take();
+            let mut inner = self.inner.write()?;
+            let wal = inner.wal.take();
             if let Some(wal) = wal {
                 wal.close_and_save();
             }
         }
         Ok(())
+    }
+
+    pub fn id(&self) -> usize {
+        self.id
     }
 }
 
@@ -147,23 +149,12 @@ impl Drop for MemTable {
 }
 
 pub struct MemTablesView {
-    tables: ManuallyDrop<[Skiplist<Comparator>; MEMTABLE_VIEW_MAX]>,
-    len: usize,
+    tables: Vec<Skiplist<Comparator>>,
 }
 
 impl MemTablesView {
     pub fn tables(&self) -> &[Skiplist<Comparator>] {
-        &self.tables[0..self.len]
-    }
-}
-
-impl Drop for MemTablesView {
-    fn drop(&mut self) {
-        for i in 0..self.len {
-            unsafe {
-                ptr::drop_in_place(&mut self.tables[i]);
-            }
-        }
+        &self.tables[..]
     }
 }
 
@@ -180,25 +171,24 @@ impl MemTables {
     /// Get view of all current memtables
     pub fn view(&self) -> MemTablesView {
         // Maybe flush is better.
-        assert!(self.immutable.len() < MEMTABLE_VIEW_MAX);
-        let mut array: [MaybeUninit<Skiplist<Comparator>>; MEMTABLE_VIEW_MAX] =
-            unsafe { MaybeUninit::uninit().assume_init() };
-        array[0] = MaybeUninit::new(self.mutable.skl.clone());
-        for (i, s) in self.immutable.iter().enumerate() {
-            array[i + 1] = MaybeUninit::new(s.skl.clone());
+        let len = self.immutable.len() + 1;
+
+        let mut tables: Vec<Skiplist<Comparator>> = Vec::with_capacity(len);
+
+        tables.push(self.mutable.skl.clone());
+        for s in self.immutable.iter() {
+            tables.push(s.skl.clone());
         }
-        MemTablesView {
-            tables: unsafe { ManuallyDrop::new(mem::transmute(array)) },
-            len: self.immutable.len() + 1,
-        }
+
+        MemTablesView { tables }
     }
 
     /// Get mutable memtable
-    pub fn table_mut(&self) -> Arc<MemTable> {
+    pub fn mut_table(&self) -> Arc<MemTable> {
         self.mutable.clone()
     }
 
-    pub fn table_imm(&self, idx: usize) -> Arc<MemTable> {
+    pub fn imm_table(&self, idx: usize) -> Arc<MemTable> {
         self.immutable[idx].clone()
     }
 
@@ -234,7 +224,7 @@ mod tests {
 
     fn get_memtable(data: Vec<(Bytes, Value)>) -> Arc<MemTable> {
         let skl = Skiplist::with_capacity(make_comparator(), 4 * 1024 * 1024);
-        let memtable = Arc::new(MemTable::new(skl, None, AgateOptions::default()));
+        let memtable = Arc::new(MemTable::new(0, skl, None, AgateOptions::default()));
 
         for (k, v) in data {
             assert!(memtable.put(k, v).is_ok());
