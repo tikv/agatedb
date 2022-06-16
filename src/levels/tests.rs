@@ -11,7 +11,7 @@ use crate::{
 };
 
 pub fn dump_levels(lvctl: &LevelsController) {
-    for level in &lvctl.core.levels {
+    for level in &lvctl.inner.levels {
         let level = level.read().unwrap();
         println!("--- Level {} ---", level.level);
         for table in &level.tables {
@@ -101,7 +101,7 @@ macro_rules! kv {
 }
 
 fn create_and_open(lvctl: &mut LevelsController, td: Vec<KeyValVersion>, level: usize) {
-    let table_opts = build_table_options(&lvctl.core.opts);
+    let table_opts = build_table_options(&lvctl.inner.opts);
     let mut builder = TableBuilder::new(table_opts.clone());
 
     for item in td {
@@ -109,14 +109,14 @@ fn create_and_open(lvctl: &mut LevelsController, td: Vec<KeyValVersion>, level: 
         let value = Value::new_with_meta(item.value.clone(), item.meta, 0);
         builder.add(&key, &value, 0);
     }
-    let filename = new_filename(lvctl.reserve_file_id(), &lvctl.core.opts.dir);
+    let filename = new_filename(lvctl.reserve_file_id(), &lvctl.inner.opts.dir);
     let table = Table::create(&filename, builder.finish(), table_opts).unwrap();
     lvctl
-        .core
+        .inner
         .manifest
         .add_changes(vec![new_create_change(table.id(), level, 0)])
         .unwrap();
-    let mut lv = lvctl.core.levels[level].write().unwrap();
+    let mut lv = lvctl.inner.levels[level].write().unwrap();
     lv.tables.push(table);
 }
 
@@ -163,7 +163,7 @@ fn generate_test_compect_def(
     this_level_id: usize,
     next_level_id: usize,
 ) -> CompactDef {
-    let targets = lvctl.core.level_targets();
+    let targets = lvctl.inner.level_targets();
     let cpt_prio = CompactionPriority {
         targets: targets.clone(),
         level: 0,
@@ -173,19 +173,19 @@ fn generate_test_compect_def(
     };
     let mut compact_def = CompactDef::new(
         0,
-        lvctl.core.levels[this_level_id].clone(),
+        lvctl.inner.levels[this_level_id].clone(),
         this_level_id,
-        lvctl.core.levels[next_level_id].clone(),
+        lvctl.inner.levels[next_level_id].clone(),
         next_level_id,
         cpt_prio,
         targets,
     );
-    compact_def.top = lvctl.core.levels[this_level_id]
+    compact_def.top = lvctl.inner.levels[this_level_id]
         .read()
         .unwrap()
         .tables
         .clone();
-    compact_def.bot = lvctl.core.levels[next_level_id]
+    compact_def.bot = lvctl.inner.levels[next_level_id]
         .read()
         .unwrap()
         .tables
@@ -219,18 +219,18 @@ mod overlap {
             create_and_open(lvctl, vec![l0], 0);
             create_and_open(lvctl, vec![l1], 1);
 
-            let l0_tables = lvctl.core.levels[0].read().unwrap().tables.clone();
-            let l1_tables = lvctl.core.levels[1].read().unwrap().tables.clone();
+            let l0_tables = lvctl.inner.levels[0].read().unwrap().tables.clone();
+            let l1_tables = lvctl.inner.levels[1].read().unwrap().tables.clone();
 
             // Level 0 should overlap with level 0 tables.
-            assert!(lvctl.core.check_overlap(&l0_tables, 0));
+            assert!(lvctl.inner.check_overlap(&l0_tables, 0));
             // Level 1 should overlap with level 0 tables (they have the same keys).
-            assert!(lvctl.core.check_overlap(&l0_tables, 1));
+            assert!(lvctl.inner.check_overlap(&l0_tables, 1));
             // Level 2 and 3 should not overlap with level 0 tables.
-            assert!(!lvctl.core.check_overlap(&l0_tables, 2));
-            assert!(!lvctl.core.check_overlap(&l1_tables, 2));
-            assert!(!lvctl.core.check_overlap(&l0_tables, 3));
-            assert!(!lvctl.core.check_overlap(&l1_tables, 3));
+            assert!(!lvctl.inner.check_overlap(&l0_tables, 2));
+            assert!(!lvctl.inner.check_overlap(&l1_tables, 2));
+            assert!(!lvctl.inner.check_overlap(&l0_tables, 3));
+            assert!(!lvctl.inner.check_overlap(&l1_tables, 3));
         });
     }
 
@@ -246,17 +246,17 @@ mod overlap {
             create_and_open(lvctl, l0, 0);
             create_and_open(lvctl, l1, 1);
 
-            let l0_tables = lvctl.core.levels[0].read().unwrap().tables.clone();
-            let l1_tables = lvctl.core.levels[1].read().unwrap().tables.clone();
+            let l0_tables = lvctl.inner.levels[0].read().unwrap().tables.clone();
+            let l1_tables = lvctl.inner.levels[1].read().unwrap().tables.clone();
 
             // Level 0 should overlap with level 0 tables.
-            assert!(lvctl.core.check_overlap(&l0_tables, 0));
-            assert!(lvctl.core.check_overlap(&l1_tables, 1));
+            assert!(lvctl.inner.check_overlap(&l0_tables, 0));
+            assert!(lvctl.inner.check_overlap(&l1_tables, 1));
             // Level 1 should overlap with level 0 tables, "foo" key is common.
-            assert!(lvctl.core.check_overlap(&l0_tables, 1));
+            assert!(lvctl.inner.check_overlap(&l0_tables, 1));
             // Level 2 and 3 should not overlap with level 0 tables.
-            assert!(!lvctl.core.check_overlap(&l0_tables, 2));
-            assert!(!lvctl.core.check_overlap(&l0_tables, 3));
+            assert!(!lvctl.inner.check_overlap(&l0_tables, 2));
+            assert!(!lvctl.inner.check_overlap(&l0_tables, 3));
         });
     }
 
@@ -272,13 +272,13 @@ mod overlap {
             create_and_open(lvctl, l0, 0);
             create_and_open(lvctl, l1, 1);
 
-            let l0_tables = lvctl.core.levels[0].read().unwrap().tables.clone();
+            let l0_tables = lvctl.inner.levels[0].read().unwrap().tables.clone();
 
             // Level 1 should not overlap with level 0 tables.
-            assert!(!lvctl.core.check_overlap(&l0_tables, 1));
+            assert!(!lvctl.inner.check_overlap(&l0_tables, 1));
             // Level 2 and 3 should not overlap with level 0 tables.
-            assert!(!lvctl.core.check_overlap(&l0_tables, 2));
-            assert!(!lvctl.core.check_overlap(&l0_tables, 3));
+            assert!(!lvctl.inner.check_overlap(&l0_tables, 2));
+            assert!(!lvctl.inner.check_overlap(&l0_tables, 3));
         });
     }
 }
@@ -300,7 +300,7 @@ mod compaction {
             create_and_open(lvctl, l1, 1);
 
             // Set a high discard timestamp so that all the keys are below the discard timestamp.
-            lvctl.core.orc.set_discard_ts(10);
+            lvctl.inner.orc.set_discard_ts(10);
 
             get_all_and_check(
                 lvctl,
@@ -315,7 +315,7 @@ mod compaction {
             let mut compact_def = generate_test_compect_def(lvctl, 0, 1);
 
             lvctl
-                .core
+                .inner
                 .run_compact_def(std::usize::MAX, 0, &mut compact_def, POOL.clone())
                 .unwrap();
 
@@ -341,7 +341,7 @@ mod compaction {
             create_and_open(lvctl, l1, 1);
 
             // Set a high discard timestamp so that all the keys are below the discard timestamp.
-            lvctl.core.orc.set_discard_ts(10);
+            lvctl.inner.orc.set_discard_ts(10);
 
             get_all_and_check(
                 lvctl,
@@ -355,7 +355,7 @@ mod compaction {
             let mut compact_def = generate_test_compect_def(lvctl, 0, 1);
 
             lvctl
-                .core
+                .inner
                 .run_compact_def(std::usize::MAX, 0, &mut compact_def, POOL.clone())
                 .unwrap();
 
@@ -383,7 +383,7 @@ mod compaction {
             create_and_open(lvctl, l2, 2);
 
             // Set a high discard timestamp so that all the keys are below the discard timestamp.
-            lvctl.core.orc.set_discard_ts(10);
+            lvctl.inner.orc.set_discard_ts(10);
 
             get_all_and_check(
                 lvctl,
@@ -399,7 +399,7 @@ mod compaction {
             let mut compact_def = generate_test_compect_def(lvctl, 0, 1);
 
             lvctl
-                .core
+                .inner
                 .run_compact_def(std::usize::MAX, 0, &mut compact_def, POOL.clone())
                 .unwrap();
 
@@ -424,7 +424,7 @@ mod compaction {
             create_and_open(lvctl, l2, 2);
 
             // Set a high discard timestamp so that all the keys are below the discard timestamp.
-            lvctl.core.orc.set_discard_ts(10);
+            lvctl.inner.orc.set_discard_ts(10);
 
             get_all_and_check(
                 lvctl,
@@ -438,7 +438,7 @@ mod compaction {
             let mut compact_def = generate_test_compect_def(lvctl, 1, 2);
 
             lvctl
-                .core
+                .inner
                 .run_compact_def(std::usize::MAX, 1, &mut compact_def, POOL.clone())
                 .unwrap();
 
@@ -464,7 +464,7 @@ mod compaction {
             create_and_open(lvctl, l3, 3);
 
             // Set a high discard timestamp so that all the keys are below the discard timestamp.
-            lvctl.core.orc.set_discard_ts(10);
+            lvctl.inner.orc.set_discard_ts(10);
 
             get_all_and_check(
                 lvctl,
@@ -479,7 +479,7 @@ mod compaction {
             let mut compact_def = generate_test_compect_def(lvctl, 1, 2);
 
             lvctl
-                .core
+                .inner
                 .run_compact_def(std::usize::MAX, 1, &mut compact_def, POOL.clone())
                 .unwrap();
 
@@ -497,7 +497,7 @@ mod compaction {
             compact_def = generate_test_compect_def(lvctl, 2, 3);
 
             lvctl
-                .core
+                .inner
                 .run_compact_def(std::usize::MAX, 2, &mut compact_def, POOL.clone())
                 .unwrap();
 
@@ -518,7 +518,7 @@ mod compaction {
             create_and_open(lvctl, l3, 3);
 
             // Set a high discard timestamp so that all the keys are below the discard timestamp.
-            lvctl.core.orc.set_discard_ts(10);
+            lvctl.inner.orc.set_discard_ts(10);
 
             get_all_and_check(
                 lvctl,
@@ -533,7 +533,7 @@ mod compaction {
             let mut compact_def = generate_test_compect_def(lvctl, 1, 2);
 
             lvctl
-                .core
+                .inner
                 .run_compact_def(std::usize::MAX, 1, &mut compact_def, POOL.clone())
                 .unwrap();
 
@@ -562,7 +562,7 @@ mod compaction {
             create_and_open(lvctl, l2, 2);
 
             // Set a high discard timestamp so that all the keys are below the discard timestamp.
-            lvctl.core.orc.set_discard_ts(10);
+            lvctl.inner.orc.set_discard_ts(10);
 
             get_all_and_check(
                 lvctl,
@@ -576,7 +576,7 @@ mod compaction {
             let mut compact_def = generate_test_compect_def(lvctl, 1, 2);
 
             lvctl
-                .core
+                .inner
                 .run_compact_def(std::usize::MAX, 1, &mut compact_def, POOL.clone())
                 .unwrap();
 
@@ -602,7 +602,7 @@ mod compaction {
             create_and_open(lvctl, l3, 3);
 
             // Set a high discard timestamp so that all the keys are below the discard timestamp.
-            lvctl.core.orc.set_discard_ts(10);
+            lvctl.inner.orc.set_discard_ts(10);
 
             get_all_and_check(
                 lvctl,
@@ -619,7 +619,7 @@ mod compaction {
             let mut compact_def = generate_test_compect_def(lvctl, 1, 2);
 
             lvctl
-                .core
+                .inner
                 .run_compact_def(std::usize::MAX, 1, &mut compact_def, POOL.clone())
                 .unwrap();
 
@@ -661,7 +661,7 @@ mod compaction_two_versions {
             create_and_open(lvctl, l3, 3);
 
             // Set a high discard timestamp so that all the keys are below the discard timestamp.
-            lvctl.core.orc.set_discard_ts(10);
+            lvctl.inner.orc.set_discard_ts(10);
 
             get_all_and_check(
                 lvctl,
@@ -676,7 +676,7 @@ mod compaction_two_versions {
             let mut compact_def = generate_test_compect_def(lvctl, 1, 2);
 
             lvctl
-                .core
+                .inner
                 .run_compact_def(std::usize::MAX, 1, &mut compact_def, POOL.clone())
                 .unwrap();
 
@@ -694,7 +694,7 @@ mod compaction_two_versions {
             compact_def = generate_test_compect_def(lvctl, 2, 3);
 
             lvctl
-                .core
+                .inner
                 .run_compact_def(std::usize::MAX, 2, &mut compact_def, POOL.clone())
                 .unwrap();
 
@@ -729,7 +729,7 @@ mod compaction_all_versions {
             create_and_open(lvctl, l2, 2);
             create_and_open(lvctl, l3, 3);
 
-            lvctl.core.orc.set_discard_ts(10);
+            lvctl.inner.orc.set_discard_ts(10);
 
             get_all_and_check(
                 lvctl,
@@ -743,7 +743,7 @@ mod compaction_all_versions {
 
             let mut compact_def = generate_test_compect_def(lvctl, 1, 2);
             lvctl
-                .core
+                .inner
                 .run_compact_def(std::usize::MAX, 1, &mut compact_def, POOL.clone())
                 .unwrap();
 
@@ -759,7 +759,7 @@ mod compaction_all_versions {
 
             let mut compact_def = generate_test_compect_def(lvctl, 2, 3);
             lvctl
-                .core
+                .inner
                 .run_compact_def(std::usize::MAX, 2, &mut compact_def, POOL.clone())
                 .unwrap();
 
@@ -785,7 +785,7 @@ mod compaction_all_versions {
             create_and_open(lvctl, l1, 1);
             create_and_open(lvctl, l2, 2);
 
-            lvctl.core.orc.set_discard_ts(10);
+            lvctl.inner.orc.set_discard_ts(10);
 
             get_all_and_check(
                 lvctl,
@@ -798,7 +798,7 @@ mod compaction_all_versions {
 
             let mut compact_def = generate_test_compect_def(lvctl, 1, 2);
             lvctl
-                .core
+                .inner
                 .run_compact_def(std::usize::MAX, 1, &mut compact_def, POOL.clone())
                 .unwrap();
 
@@ -830,7 +830,7 @@ mod discard_ts {
             create_and_open(lvctl, l1, 1);
 
             // Set discard_ts to 1. All the keys are above discard_ts.
-            lvctl.core.orc.set_discard_ts(1);
+            lvctl.inner.orc.set_discard_ts(1);
 
             get_all_and_check(
                 lvctl,
@@ -845,7 +845,7 @@ mod discard_ts {
             let mut compact_def = generate_test_compect_def(lvctl, 0, 1);
 
             lvctl
-                .core
+                .inner
                 .run_compact_def(std::usize::MAX, 0, &mut compact_def, POOL.clone())
                 .unwrap();
 
@@ -875,7 +875,7 @@ mod discard_ts {
             create_and_open(lvctl, l1, 1);
 
             // Set discard_ts to 3. foo2 and foo1 should be dropped.
-            lvctl.core.orc.set_discard_ts(3);
+            lvctl.inner.orc.set_discard_ts(3);
 
             get_all_and_check(
                 lvctl,
@@ -891,7 +891,7 @@ mod discard_ts {
             let mut compact_def = generate_test_compect_def(lvctl, 0, 1);
 
             lvctl
-                .core
+                .inner
                 .run_compact_def(std::usize::MAX, 0, &mut compact_def, POOL.clone())
                 .unwrap();
 
@@ -917,7 +917,7 @@ mod discard_ts {
             create_and_open(lvctl, l1, 1);
 
             // Set discard_ts to 10. All the keys are below discard_ts.
-            lvctl.core.orc.set_discard_ts(10);
+            lvctl.inner.orc.set_discard_ts(10);
 
             get_all_and_check(
                 lvctl,
@@ -932,7 +932,7 @@ mod discard_ts {
             let mut compact_def = generate_test_compect_def(lvctl, 0, 1);
 
             lvctl
-                .core
+                .inner
                 .run_compact_def(std::usize::MAX, 0, &mut compact_def, POOL.clone())
                 .unwrap();
 
@@ -970,11 +970,11 @@ mod miscellaneous {
             create_and_open(lvctl, l04, 0);
             create_and_open(lvctl, l05, 0);
 
-            lvctl.core.orc.set_discard_ts(7);
+            lvctl.inner.orc.set_discard_ts(7);
 
             let mut compact_def = generate_test_compect_def(lvctl, 0, 1);
             lvctl
-                .core
+                .inner
                 .run_compact_def(std::usize::MAX, 0, &mut compact_def, POOL.clone())
                 .unwrap();
 

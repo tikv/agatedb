@@ -1,6 +1,8 @@
+use getset::Setters;
+
 use super::*;
 use crate::{entry::Entry, opt};
-use getset::Setters;
+use std::cmp;
 
 #[derive(Clone, Setters)]
 pub struct AgateOptions {
@@ -40,6 +42,7 @@ pub struct AgateOptions {
     /// Sets the maximum size in bytes for memtable.
     ///
     /// The default value of `mem_table_size` is 64 << 20 bytes.
+    #[getset(set = "pub")]
     pub mem_table_size: u64,
     /// Sets the maximum size in bytes for LSM table or file in the base level.
     ///
@@ -188,8 +191,11 @@ impl AgateOptions {
     }
 
     pub fn arena_size(&self) -> u64 {
-        // TODO: take other options into account
-        self.mem_table_size as u64
+        // When arena reach it's capacity, it will grow, this will copy whole data to the new
+        // allocated memory space and the cost is not trivial. So we adjust the arena capacity
+        // to a bit of larger than the memtable size to prevent arena's grow in most cases.
+        let extra_size = cmp::min((self.mem_table_size as f64 * 0.1) as u64, 1024 * 1024);
+        self.mem_table_size + extra_size
     }
 
     pub fn open<P: AsRef<Path>>(&mut self, path: P) -> Result<Agate> {
@@ -226,12 +232,29 @@ mod tests {
             .set_value_log_file_size(256)
             .set_num_memtables(3)
             .set_value_log_max_entries(96)
-            .set_sync_writes(true);
+            .set_sync_writes(true)
+            .set_mem_table_size(1024);
         assert!(opt.create_if_not_exists);
         assert!(opt.in_memory);
         assert_eq!(opt.value_log_file_size, 256);
         assert_eq!(opt.num_memtables, 3);
         assert_eq!(opt.value_log_max_entries, 96);
         assert!(opt.sync_writes);
+        assert_eq!(opt.mem_table_size, 1024);
+    }
+
+    #[test]
+    fn test_adjust_arena_size() {
+        // Arena size is larger than mem_table_size, but the extra size is not larger than 1MB
+        let mut opt = AgateOptions::default();
+        opt.set_mem_table_size(32 * 1024 * 1024);
+        assert!(opt.arena_size() > opt.mem_table_size);
+        assert!(opt.arena_size() <= opt.mem_table_size + 1024 * 1024);
+
+        // Arena size is larger than mem_table_size, but the extra size is not larger than 10%
+        // memtable size
+        opt.set_mem_table_size(4096);
+        assert!(opt.arena_size() > opt.mem_table_size);
+        assert!(opt.arena_size() <= (opt.mem_table_size as f64 * 1.1) as u64);
     }
 }
