@@ -5,9 +5,10 @@ use std::{
     fs,
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize},
         Arc, RwLock,
     },
+    thread::JoinHandle,
 };
 
 use bytes::{Bytes, BytesMut};
@@ -60,11 +61,14 @@ pub struct Core {
     pub(crate) orc: Arc<Oracle>,
 }
 
-#[derive(Clone)]
 pub struct Agate {
     pub(crate) core: Arc<Core>,
     closer: Closer,
-    pub(crate) pool: Arc<yatp::ThreadPool<yatp::task::callback::TaskCell>>,
+    pool: Arc<yatp::ThreadPool<yatp::task::callback::TaskCell>>,
+
+    // TODO: replace flush thread with yatp pool, so we can control the total
+    // cpu usage by control the unified yatp pool.
+    flush_handle: Option<JoinHandle<()>>,
 }
 
 struct FlushTask {
@@ -102,40 +106,45 @@ impl Agate {
                 .build_callback_pool(),
         );
 
-        let agate = Self {
-            core,
-            closer: closer.clone(),
-            pool,
-        };
+        let flush_core = core.clone();
+        let flush_handle = std::thread::spawn(move || flush_core.flush_memtable().unwrap());
 
-        let core = agate.core.clone();
-        agate
-            .pool
-            .spawn(move |_: &mut Handle<'_>| core.flush_memtable().unwrap());
-
-        let core = agate.core.clone();
-        let pool = agate.pool.clone();
-        agate.pool.spawn(move |_: &mut Handle<'_>| {
-            core.do_writes(core.closers.writes.clone(), core.clone(), pool)
+        let write_core = core.clone();
+        let pool_clone = pool.clone();
+        pool.spawn(move |_: &mut Handle<'_>| {
+            write_core
+                .do_writes(
+                    write_core.closers.writes.clone(),
+                    write_core.clone(),
+                    pool_clone,
+                )
                 .unwrap()
         });
 
-        agate.core.lvctl.start_compact(closer, agate.pool.clone());
+        core.lvctl.start_compact(closer.clone(), pool.clone());
 
-        agate
-    }
-
-    fn close(&self) {
-        self.core.block_writes.store(true, Ordering::SeqCst);
-        self.core.closers.writes.close();
-        self.core.flush_channel.0.send(None).unwrap();
-        self.closer.close();
+        Self {
+            core,
+            closer,
+            pool,
+            flush_handle: Some(flush_handle),
+        }
     }
 }
 
 impl Drop for Agate {
     fn drop(&mut self) {
-        self.close();
+        self.core
+            .block_writes
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.core.closers.writes.close();
+        // Flush thread need to be closed before compaction threads. Because the flush
+        // thread may stuck in add_l0_table forever when there are too many sst files
+        // in level0, and at the same time all compaction threads have exited.
+        // TODO: remove such closing order dependency
+        self.core.flush_channel.0.send(None).unwrap();
+        self.flush_handle.take().unwrap().join().unwrap();
+        self.closer.close();
         self.pool.shutdown();
     }
 }
