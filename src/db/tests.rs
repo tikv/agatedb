@@ -175,3 +175,14 @@ fn test_in_memory_agate() {
         verify_requests(10, &agate);
     });
 }
+
+#[test]
+fn test_flush_l1() {
+    with_agate_test(false, |agate| {
+        let requests = generate_requests(10000);
+        for request in requests.chunks(100) {
+            agate.write_requests(request.to_vec()).unwrap();
+        }
+        verify_requests(10000, &agate);
+    });
+}
