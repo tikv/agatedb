@@ -124,7 +124,7 @@ where
     let mut opts = if let Some(opts) = opts {
         opts
     } else {
-        generate_test_agate_options()
+        AgateOptions::default()
     };
 
     if !opts.in_memory {
