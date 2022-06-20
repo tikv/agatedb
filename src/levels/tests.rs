@@ -31,6 +31,9 @@ where
     F: FnOnce(&mut LevelsController),
     F: Send + 'static,
 {
+    // So as to set and get discard timestamp by self.
+    opts.managed_txns = true;
+
     let (tx, rx) = std::sync::mpsc::channel();
 
     let handle = std::thread::spawn(move || {
@@ -44,7 +47,7 @@ where
         opts.value_dir = tmp_dir.clone();
 
         let manifest = Arc::new(ManifestFile::open_or_create_manifest_file(&opts).unwrap());
-        let orc = Arc::new(Oracle::default());
+        let orc = Arc::new(Oracle::new(&opts));
 
         let mut lvctl = LevelsController::new(opts.clone(), manifest, orc).unwrap();
 

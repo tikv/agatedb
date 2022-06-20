@@ -1,30 +1,26 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Mutex,
+};
 
 use bytes::Bytes;
 
-use crate::{db::Agate, entry::Entry, Error, Result};
+use crate::{entry::Entry, Error, Result};
 
 const MAX_KEY_LENGTH: usize = 65000;
 
+#[derive(Default)]
 pub struct Transaction {
-    read_ts: u64,
-    commit_ts: u64,
+    pub(crate) read_ts: u64,
+    pub(crate) commit_ts: u64,
 
     update: bool,
     pending_writes: HashMap<Bytes, Entry>,
-    agate: Arc<crate::db::Core>,
-}
 
-impl Agate {
-    pub fn new_transaction(&self, update: bool) -> Transaction {
-        Transaction {
-            read_ts: 0,
-            commit_ts: 0,
-            update,
-            pending_writes: HashMap::default(),
-            agate: self.core.clone(),
-        }
-    }
+    // TODO: Add Agate.
+    pub(crate) reads: Mutex<Vec<u64>>,
+    pub(crate) conflict_keys: HashSet<u64>,
+    pub(crate) done_read: bool,
 }
 
 impl Transaction {

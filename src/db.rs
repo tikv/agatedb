@@ -113,8 +113,7 @@ impl Drop for Agate {
 impl Core {
     fn new(opts: AgateOptions) -> Result<Self> {
         // create first mem table
-        // TODO: let orc = Arc::new(Oracle::new(opts.managed_txns, opts.detect_conflicts));
-        let orc = Arc::new(Oracle::default());
+        let orc = Arc::new(Oracle::new(&opts));
         let manifest = Arc::new(ManifestFile::open_or_create_manifest_file(&opts)?);
         let lvctl = LevelsController::new(opts.clone(), manifest, orc)?;
 

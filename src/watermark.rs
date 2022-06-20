@@ -325,6 +325,7 @@ mod tests {
             watermark.done(1);
 
             watermark.wait_for_mark(1);
+            watermark.wait_for_mark(3);
             assert_eq!(watermark.done_until(), 3);
         });
     }
