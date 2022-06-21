@@ -151,6 +151,7 @@ impl Drop for Agate {
 
 impl Core {
     pub(crate) fn new(opts: &AgateOptions) -> Result<Self> {
+        // create first mem table
         let orc = Arc::new(Oracle::new(opts));
         let manifest = Arc::new(ManifestFile::open_or_create_manifest_file(opts)?);
         let lvctl = LevelsController::new(opts, manifest.clone(), orc.clone())?;
