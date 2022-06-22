@@ -47,7 +47,7 @@ impl Transaction {
     ///
     /// This will panic if not used with managed transactions.
     pub fn commit_at(mut self, commit_ts: u64) -> Result<()> {
-        if !self.agate.opts.managed_txns {
+        if !self.core.opts.managed_txns {
             panic!("Cannot use commit_at when managed_txns is false. Use commit_at instead.");
         }
         self.commit_ts = commit_ts;

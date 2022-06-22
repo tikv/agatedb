@@ -928,6 +928,8 @@ mod normal_db {
         where
             F: FnOnce(Arc<Agate>) + Clone + Send + 'static,
         {
+            // If num_go is too large, we may not pass the leak sanitizer test.
+            // Refer to https://github.com/tikv/agatedb/pull/143 for more details.
             let num_go = 4;
 
             set_count.store(0, Ordering::SeqCst);

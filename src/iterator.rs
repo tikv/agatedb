@@ -38,11 +38,11 @@ pub struct Item {
     pub(crate) meta: u8,
     pub(crate) user_meta: u8,
 
-    agate: Arc<crate::db::Core>,
+    core: Arc<crate::db::Core>,
 }
 
 impl Item {
-    pub(crate) fn new(agate: Arc<crate::db::Core>) -> Self {
+    pub(crate) fn new(core: Arc<crate::db::Core>) -> Self {
         Self {
             key: Bytes::new(),
             vptr: Bytes::new(),
@@ -52,7 +52,7 @@ impl Item {
             status: PrefetchStatus::No,
             meta: 0,
             user_meta: 0,
-            agate,
+            core,
         }
     }
 
@@ -82,7 +82,7 @@ impl Item {
 
         let mut vptr = ValuePointer::default();
         vptr.decode(&self.vptr);
-        let vlog = (*self.agate.vlog).as_ref().unwrap();
+        let vlog = (*self.core.vlog).as_ref().unwrap();
         let raw_buffer = vlog.read(vptr);
         if let Ok(mut raw_buffer) = raw_buffer {
             let entry = Wal::decode_entry(&mut raw_buffer).unwrap();
@@ -224,9 +224,9 @@ impl Transaction {
         self.num_iterators
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
-        let tables = self.agate.get_mem_tables();
+        let tables = self.core.get_mem_tables();
         // We need to get a reference to vlog, to avoid vlog GC (not implemented).
-        let _vlog = self.agate.vlog.clone();
+        let _vlog = self.core.vlog.clone();
 
         let mut iters: Vec<TableIterators> = vec![];
         if let Some(itr) = self.new_pending_writes_iterator(opt.reverse) {
@@ -239,7 +239,7 @@ impl Transaction {
             )));
         }
 
-        self.agate.lvctl.append_iterators(&mut iters, opt);
+        self.core.lvctl.append_iterators(&mut iters, opt);
 
         Iterator {
             table_iter: MergeIterator::from_iterators(iters, opt.reverse),
@@ -309,7 +309,7 @@ impl<'a> Iterator<'a> {
         if self.opt.all_versions {
             // Return deleted or expired values also, otherwise user can't figure out
             // whether the key was deleted.
-            let mut item = Item::new(self.txn.agate.clone());
+            let mut item = Item::new(self.txn.core.clone());
             Self::fill_item(&mut item, key, &self.table_iter.value(), &self.opt);
             self.item = Some(item);
             self.table_iter.next();
@@ -339,7 +339,7 @@ impl<'a> Iterator<'a> {
                 return false;
             }
 
-            let mut item = Item::new(self.txn.agate.clone());
+            let mut item = Item::new(self.txn.core.clone());
             Self::fill_item(&mut item, key, &self.table_iter.value(), &self.opt);
 
             self.table_iter.next();

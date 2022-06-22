@@ -45,7 +45,7 @@ pub struct Transaction {
     // Update is used to conditionally keep track of reads.
     pub(crate) update: bool,
 
-    pub(crate) agate: Arc<crate::db::Core>,
+    pub(crate) core: Arc<crate::db::Core>,
 }
 
 pub struct PendingWritesIterator {
@@ -71,7 +71,7 @@ impl Transaction {
             discarded: false,
             done_read: false,
             update: false,
-            agate: core,
+            core,
         }
     }
 
@@ -99,10 +99,10 @@ impl Transaction {
 
     fn check_size(&mut self, entry: &Entry) -> Result<()> {
         let count = self.count + 1;
-        let size = self.size + entry.estimate_size(self.agate.opts.value_threshold) as usize + 10;
+        let size = self.size + entry.estimate_size(self.core.opts.value_threshold) as usize + 10;
 
-        if count >= self.agate.opts.max_batch_count as usize
-            || size >= self.agate.opts.max_batch_size as usize
+        if count >= self.core.opts.max_batch_count as usize
+            || size >= self.core.opts.max_batch_size as usize
         {
             return Err(Error::TxnTooBig);
         }
@@ -137,7 +137,7 @@ impl Transaction {
                 &e.key[..MAX_KEY_LENGTH]
             )));
         }
-        let value_log_file_size = self.agate.opts.value_log_file_size as usize;
+        let value_log_file_size = self.core.opts.value_log_file_size as usize;
         if e.value.len() > value_log_file_size {
             return Err(Error::TooLong(format!(
                 "value's length > {}: {:?}..",
@@ -145,17 +145,17 @@ impl Transaction {
                 &e.value[..value_log_file_size]
             )));
         }
-        if self.agate.opts.in_memory && e.value.len() > self.agate.opts.value_threshold {
+        if self.core.opts.in_memory && e.value.len() > self.core.opts.value_threshold {
             return Err(Error::TooLong(format!(
                 "value's length > {}: {:?}..",
-                self.agate.opts.value_threshold,
-                &e.value[..self.agate.opts.value_threshold]
+                self.core.opts.value_threshold,
+                &e.value[..self.core.opts.value_threshold]
             )));
         }
 
         self.check_size(&e)?;
 
-        if self.agate.opts.detect_conflicts {
+        if self.core.opts.detect_conflicts {
             self.conflict_keys.insert(default_hash(&e.key));
         }
 
@@ -205,7 +205,7 @@ impl Transaction {
 
         // TODO: Check if the key is banned.
 
-        let mut item = Item::new(self.agate.clone());
+        let mut item = Item::new(self.core.clone());
 
         if self.update {
             if let Some(entry) = self.pending_writes.get(key) {
@@ -234,7 +234,7 @@ impl Transaction {
 
         let seek = key_with_ts.freeze();
 
-        let vs = self.agate.get(&seek)?;
+        let vs = self.core.get(&seek)?;
 
         if vs.value.is_empty() && vs.meta == 0 {
             return Err(Error::KeyNotFound(()));
@@ -274,13 +274,13 @@ impl Transaction {
         }
 
         self.discarded = true;
-        if !self.agate.orc.is_managed {
-            self.agate.orc.clone().done_read(self);
+        if !self.core.orc.is_managed {
+            self.core.orc.clone().done_read(self);
         }
     }
 
     fn commit_and_send(&mut self) -> Result<()> {
-        let orc = self.agate.orc.clone();
+        let orc = self.core.orc.clone();
         // Ensure that the order in which we get the commit timestamp is the same as
         // the order in which we push these updates to the write channel. So, we
         // acquire a write_ch_lock before getting a commit timestamp, and only release
@@ -345,7 +345,7 @@ impl Transaction {
             entries.push(e);
         }
 
-        let done = self.agate.send_to_write_channel(entries);
+        let done = self.core.send_to_write_channel(entries);
 
         if let Err(err) = done {
             orc.done_commit(commit_ts);
@@ -375,7 +375,7 @@ impl Transaction {
         // uses Transaction::commit instead of Transaction::commit_at in managed mode.
         // This should happen only in managed mode. In normal mode, keep_together will
         // always be true.
-        if keep_together && self.agate.opts.managed_txns && self.commit_ts == 0 {
+        if keep_together && self.core.opts.managed_txns && self.commit_ts == 0 {
             return Err(Error::CustomError("commit_ts cannot be zero.".to_string()));
         }
 
