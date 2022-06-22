@@ -1,8 +1,8 @@
-use std::cmp::Ordering;
+use std::{cmp::Ordering, fmt::Debug};
 
 use bytes::Bytes;
 
-pub trait KeyComparator: Clone {
+pub trait KeyComparator: Clone + Debug {
     fn compare_key(&self, lhs: &[u8], rhs: &[u8]) -> Ordering;
     fn same_key(&self, lhs: &[u8], rhs: &[u8]) -> bool;
 }
@@ -35,8 +35,8 @@ impl KeyComparator for FixedLengthSuffixComparator {
                 Bytes::copy_from_slice(rhs)
             );
         }
-        let (l_p, l_s) = lhs.split_at(lhs.len() - self.len);
-        let (r_p, r_s) = rhs.split_at(rhs.len() - self.len);
+        let (l_p, l_s) = lhs.split_at(self.len);
+        let (r_p, r_s) = rhs.split_at(self.len);
         let res = l_p.cmp(r_p);
         match res {
             Ordering::Greater | Ordering::Less => res,
@@ -68,6 +68,20 @@ mod tests {
         assert_eq!(
             suffix_comp.compare_key(l.as_bytes(), s.as_bytes()),
             Ordering::Equal
+        );
+    }
+
+    #[test]
+    fn test_key_comparator2() {
+        let suffix_comp = FixedLengthSuffixComparator::new(8);
+        let (l, r) = ("adeadeade", "acdacdacd");
+        assert_eq!(
+            suffix_comp.compare_key("addddddd".as_bytes(), l.as_bytes()),
+            Ordering::Less
+        );
+        assert_eq!(
+            suffix_comp.compare_key("addddddd".as_bytes(), r.as_bytes()),
+            Ordering::Greater
         );
     }
 }
