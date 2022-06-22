@@ -143,25 +143,38 @@ impl IteratorOptions {
 
 pub struct SkiplistIterator<C: KeyComparator> {
     skl_iter: IterRef<Skiplist<C>, C>,
+    reversed: bool,
 }
 
 impl<C: KeyComparator> SkiplistIterator<C> {
-    pub fn new(skl_iter: IterRef<Skiplist<C>, C>) -> Self {
-        Self { skl_iter }
+    pub fn new(skl_iter: IterRef<Skiplist<C>, C>, reversed: bool) -> Self {
+        Self { skl_iter, reversed }
     }
 }
 
 impl<C: KeyComparator> AgateIterator for SkiplistIterator<C> {
     fn next(&mut self) {
-        self.skl_iter.next();
+        if !self.reversed {
+            self.skl_iter.next();
+        } else {
+            self.skl_iter.prev();
+        }
     }
 
     fn rewind(&mut self) {
-        self.skl_iter.seek_to_first();
+        if !self.reversed {
+            self.skl_iter.seek_to_first();
+        } else {
+            self.skl_iter.seek_to_last();
+        }
     }
 
     fn seek(&mut self, key: &Bytes) {
-        self.skl_iter.seek(key);
+        if !self.reversed {
+            self.skl_iter.seek(key);
+        } else {
+            self.skl_iter.seek_for_prev(key);
+        }
     }
 
     fn key(&self) -> &[u8] {
@@ -222,13 +235,14 @@ impl Transaction {
         for table in tables {
             iters.push(TableIterators::from(SkiplistIterator::new(
                 table.skl.iter(),
+                opt.reverse,
             )));
         }
 
         self.agate.lvctl.append_iterators(&mut iters, opt);
 
         Iterator {
-            table_iter: MergeIterator::from_iterators(iters, false),
+            table_iter: MergeIterator::from_iterators(iters, opt.reverse),
             txn: self,
             read_ts: self.read_ts,
             opt: opt.clone(),
@@ -276,7 +290,8 @@ impl<'a> Iterator<'a> {
     ///
     /// This function advances the iterator.
     fn parse_item(&mut self) -> bool {
-        let key: &[u8] = self.table_iter.key();
+        #[allow(clippy::unnecessary_to_owned)]
+        let key: &[u8] = &self.table_iter.key().to_owned();
 
         // Skip Agate keys.
         if !self.opt.internal_access && key.starts_with(AGATE_PREFIX) {
@@ -317,23 +332,33 @@ impl<'a> Iterator<'a> {
             self.last_key.extend_from_slice(key);
         }
 
-        let vs = self.table_iter.value();
-        if is_deleted_or_expired(vs.meta, vs.expires_at) {
+        loop {
+            let vs = self.table_iter.value();
+            if is_deleted_or_expired(vs.meta, vs.expires_at) {
+                self.table_iter.next();
+                return false;
+            }
+
+            let mut item = Item::new(self.txn.agate.clone());
+            Self::fill_item(&mut item, key, &self.table_iter.value(), &self.opt);
+
             self.table_iter.next();
-            return false;
-        }
+            if !self.opt.reverse || !self.table_iter.valid() {
+                self.item = Some(item);
+                return true;
+            }
 
-        let mut item = Item::new(self.txn.agate.clone());
-        Self::fill_item(&mut item, key, &self.table_iter.value(), &self.opt);
-
-        self.table_iter.next();
-        if !self.opt.reverse || !self.table_iter.valid() {
+            // Reverse direction.
+            let next_ts = get_ts(self.table_iter.key());
+            let key_without_ts = user_key(self.table_iter.key());
+            if next_ts <= self.read_ts && key_without_ts == item.key {
+                // This is a valid potential candidate.
+                continue;
+            }
+            // Ignore the next candidate. Return the current one.
             self.item = Some(item);
             return true;
         }
-
-        // TODO: Reverse direction.
-        unimplemented!();
     }
 
     fn fill_item(item: &mut Item, key: &[u8], vs: &Value, opts: &IteratorOptions) {

@@ -457,7 +457,8 @@ impl AgateIterator for PendingWritesIterator {
 
         let key = user_key(key);
         self.next_idx = crate::util::search(self.entries.len(), |idx| {
-            let cmp = COMPARATOR.compare_key(&self.entries[idx].key, key);
+            // Should not use COMPARATOR when compare without ts.
+            let cmp = (&self.entries[idx].key[..]).cmp(key);
             if !self.reversed {
                 cmp != Less
             } else {

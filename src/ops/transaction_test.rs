@@ -350,13 +350,24 @@ mod normal_db {
                 let it = txn.new_iterator(&IteratorOptions::default());
                 check_iterator(it, i);
 
-                // TODO: Reverse.
+                let reversed_it = txn.new_iterator(&IteratorOptions {
+                    reverse: true,
+                    ..Default::default()
+                });
+                check_iterator(reversed_it, i);
 
                 let it = txn.new_iterator(&IteratorOptions {
                     all_versions: true,
                     ..Default::default()
                 });
                 check_all_versions(it, i);
+
+                let reversed_it = txn.new_iterator(&IteratorOptions {
+                    reverse: true,
+                    all_versions: true,
+                    ..Default::default()
+                });
+                check_all_versions(reversed_it, i);
             }
 
             let txn = agate.new_transaction(true);
@@ -414,7 +425,7 @@ mod normal_db {
     }
 
     #[test]
-    fn test_txn_iteration_edge_test() {
+    fn test_txn_iteration_edge_case() {
         // a3, a2, b4 (del), b3, c2, c1
         // Read at ts=4 -> a3, c2
         // Read at ts=4(Uncommitted) -> a3, b4
@@ -479,30 +490,44 @@ mod normal_db {
                 assert_eq!(expectd.len(), index);
             };
 
-            // TODO: Reverse.
-
             let mut txn = agate.new_transaction(true);
+            let rev = IteratorOptions {
+                reverse: true,
+                ..Default::default()
+            };
+
             let it = txn.new_iterator(&IteratorOptions::default());
             let it5 = txn4.new_iterator(&IteratorOptions::default());
             check_iterator(it, vec!["a3", "c2"]);
             check_iterator(it5, vec!["a3", "b4"]);
 
+            let it = txn.new_iterator(&rev);
+            let it5 = txn4.new_iterator(&rev);
+            check_iterator(it, vec!["c2", "a3"]);
+            check_iterator(it5, vec!["b4", "a3"]);
+
             txn.read_ts = 3;
             let it = txn.new_iterator(&IteratorOptions::default());
             check_iterator(it, vec!["a3", "b3", "c2"]);
+            let it = txn.new_iterator(&rev);
+            check_iterator(it, vec!["c2", "b3", "a3"]);
 
             txn.read_ts = 2;
             let it = txn.new_iterator(&IteratorOptions::default());
             check_iterator(it, vec!["a2", "c2"]);
+            let it = txn.new_iterator(&rev);
+            check_iterator(it, vec!["c2", "a2"]);
 
             txn.read_ts = 1;
             let it = txn.new_iterator(&IteratorOptions::default());
+            check_iterator(it, vec!["c1"]);
+            let it = txn.new_iterator(&rev);
             check_iterator(it, vec!["c1"]);
         });
     }
 
     #[test]
-    fn test_txn_iteration_edge_test2() {
+    fn test_txn_iteration_edge_case2() {
         // a2, a3, b4 (del), b3, c2, c1
         // Read at ts=4 -> a3, c2
         // Read at ts=3 -> a3, b3, c2
@@ -560,15 +585,28 @@ mod normal_db {
                 assert_eq!(expectd.len(), index);
             };
 
-            // TODO: Reverse.
-
             let mut txn = agate.new_transaction(true);
+            let rev = IteratorOptions {
+                reverse: true,
+                ..Default::default()
+            };
+
             let it = txn.new_iterator(&IteratorOptions::default());
             check_iterator(it, vec!["a3", "c2"]);
+            let it = txn.new_iterator(&rev);
+            check_iterator(it, vec!["c2", "a3"]);
 
             txn.read_ts = 5;
             {
                 let mut it = txn.new_iterator(&IteratorOptions::default());
+                it.seek(&ka);
+                assert!(it.valid());
+                assert_bytes_eq!(&it.item().key, &ka);
+                it.seek(&kc);
+                assert!(it.valid());
+                assert_bytes_eq!(&it.item().key, &kc);
+
+                let mut it = txn.new_iterator(&rev);
                 it.seek(&ka);
                 assert!(it.valid());
                 assert_bytes_eq!(&it.item().key, &ka);
@@ -580,19 +618,25 @@ mod normal_db {
             txn.read_ts = 3;
             let it = txn.new_iterator(&IteratorOptions::default());
             check_iterator(it, vec!["a3", "b3", "c2"]);
+            let it = txn.new_iterator(&rev);
+            check_iterator(it, vec!["c2", "b3", "a3"]);
 
             txn.read_ts = 2;
             let it = txn.new_iterator(&IteratorOptions::default());
             check_iterator(it, vec!["a2", "c2"]);
+            let it = txn.new_iterator(&rev);
+            check_iterator(it, vec!["c2", "a2"]);
 
             txn.read_ts = 1;
             let it = txn.new_iterator(&IteratorOptions::default());
+            check_iterator(it, vec!["c1"]);
+            let it = txn.new_iterator(&rev);
             check_iterator(it, vec!["c1"]);
         });
     }
 
     #[test]
-    fn test_txn_iteration_edge_test3() {
+    fn test_txn_iteration_edge_case3() {
         run_agate_test(None, |agate| {
             // Satisfy FixedLengthSuffixComparator need.
             let kb = Bytes::from("abcabcabc");
@@ -619,6 +663,10 @@ mod normal_db {
             txn2.delete(kc.clone()).unwrap();
 
             let txn = agate.new_transaction(true);
+            let rev = IteratorOptions {
+                reverse: true,
+                ..Default::default()
+            };
 
             {
                 let mut it = txn.new_iterator(&IteratorOptions::default());
@@ -662,7 +710,45 @@ mod normal_db {
                 assert_bytes_eq!(&it.item().key, &kd);
             }
 
-            // TODO: Reverse.
+            {
+                let mut it = txn.new_iterator(&rev);
+                it.seek(&Bytes::from("ac"));
+                assert!(it.valid());
+                assert_bytes_eq!(&it.item().key, &kb);
+                it.seek(&Bytes::from("ad"));
+                assert!(it.valid());
+                assert_bytes_eq!(&it.item().key, &kc);
+                it.seek(&Bytes::new());
+                assert!(it.valid());
+                assert_bytes_eq!(&it.item().key, &kc);
+
+                it.rewind();
+                assert!(it.valid());
+                assert_bytes_eq!(&it.item().key, &kc);
+                it.seek(&Bytes::from("ad"));
+                assert!(it.valid());
+                assert_bytes_eq!(&it.item().key, &kc);
+            }
+
+            {
+                let mut it = txn2.new_iterator(&rev);
+                it.seek(&Bytes::from("addddddd"));
+                assert!(it.valid());
+                assert_bytes_eq!(&it.item().key, &kb);
+                it.seek(&Bytes::from("aeeeeeee"));
+                assert!(it.valid());
+                assert_bytes_eq!(&it.item().key, &kd);
+                it.seek(&Bytes::new());
+                assert!(it.valid());
+                assert_bytes_eq!(&it.item().key, &kd);
+
+                it.rewind();
+                assert!(it.valid());
+                assert_bytes_eq!(&it.item().key, &kd);
+                it.seek(&Bytes::from("accccccc"));
+                assert!(it.valid());
+                assert_bytes_eq!(&it.item().key, &kb);
+            }
         });
     }
 
