@@ -842,31 +842,29 @@ mod normal_db {
         where
             F: FnOnce(Arc<Agate>) + Clone + Send + 'static,
         {
-            let num_go = 16;
+            let num_go = 4;
 
-            for _ in 0..10 {
-                set_count.store(0, Ordering::SeqCst);
-                test_count.store(0, Ordering::SeqCst);
+            set_count.store(0, Ordering::SeqCst);
+            test_count.store(0, Ordering::SeqCst);
 
-                let mut handles = vec![];
+            let mut handles = vec![];
 
-                run_agate_test(None, |agate| {
-                    for _ in 0..num_go {
-                        let agate_clone = agate.clone();
-                        let f_clone = f.clone();
-                        handles.push(std::thread::spawn(|| {
-                            f_clone(agate_clone);
-                        }));
-                    }
-                });
+            run_agate_test(None, |agate| {
+                for _ in 0..num_go {
+                    let agate_clone = agate.clone();
+                    let f_clone = f.clone();
+                    handles.push(std::thread::spawn(|| {
+                        f_clone(agate_clone);
+                    }));
+                }
+            });
 
-                handles
-                    .into_iter()
-                    .for_each(|handle| handle.join().unwrap());
+            handles
+                .into_iter()
+                .for_each(|handle| handle.join().unwrap());
 
-                assert_eq!(test_count.load(Ordering::SeqCst), num_go);
-                assert_eq!(set_count.load(Ordering::SeqCst), 1);
-            }
+            assert_eq!(test_count.load(Ordering::SeqCst), num_go);
+            assert_eq!(set_count.load(Ordering::SeqCst), 1);
         }
 
         run_test(set_count.clone(), test_count.clone(), test_and_set);
