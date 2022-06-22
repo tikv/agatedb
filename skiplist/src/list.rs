@@ -57,10 +57,11 @@ struct SkiplistInner {
 pub struct Skiplist<C> {
     inner: Arc<SkiplistInner>,
     c: C,
+    allow_concurrent_write: bool,
 }
 
 impl<C> Skiplist<C> {
-    pub fn with_capacity(c: C, arena_size: usize) -> Skiplist<C> {
+    pub fn with_capacity(c: C, arena_size: usize, allow_concurrent_write: bool) -> Skiplist<C> {
         let arena = Arena::with_capacity(arena_size);
         let head_offset = Node::alloc(&arena, Bytes::new(), Bytes::new(), MAX_HEIGHT - 1);
         let head = unsafe { NonNull::new_unchecked(arena.get_mut(head_offset)) };
@@ -71,6 +72,7 @@ impl<C> Skiplist<C> {
                 arena,
             }),
             c,
+            allow_concurrent_write,
         }
     }
 
@@ -223,7 +225,7 @@ impl<C: KeyComparator> Skiplist<C> {
         }
         let x: &mut Node = unsafe { &mut *self.inner.arena.get_mut(node_offset) };
         for i in 0..=height {
-            loop {
+            if !self.allow_concurrent_write {
                 if prev[i].is_null() {
                     assert!(i > 1);
                     let (p, n) =
@@ -233,30 +235,45 @@ impl<C: KeyComparator> Skiplist<C> {
                     assert_ne!(p, n);
                 }
                 let next_offset = self.inner.arena.offset(next[i]);
-                x.tower[i].store(next_offset, Ordering::SeqCst);
-                match unsafe { &*prev[i] }.tower[i].compare_exchange(
-                    next_offset,
-                    node_offset,
-                    Ordering::SeqCst,
-                    Ordering::SeqCst,
-                ) {
-                    Ok(_) => break,
-                    Err(_) => {
-                        let (p, n) = unsafe { self.find_splice_for_level(&x.key, prev[i], i) };
-                        if p == n {
-                            assert_eq!(i, 0);
-                            if unsafe { &*p }.value != x.value {
-                                let key = mem::replace(&mut x.key, Bytes::new());
-                                let value = mem::replace(&mut x.value, Bytes::new());
-                                return Some((key, value));
-                            }
-                            unsafe {
-                                ptr::drop_in_place(x);
-                            }
-                            return None;
-                        }
+                x.tower[i].store(next_offset, Ordering::Relaxed);
+                unsafe { &*prev[i] }.tower[i].store(node_offset, Ordering::Release);
+            } else {
+                loop {
+                    if prev[i].is_null() {
+                        assert!(i > 1);
+                        let (p, n) = unsafe {
+                            self.find_splice_for_level(&x.key, self.inner.head.as_ptr(), i)
+                        };
                         prev[i] = p;
                         next[i] = n;
+                        assert_ne!(p, n);
+                    }
+                    let next_offset = self.inner.arena.offset(next[i]);
+                    x.tower[i].store(next_offset, Ordering::SeqCst);
+                    match unsafe { &*prev[i] }.tower[i].compare_exchange(
+                        next_offset,
+                        node_offset,
+                        Ordering::SeqCst,
+                        Ordering::SeqCst,
+                    ) {
+                        Ok(_) => break,
+                        Err(_) => {
+                            let (p, n) = unsafe { self.find_splice_for_level(&x.key, prev[i], i) };
+                            if p == n {
+                                assert_eq!(i, 0);
+                                if unsafe { &*p }.value != x.value {
+                                    let key = mem::replace(&mut x.key, Bytes::new());
+                                    let value = mem::replace(&mut x.value, Bytes::new());
+                                    return Some((key, value));
+                                }
+                                unsafe {
+                                    ptr::drop_in_place(x);
+                                }
+                                return None;
+                            }
+                            prev[i] = p;
+                            next[i] = n;
+                        }
                     }
                 }
             }
@@ -439,50 +456,65 @@ mod tests {
     use super::*;
     use crate::FixedLengthSuffixComparator;
 
-    #[test]
-    fn test_find_near() {
+    fn with_skl_test(
+        allow_concurrent_write: bool,
+        capacity: usize,
+        f: impl FnOnce(Skiplist<FixedLengthSuffixComparator>),
+    ) {
         let comp = FixedLengthSuffixComparator::new(8);
-        let list = Skiplist::with_capacity(comp, 1 << 20);
-        for i in 0..1000 {
-            let key = Bytes::from(format!("{:05}{:08}", i * 10 + 5, 0));
-            let value = Bytes::from(format!("{:05}", i));
-            list.put(key, value);
-        }
-        let mut cases = vec![
-            ("00001", false, false, Some("00005")),
-            ("00001", false, true, Some("00005")),
-            ("00001", true, false, None),
-            ("00001", true, true, None),
-            ("00005", false, false, Some("00015")),
-            ("00005", false, true, Some("00005")),
-            ("00005", true, false, None),
-            ("00005", true, true, Some("00005")),
-            ("05555", false, false, Some("05565")),
-            ("05555", false, true, Some("05555")),
-            ("05555", true, false, Some("05545")),
-            ("05555", true, true, Some("05555")),
-            ("05558", false, false, Some("05565")),
-            ("05558", false, true, Some("05565")),
-            ("05558", true, false, Some("05555")),
-            ("05558", true, true, Some("05555")),
-            ("09995", false, false, None),
-            ("09995", false, true, Some("09995")),
-            ("09995", true, false, Some("09985")),
-            ("09995", true, true, Some("09995")),
-            ("59995", false, false, None),
-            ("59995", false, true, None),
-            ("59995", true, false, Some("09995")),
-            ("59995", true, true, Some("09995")),
-        ];
-        for (i, (key, less, allow_equal, exp)) in cases.drain(..).enumerate() {
-            let seek_key = Bytes::from(format!("{}{:08}", key, 0));
-            let res = unsafe { list.find_near(&seek_key, less, allow_equal) };
-            if exp.is_none() {
-                assert!(res.is_null(), "{}", i);
-                continue;
+        let list = Skiplist::with_capacity(comp, capacity, allow_concurrent_write);
+        f(list);
+    }
+
+    fn test_find_near_imp(allow_concurrent_write: bool, capacity: usize) {
+        with_skl_test(allow_concurrent_write, capacity, |list| {
+            for i in 0..1000 {
+                let key = Bytes::from(format!("{:05}{:08}", i * 10 + 5, 0));
+                let value = Bytes::from(format!("{:05}", i));
+                list.put(key, value);
             }
-            let e = format!("{}{:08}", exp.unwrap(), 0);
-            assert_eq!(&unsafe { &*res }.key, e.as_bytes(), "{}", i);
-        }
+            let mut cases = vec![
+                ("00001", false, false, Some("00005")),
+                ("00001", false, true, Some("00005")),
+                ("00001", true, false, None),
+                ("00001", true, true, None),
+                ("00005", false, false, Some("00015")),
+                ("00005", false, true, Some("00005")),
+                ("00005", true, false, None),
+                ("00005", true, true, Some("00005")),
+                ("05555", false, false, Some("05565")),
+                ("05555", false, true, Some("05555")),
+                ("05555", true, false, Some("05545")),
+                ("05555", true, true, Some("05555")),
+                ("05558", false, false, Some("05565")),
+                ("05558", false, true, Some("05565")),
+                ("05558", true, false, Some("05555")),
+                ("05558", true, true, Some("05555")),
+                ("09995", false, false, None),
+                ("09995", false, true, Some("09995")),
+                ("09995", true, false, Some("09985")),
+                ("09995", true, true, Some("09995")),
+                ("59995", false, false, None),
+                ("59995", false, true, None),
+                ("59995", true, false, Some("09995")),
+                ("59995", true, true, Some("09995")),
+            ];
+            for (i, (key, less, allow_equal, exp)) in cases.drain(..).enumerate() {
+                let seek_key = Bytes::from(format!("{}{:08}", key, 0));
+                let res = unsafe { list.find_near(&seek_key, less, allow_equal) };
+                if exp.is_none() {
+                    assert!(res.is_null(), "{}", i);
+                    continue;
+                }
+                let e = format!("{}{:08}", exp.unwrap(), 0);
+                assert_eq!(&unsafe { &*res }.key, e.as_bytes(), "{}", i);
+            }
+        });
+    }
+
+    #[test]
+    fn test_skl_basic() {
+        test_find_near_imp(true, 1 << 20);
+        test_find_near_imp(false, 1 << 26);
     }
 }

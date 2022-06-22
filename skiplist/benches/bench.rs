@@ -44,7 +44,7 @@ fn bench_read_write_skiplist_frac(b: &mut Bencher<'_>, frac: &usize) {
     let frac = *frac;
     let value = Bytes::from_static(b"00123");
     let comp = FixedLengthSuffixComparator::new(8);
-    let list = Skiplist::with_capacity(comp, 512 << 20);
+    let list = Skiplist::with_capacity(comp, 512 << 20, true);
     let l = list.clone();
     let stop = Arc::new(AtomicBool::new(false));
     let s = stop.clone();
@@ -136,7 +136,7 @@ fn bench_read_write_map(c: &mut Criterion) {
 
 fn bench_write_skiplist(c: &mut Criterion) {
     let comp = FixedLengthSuffixComparator::new(8);
-    let list = Skiplist::with_capacity(comp, 512 << 21);
+    let list = Skiplist::with_capacity(comp, 512 << 21, true);
     let value = Bytes::from_static(b"00123");
     let l = list.clone();
     let stop = Arc::new(AtomicBool::new(false));
