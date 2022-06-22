@@ -13,6 +13,4 @@ jobs:
         with:
           organization: 'tikv'
           period: 7
-          charts: true
-          disable-links: true
           sort-by: 'COMMENTS'
