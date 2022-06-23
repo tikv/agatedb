@@ -524,6 +524,6 @@ mod tests {
     #[test]
     fn test_skl_basic() {
         test_find_near_imp(true, 1 << 20);
-        test_find_near_imp(false, 1 << 26);
+        test_find_near_imp(false, 1 << 20);
     }
 }
