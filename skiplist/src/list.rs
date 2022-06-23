@@ -212,32 +212,28 @@ impl<C: KeyComparator> Skiplist<C> {
 
         let height = self.random_height();
         let node_offset = Node::alloc(&self.inner.arena, key, value, height);
-        while height > list_height {
-            match self.inner.height.compare_exchange_weak(
-                list_height,
-                height,
-                Ordering::SeqCst,
-                Ordering::SeqCst,
-            ) {
-                Ok(_) => break,
-                Err(h) => list_height = h,
+        if self.allow_concurrent_write {
+            while height > list_height {
+                match self.inner.height.compare_exchange_weak(
+                    list_height,
+                    height,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                ) {
+                    Ok(_) => break,
+                    Err(h) => list_height = h,
+                }
+            }
+        } else {
+            // There is no need to use CAS for single thread writing.
+            if height > list_height {
+                self.inner.height.store(height, Ordering::Relaxed);
             }
         }
+
         let x: &mut Node = unsafe { &mut *self.inner.arena.get_mut(node_offset) };
         for i in 0..=height {
-            if !self.allow_concurrent_write {
-                if prev[i].is_null() {
-                    assert!(i > 1);
-                    let (p, n) =
-                        unsafe { self.find_splice_for_level(&x.key, self.inner.head.as_ptr(), i) };
-                    prev[i] = p;
-                    next[i] = n;
-                    assert_ne!(p, n);
-                }
-                let next_offset = self.inner.arena.offset(next[i]);
-                x.tower[i].store(next_offset, Ordering::Relaxed);
-                unsafe { &*prev[i] }.tower[i].store(node_offset, Ordering::Release);
-            } else {
+            if self.allow_concurrent_write {
                 loop {
                     if prev[i].is_null() {
                         assert!(i > 1);
@@ -276,6 +272,19 @@ impl<C: KeyComparator> Skiplist<C> {
                         }
                     }
                 }
+            } else {
+                // There is no need to use CAS for single thread writing.
+                if prev[i].is_null() {
+                    assert!(i > 1);
+                    let (p, n) =
+                        unsafe { self.find_splice_for_level(&x.key, self.inner.head.as_ptr(), i) };
+                    prev[i] = p;
+                    next[i] = n;
+                    assert_ne!(p, n);
+                }
+                let next_offset = self.inner.arena.offset(next[i]);
+                x.tower[i].store(next_offset, Ordering::Relaxed);
+                unsafe { &*prev[i] }.tower[i].store(node_offset, Ordering::Release);
             }
         }
         None
