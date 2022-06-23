@@ -130,6 +130,18 @@ impl Agate {
             flush_handle: Some(flush_handle),
         }
     }
+
+    pub fn get(&self, key: &Bytes) -> Result<Value> {
+        self.core.get(key)
+    }
+
+    pub fn write_to_lsm(&self, request: Request) -> Result<()> {
+        self.core.write_to_lsm(request)
+    }
+
+    pub fn write_requests(&self, request: Vec<Request>) -> Result<()> {
+        self.core.write_requests(request)
+    }
 }
 
 impl Drop for Agate {
@@ -632,20 +644,6 @@ impl Core {
         }
 
         unreachable!()
-    }
-}
-
-impl Agate {
-    pub fn get(&self, key: &Bytes) -> Result<Value> {
-        self.core.get(key)
-    }
-
-    pub fn write_to_lsm(&self, request: Request) -> Result<()> {
-        self.core.write_to_lsm(request)
-    }
-
-    pub fn write_requests(&self, request: Vec<Request>) -> Result<()> {
-        self.core.write_requests(request)
     }
 }
 
