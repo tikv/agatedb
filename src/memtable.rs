@@ -223,7 +223,7 @@ mod tests {
     use crate::{format::append_ts, util::make_comparator};
 
     fn get_memtable(data: Vec<(Bytes, Value)>) -> Arc<MemTable> {
-        let skl = Skiplist::with_capacity(make_comparator(), 4 * 1024 * 1024);
+        let skl = Skiplist::with_capacity(make_comparator(), 4 * 1024 * 1024, true);
         let memtable = Arc::new(MemTable::new(0, skl, None, AgateOptions::default()));
 
         for (k, v) in data {
