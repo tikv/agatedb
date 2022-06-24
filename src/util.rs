@@ -1,4 +1,12 @@
-use std::{cmp, fs::File, path::Path, ptr, sync::atomic::AtomicBool};
+use std::{
+    cmp,
+    collections::hash_map::DefaultHasher,
+    fs::File,
+    hash::{Hash, Hasher},
+    path::Path,
+    ptr,
+    sync::atomic::AtomicBool,
+};
 
 use bytes::Bytes;
 pub use skiplist::{FixedLengthSuffixComparator as Comparator, KeyComparator};
@@ -96,6 +104,25 @@ pub fn panic_if_fail() {
     }
 }
 
+pub fn default_hash(h: &impl Hash) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    h.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// `assert_bytes_eq` will first convert `left` and `right` into `bytes::Bytes`, and call `assert_eq!`.
+/// When asserting eq, `Bytes` is more readable than `&[u8]` in output, as it will show characters as-is
+/// and only escape control characters. For example, it will show `aaa` instead of `[97, 97, 97]`.
+#[macro_export]
+macro_rules! assert_bytes_eq {
+    ($left:expr, $right:expr) => {
+        assert_eq!(
+            Bytes::copy_from_slice($left),
+            Bytes::copy_from_slice($right)
+        )
+    };
+}
+
 #[cfg(test)]
 mod test {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -106,6 +133,6 @@ mod test {
     fn test_unix_time() {
         let start = SystemTime::now();
         let since_the_epoch = start.duration_since(UNIX_EPOCH).unwrap();
-        assert_eq!(since_the_epoch.as_millis() as u64 / 10, unix_time() / 10);
+        assert_eq!(since_the_epoch.as_millis() as u64 / 100, unix_time() / 100);
     }
 }

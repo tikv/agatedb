@@ -56,8 +56,14 @@ pub enum Error {
     PoisonError(String),
     #[error("Join Error")]
     JoinError(String),
+    #[error("Txn is too big to fit into one request")]
+    TxnTooBig,
     #[error("Send error {0}")]
     SendError(String),
+    #[error("Key not found")]
+    KeyNotFound(()),
+    #[error("This transaction has been discarded. Create a new one")]
+    DiscardedTxn,
     #[error("No room for write")]
     WriteNoRoom(()),
 }

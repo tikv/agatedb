@@ -44,11 +44,11 @@ jobs:
           git diff --quiet
       - name: Linting The Code 🩹
         run: make clippy
-      - uses: taiki-e/install-action@cargo-llvm-cov      
+      - uses: taiki-e/install-action@cargo-llvm-cov
       - name: Running Tests With Code Coverage 🚀
         run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
       - name: Upload Coverage To Codecov ⬆️
-        uses: codecov/codecov-action@v1 
+        uses: codecov/codecov-action@v1
         with:
           files: lcov.info
           fail_ci_if_error: true
@@ -82,7 +82,7 @@ jobs:
         name: Running Tests with ${{ matrix.sanitizer }} sanitizer 🚀
         with:
           command: test
-          args: --all-features -Zbuild-std --target x86_64-unknown-linux-gnu
+          args: --all-features -Zbuild-std --target x86_64-unknown-linux-gnu -- --test-threads=1
         env:
           TSAN_OPTIONS: "suppressions=.github/workflows/tsan"
           RUSTFLAGS: "-Zsanitizer=${{ matrix.sanitizer }}"

@@ -3,44 +3,62 @@ mod opt;
 use std::{
     collections::VecDeque,
     fs,
-    path::{Path, PathBuf},
-    sync::{atomic::AtomicUsize, Arc, RwLock},
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize},
+        Arc, RwLock,
+    },
     thread::JoinHandle,
 };
 
-use bytes::Bytes;
-use crossbeam_channel::{Receiver, Sender};
-use log::debug;
+use bytes::{Bytes, BytesMut};
+use crossbeam_channel::{bounded, select, Receiver, Sender};
+use log::{debug, info};
 pub use opt::AgateOptions;
 use skiplist::Skiplist;
+use yatp::task::callback::Handle;
 
-use super::{
-    manifest::ManifestFile,
-    memtable::{MemTable, MemTables},
-    opt::build_table_options,
-    Error, Result,
-};
 use crate::{
     closer::Closer,
-    format::get_ts,
+    entry::Entry,
+    get_ts,
     levels::LevelsController,
+    manifest::ManifestFile,
+    memtable::{MemTable, MemTables},
     ops::oracle::Oracle,
+    opt::build_table_options,
     util::{has_any_prefixes, make_comparator},
     value::{self, Request, Value},
     value_log::ValueLog,
     wal::Wal,
-    Table, TableBuilder, TableOptions,
+    Error, Result, Table, TableBuilder, TableOptions,
 };
 
 const MEMTABLE_FILE_EXT: &str = ".mem";
+const KV_WRITE_CH_CAPACITY: usize = 1000;
+
+struct Closers {
+    writes: Closer,
+}
 
 pub struct Core {
+    closers: Closers,
+
     mts: RwLock<MemTables>,
-    pub(crate) opts: AgateOptions,
+
     next_mem_fid: AtomicUsize,
-    vlog: Arc<Option<ValueLog>>,
-    lvctl: LevelsController,
+
+    pub(crate) opts: AgateOptions,
+    pub(crate) manifest: Arc<ManifestFile>,
+    pub(crate) lvctl: LevelsController,
+    pub(crate) vlog: Arc<Option<ValueLog>>,
+    write_channel: (Sender<Request>, Receiver<Request>),
     flush_channel: (Sender<Option<FlushTask>>, Receiver<Option<FlushTask>>),
+
+    block_writes: AtomicBool,
+    is_closed: AtomicBool,
+
+    pub(crate) orc: Arc<Oracle>,
 }
 
 pub struct Agate {
@@ -80,11 +98,28 @@ impl Agate {
     */
 
     fn new(core: Arc<Core>) -> Self {
-        let flush_core = core.clone();
         let closer = Closer::new();
-        let pool = Arc::new(yatp::Builder::new("agatedb").build_callback_pool());
+        let pool = Arc::new(
+            yatp::Builder::new("agatedb")
+                .max_thread_count(core.opts.num_compactors * 8 + 2)
+                .min_thread_count(core.opts.num_compactors * 5 + 2)
+                .build_callback_pool(),
+        );
 
+        let flush_core = core.clone();
         let flush_handle = std::thread::spawn(move || flush_core.flush_memtable().unwrap());
+
+        let write_core = core.clone();
+        let pool_clone = pool.clone();
+        pool.spawn(move |_: &mut Handle<'_>| {
+            write_core
+                .do_writes(
+                    write_core.closers.writes.clone(),
+                    write_core.clone(),
+                    pool_clone,
+                )
+                .unwrap()
+        });
 
         core.lvctl.start_compact(closer.clone(), pool.clone());
 
@@ -95,10 +130,26 @@ impl Agate {
             flush_handle: Some(flush_handle),
         }
     }
+
+    pub fn get(&self, key: &Bytes) -> Result<Value> {
+        self.core.get(key)
+    }
+
+    pub fn write_to_lsm(&self, request: Request) -> Result<()> {
+        self.core.write_to_lsm(request)
+    }
+
+    pub fn write_requests(&self, request: Vec<Request>) -> Result<()> {
+        self.core.write_requests(request)
+    }
 }
 
 impl Drop for Agate {
     fn drop(&mut self) {
+        self.core
+            .block_writes
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.core.closers.writes.close();
         // Flush thread need to be closed before compaction threads. Because the flush
         // thread may stuck in add_l0_table forever when there are too many sst files
         // in level0, and at the same time all compaction threads have exited.
@@ -111,28 +162,35 @@ impl Drop for Agate {
 }
 
 impl Core {
-    fn new(opts: AgateOptions) -> Result<Self> {
+    pub(crate) fn new(opts: &AgateOptions) -> Result<Self> {
         // create first mem table
-        let orc = Arc::new(Oracle::new(&opts));
-        let manifest = Arc::new(ManifestFile::open_or_create_manifest_file(&opts)?);
-        let lvctl = LevelsController::new(opts.clone(), manifest, orc)?;
+        let orc = Arc::new(Oracle::new(opts));
+        let manifest = Arc::new(ManifestFile::open_or_create_manifest_file(opts)?);
+        let lvctl = LevelsController::new(opts, manifest.clone(), orc.clone())?;
 
-        let (imm_tables, mut next_mem_fid) = Self::open_mem_tables(&opts)?;
-        let mt = Self::open_mem_table(&opts, next_mem_fid)?;
+        let (imm_tables, mut next_mem_fid) = Self::open_mem_tables(opts)?;
+        let mt = Self::open_mem_table(opts, next_mem_fid)?;
         next_mem_fid += 1;
 
-        // create agate core
         let core = Self {
+            closers: Closers {
+                writes: Closer::new(),
+            },
             mts: RwLock::new(MemTables::new(Arc::new(mt), imm_tables)),
-            opts: opts.clone(),
             next_mem_fid: AtomicUsize::new(next_mem_fid),
-            vlog: Arc::new(ValueLog::new(opts.clone())?),
+            opts: opts.clone(),
+            manifest,
             lvctl,
+            vlog: Arc::new(ValueLog::new(opts.clone())?),
+            write_channel: bounded(KV_WRITE_CH_CAPACITY),
             flush_channel: crossbeam_channel::bounded(opts.num_memtables),
+            block_writes: AtomicBool::new(false),
+            is_closed: AtomicBool::new(false),
+            orc,
         };
 
-        // TODO: initialize other structures
-
+        // TODO: Initialize other structures.
+        core.orc.increment_next_ts();
         Ok(core)
     }
 
@@ -219,15 +277,17 @@ impl Core {
         }
 
         let view = self.mts.read()?.view();
-        let mut max_value = Value::default();
 
+        let mut max_value = Value::default();
         let version = get_ts(key);
 
         for table in view.tables() {
             let mut value = Value::default();
 
-            if let Some(value_data) = table.get(key) {
+            if let Some((key, value_data)) = table.get_with_key(key) {
                 value.decode(value_data.clone());
+                value.version = get_ts(key);
+
                 if value.meta == 0 && value.value.is_empty() {
                     continue;
                 }
@@ -241,7 +301,7 @@ impl Core {
             }
         }
 
-        // max_value will be used in level controller
+        // max_value will be used in level controller.
         self.lvctl.get(key, max_value, 0)
     }
 
@@ -251,13 +311,13 @@ impl Core {
     /// 1. read lock of memtable list (only block flush)
     /// 2. write lock of mutable memtable WAL (won't block mut-table read).
     /// 3. level controller lock (TBD)
-    pub fn write_to_lsm(&self, request: Request) -> Result<()> {
-        // TODO: check entries and pointers
+    pub(crate) fn write_to_lsm(&self, request: Request) -> Result<()> {
+        // TODO: Check entries and pointers.
 
         let memtables = self.mts.read()?;
         let mut_table = memtables.mut_table();
 
-        for entry in request.entries.into_iter() {
+        for (idx, entry) in request.entries.into_iter().enumerate() {
             if self.opts.skip_vlog(&entry) {
                 // deletion, tombstone, and small values
                 mut_table.put(
@@ -271,29 +331,31 @@ impl Core {
                     },
                 )?;
             } else {
-                // write pointer to memtable
+                let mut vptr_buf = BytesMut::new();
+                request.ptrs[idx].encode(&mut vptr_buf);
+                // Write pointer to memtable.
                 mut_table.put(
                     entry.key,
                     Value {
-                        value: Bytes::new(),
+                        value: vptr_buf.freeze(),
                         meta: entry.meta | value::VALUE_POINTER,
                         user_meta: entry.user_meta,
                         expires_at: entry.expires_at,
                         version: 0,
                     },
                 )?;
-                unimplemented!()
             }
         }
+
         if self.opts.sync_writes {
             mut_table.sync_wal()?;
         }
         Ok(())
     }
 
-    /// Calling ensure_room_for_write requires locking whole memtable
+    /// Calling ensure_room_for_write requires locking whole memtable.
     pub fn ensure_room_for_write(&self) -> Result<()> {
-        // we do not need to force flush memtable in in-memory mode as WAL is None
+        // we do not need to force flush memtable in in-memory mode as WAL is None.
         let mut mts = self.mts.write()?;
         let mut force_flush = false;
 
@@ -385,6 +447,16 @@ impl Core {
         Ok(())
     }
 
+    pub(crate) fn get_mem_tables(&self) -> Vec<Arc<MemTable>> {
+        let mut tables = vec![];
+        let mts = self.mts.read().unwrap();
+        tables.push(mts.mut_table());
+        for idx in 0..mts.nums_of_memtable() - 1 {
+            tables.push(mts.imm_table(idx));
+        }
+        tables
+    }
+
     fn flush_memtable(&self) -> Result<()> {
         for task in self.flush_channel.1.clone() {
             if let Some(task) = task {
@@ -411,34 +483,32 @@ impl Core {
     /// Write requests should be only called in one thread. By calling this
     /// function, requests will be written into the LSM tree.
     ///
-    /// TODO: ensure only one thread calls this function by using Mutex.
-    #[allow(clippy::needless_collect)]
+    // TODO: ensure only one thread calls this function by using Mutex.
     pub fn write_requests(&self, mut requests: Vec<Request>) -> Result<()> {
         if requests.is_empty() {
             return Ok(());
         }
 
+        #[allow(clippy::needless_collect)]
         let dones: Vec<_> = requests.iter().map(|x| x.done.clone()).collect();
 
         let write = || {
-            // TODO: process subscriptions
-
             if let Some(ref vlog) = *self.vlog {
                 vlog.write(&mut requests)?;
             }
 
             let mut cnt = 0;
 
-            // writing to LSM
+            // Writing to LSM.
             for req in requests {
                 if req.entries.is_empty() {
                     continue;
                 }
+
                 cnt += req.entries.len();
 
                 while self.ensure_room_for_write().is_err() {
                     std::thread::sleep(std::time::Duration::from_millis(10));
-                    // eprintln!("wait for room... {:?}", err)
                 }
 
                 self.write_to_lsm(req)?;
@@ -457,33 +527,123 @@ impl Core {
 
         result
     }
-}
 
-impl Agate {
-    pub fn get(&self, key: &Bytes) -> Result<Value> {
-        self.core.get(key)
-    }
-
-    pub fn write_to_lsm(&self, request: Request) -> Result<()> {
-        self.core.write_to_lsm(request)
-    }
-
-    pub fn write_requests(&self, request: Vec<Request>) -> Result<()> {
-        self.core.write_requests(request)
-    }
-
-    pub fn open<P: AsRef<Path>>(mut opts: AgateOptions, path: P) -> Result<Self> {
-        opts.fix_options()?;
-
-        opts.dir = path.as_ref().to_path_buf();
-
-        if !opts.in_memory && !opts.dir.exists() {
-            fs::create_dir_all(&opts.dir)?;
-            // TODO: create wal path, acquire database path lock
+    pub(crate) fn send_to_write_channel(
+        &self,
+        entries: Vec<Entry>,
+    ) -> Result<Receiver<Result<()>>> {
+        if self.block_writes.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Error::CustomError(
+                "Writes are blocked, possibly due to dropping all data or close".to_string(),
+            ));
         }
 
-        // TODO: open or create manifest
-        Ok(Self::new(Arc::new(Core::new(opts)?)))
+        let mut count = 0;
+        let mut size = 0;
+        for entry in &entries {
+            size += entry.estimate_size(self.opts.value_threshold) as u64;
+            count += 1;
+        }
+        if count >= self.opts.max_batch_count || size >= self.opts.max_batch_size {
+            return Err(Error::TxnTooBig);
+        }
+
+        let (tx, rx) = bounded(1);
+        // TODO: Get request from request pool.
+        let req = Request {
+            entries,
+            ptrs: vec![],
+            done: Some(tx),
+        };
+        self.write_channel.0.send(req)?;
+        Ok(rx)
+    }
+
+    fn do_writes(
+        &self,
+        closer: Closer,
+        core: Arc<Self>,
+        pool: Arc<yatp::ThreadPool<yatp::task::callback::TaskCell>>,
+    ) -> Result<()> {
+        info!("Start doing writes.");
+
+        let (pending_tx, pending_rx) = bounded(1);
+
+        const STATUS_WRITE: usize = 0;
+        const STATUS_CLOSED: usize = 1;
+
+        let mut reqs = Vec::with_capacity(10);
+
+        let status = loop {
+            let req;
+
+            // We wait until there is at least one request.
+            select! {
+                recv(core.write_channel.1) -> req_recv => {
+                    req = req_recv.unwrap();
+                }
+                recv(closer.get_receiver()) -> _ => {
+                    break STATUS_CLOSED;
+                }
+            }
+
+            reqs.push(req);
+
+            let status = loop {
+                if reqs.len() >= 3 * KV_WRITE_CH_CAPACITY {
+                    pending_tx.send(()).unwrap();
+                    break STATUS_WRITE;
+                }
+
+                select! {
+                    // Either push to pending, or continue to pick from write_channel.
+                    recv(core.write_channel.1) -> req => {
+                        let req = req.unwrap();
+                        reqs.push(req);
+                    }
+                    send(pending_tx, ()) -> _ => {
+                        break STATUS_WRITE;
+                    }
+                    recv(closer.get_receiver()) -> _ => {
+                        break STATUS_CLOSED;
+                    }
+                }
+            };
+
+            if status == STATUS_CLOSED {
+                break STATUS_CLOSED;
+            } else if status == STATUS_WRITE {
+                let rx = pending_rx.clone();
+                let reqs = std::mem::replace(&mut reqs, Vec::with_capacity(10));
+                let core = core.clone();
+                pool.spawn(move |_: &mut Handle<'_>| {
+                    if let Err(err) = core.write_requests(reqs) {
+                        log::error!("failed to write: {:?}", err);
+                    }
+                    rx.recv().ok();
+                })
+            }
+        };
+
+        if status == STATUS_CLOSED {
+            // All the pending request are drained.
+            // Don't close the write_channel, because it has be used in several places.
+            loop {
+                select! {
+                    recv(core.write_channel.1) -> req => {
+                        reqs.push(req.unwrap());
+                    }
+                    default => {
+                        if let Err(err) = core.write_requests(reqs) {
+                            log::error!("failed to write: {:?}", err);
+                        }
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        unreachable!()
     }
 }
 

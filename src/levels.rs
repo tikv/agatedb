@@ -53,7 +53,7 @@ pub struct LevelsController {
 }
 
 impl LevelsControllerInner {
-    fn new(opts: AgateOptions, manifest: Arc<ManifestFile>, orc: Arc<Oracle>) -> Result<Self> {
+    fn new(opts: &AgateOptions, manifest: Arc<ManifestFile>, orc: Arc<Oracle>) -> Result<Self> {
         assert!(opts.num_level_zero_tables_stall > opts.num_level_zero_tables);
 
         let mut inner = LevelsControllerInner {
@@ -92,7 +92,7 @@ impl LevelsControllerInner {
         for (id, table_manifest) in manifest_data.tables {
             max_file_id = std::cmp::max(max_file_id, id);
 
-            let table_opts = build_table_options(&opts);
+            let table_opts = build_table_options(opts);
             // TODO: Set compression, data_key, cache.
 
             let filename = crate::table::new_filename(id, &opts.dir);
@@ -961,7 +961,7 @@ impl LevelsControllerInner {
 }
 
 impl LevelsController {
-    pub fn new(opts: AgateOptions, manifest: Arc<ManifestFile>, orc: Arc<Oracle>) -> Result<Self> {
+    pub fn new(opts: &AgateOptions, manifest: Arc<ManifestFile>, orc: Arc<Oracle>) -> Result<Self> {
         Ok(Self {
             inner: Arc::new(LevelsControllerInner::new(opts, manifest, orc)?),
         })

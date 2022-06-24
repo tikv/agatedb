@@ -3,8 +3,10 @@ use enum_dispatch::enum_dispatch;
 
 use super::{concat_iterator::ConcatIterator, TableIterator};
 use crate::{
+    iterator::SkiplistIterator,
     iterator_trait::AgateIterator,
-    util::{KeyComparator, COMPARATOR},
+    ops::transaction::PendingWritesIterator,
+    util::{Comparator, KeyComparator, COMPARATOR},
     Value,
 };
 
@@ -16,6 +18,8 @@ pub enum Iterators {
     Merge(MergeIterator),
     Concat(ConcatIterator),
     Table(TableIterator),
+    Txn(PendingWritesIterator),
+    Skiplist(SkiplistIterator<Comparator>),
     #[cfg(test)]
     Vec(tests::VecIterator),
 }
@@ -231,6 +235,7 @@ impl AgateIterator for MergeIterator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assert_bytes_eq;
     use crate::format::{key_with_ts, user_key};
 
     pub struct VecIterator {
@@ -288,18 +293,6 @@ mod tests {
             .filter(|x| predicate(*x))
             .map(|i| key_with_ts(format!("{:012x}", i).as_str(), 0))
             .collect()
-    }
-
-    /// `assert_bytes_eq` will first convert `left` and `right` into `bytes::Bytes`, and call `assert_eq!`.
-    /// When asserting eq, `Bytes` is more readable than `&[u8]` in output, as it will show characters as-is
-    /// and only escape control characters. For example, it will show `aaa` instead of `[97, 97, 97]`.
-    macro_rules! assert_bytes_eq {
-        ($left:expr, $right:expr) => {
-            assert_eq!(
-                Bytes::copy_from_slice($left),
-                Bytes::copy_from_slice($right)
-            )
-        };
     }
 
     fn check_sequence_both(mut iter: Box<Iterators>, n: usize, reversed: bool) {

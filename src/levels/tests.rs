@@ -6,6 +6,7 @@ use yatp::{task::callback::TaskCell, ThreadPool};
 
 use super::*;
 use crate::{
+    assert_bytes_eq,
     db::tests::{generate_test_agate_options, helper_dump_dir},
     table::new_filename,
 };
@@ -49,7 +50,7 @@ where
         let manifest = Arc::new(ManifestFile::open_or_create_manifest_file(&opts).unwrap());
         let orc = Arc::new(Oracle::new(&opts));
 
-        let mut lvctl = LevelsController::new(opts.clone(), manifest, orc).unwrap();
+        let mut lvctl = LevelsController::new(&opts, manifest, orc).unwrap();
 
         f(&mut lvctl);
 
@@ -118,15 +119,6 @@ fn create_and_open(lvctl: &mut LevelsController, td: Vec<KeyValVersion>, level: 
         .unwrap();
     let mut lv = lvctl.inner.levels[level].write().unwrap();
     lv.tables.push(table);
-}
-
-macro_rules! assert_bytes_eq {
-    ($left:expr, $right:expr) => {
-        assert_eq!(
-            Bytes::copy_from_slice($left),
-            Bytes::copy_from_slice($right)
-        )
-    };
 }
 
 fn get_all_and_check(lvctl: &mut LevelsController, expected: Vec<KeyValVersion>) {
