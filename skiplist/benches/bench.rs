@@ -190,7 +190,7 @@ fn bench_reverse_scan_doubly_skiplist(c: &mut Criterion) {
     for _ in 0..10000 {
         list.put(random_key(&mut rng), value.clone());
     }
-    c.bench_function("skiplist_reverse_scan_fast", |b| {
+    c.bench_function("doubly_skiplist_reverse_scan", |b| {
         b.iter(|| {
             let mut iter = list.iter_ref();
             iter.seek_to_last();
