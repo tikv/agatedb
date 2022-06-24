@@ -182,7 +182,7 @@ fn bench_reverse_scan_skiplist(c: &mut Criterion) {
     });
 }
 
-fn bench_reverse_scan_skiplist_fast(c: &mut Criterion) {
+fn bench_reverse_scan_doubly_skiplist(c: &mut Criterion) {
     let comp = FixedLengthSuffixComparator::new(8);
     let list = Skiplist::with_capacity(comp, 16 << 20, false);
     let value = Bytes::from_static(b"0123456789abcdefghijklmkopqrstuvwxyz");
@@ -204,7 +204,7 @@ fn bench_reverse_scan_skiplist_fast(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_reverse_scan_skiplist,
-    bench_reverse_scan_skiplist_fast,
+    bench_reverse_scan_doubly_skiplist,
     bench_read_write_skiplist,
     bench_read_write_map,
     bench_write_skiplist,
