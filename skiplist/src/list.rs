@@ -22,6 +22,8 @@ pub struct Node {
     key: Bytes,
     value: Bytes,
     height: usize,
+    // PrevList for fast reverse scan.
+    prev: AtomicUsize,
     tower: [AtomicUsize; MAX_HEIGHT],
 }
 
@@ -282,6 +284,17 @@ impl<C: KeyComparator> Skiplist<C> {
                     next[i] = n;
                     assert_ne!(p, n);
                 }
+                // Construct the PrevList for level 0.
+                if i == 0 {
+                    let prev_offset = self.inner.arena.offset(prev[0]);
+                    x.prev.store(prev_offset, Ordering::Relaxed);
+                    if !next[i].is_null() {
+                        unsafe { &*next[i] }
+                            .prev
+                            .store(node_offset, Ordering::Release);
+                    }
+                }
+                // Construct the NextList for level i.
                 let next_offset = self.inner.arena.offset(next[i]);
                 x.tower[i].store(next_offset, Ordering::Relaxed);
                 unsafe { &*prev[i] }.tower[i].store(node_offset, Ordering::Release);
@@ -431,8 +444,20 @@ impl<T: AsRef<Skiplist<C>>, C: KeyComparator> IterRef<T, C> {
 
     pub fn prev(&mut self) {
         assert!(self.valid());
-        unsafe {
-            self.cursor = self.list.as_ref().find_near(self.key(), true, false);
+        if self.list.as_ref().allow_concurrent_write {
+            unsafe {
+                self.cursor = self.list.as_ref().find_near(self.key(), true, false);
+            }
+        } else {
+            unsafe {
+                let prev_offset = (*self.cursor).prev.load(Ordering::Acquire);
+                let node = self.list.as_ref().inner.arena.get_mut(prev_offset);
+                if node != self.list.as_ref().inner.head.as_ptr() {
+                    self.cursor = node;
+                } else {
+                    self.cursor = ptr::null();
+                }
+            }
         }
     }
 
@@ -465,18 +490,19 @@ mod tests {
     use super::*;
     use crate::FixedLengthSuffixComparator;
 
+    const ARENA_SIZE: usize = 1 << 20;
+
     fn with_skl_test(
         allow_concurrent_write: bool,
-        capacity: usize,
         f: impl FnOnce(Skiplist<FixedLengthSuffixComparator>),
     ) {
         let comp = FixedLengthSuffixComparator::new(8);
-        let list = Skiplist::with_capacity(comp, capacity, allow_concurrent_write);
+        let list = Skiplist::with_capacity(comp, ARENA_SIZE, allow_concurrent_write);
         f(list);
     }
 
-    fn test_find_near_imp(allow_concurrent_write: bool, capacity: usize) {
-        with_skl_test(allow_concurrent_write, capacity, |list| {
+    fn test_find_near_imp(allow_concurrent_write: bool) {
+        with_skl_test(allow_concurrent_write, |list| {
             for i in 0..1000 {
                 let key = Bytes::from(format!("{:05}{:08}", i * 10 + 5, 0));
                 let value = Bytes::from(format!("{:05}", i));
@@ -522,8 +548,8 @@ mod tests {
     }
 
     #[test]
-    fn test_skl_basic() {
-        test_find_near_imp(true, 1 << 20);
-        test_find_near_imp(false, 1 << 20);
+    fn test_skl_find_near() {
+        test_find_near_imp(true);
+        test_find_near_imp(false);
     }
 }

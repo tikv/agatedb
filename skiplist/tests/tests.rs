@@ -191,25 +191,39 @@ fn test_iterator_next() {
 
 #[test]
 fn test_iterator_prev() {
-    let n = 100;
+    test_iterator_prev_imp(true);
+    test_iterator_prev_imp(false);
+}
+
+fn with_skl_test(
+    allow_concurrent_write: bool,
+    f: impl FnOnce(Skiplist<FixedLengthSuffixComparator>),
+) {
     let comp = FixedLengthSuffixComparator::new(8);
-    let list = Skiplist::with_capacity(comp, ARENA_SIZE, true);
-    let mut iter_ref = list.iter_ref();
-    assert!(!iter_ref.valid());
-    iter_ref.seek_to_last();
-    assert!(!iter_ref.valid());
-    for i in (0..n).rev() {
-        let key = key_with_ts(format!("{:05}", i).as_str(), 0);
-        list.put(key, new_value(i));
-    }
-    iter_ref.seek_to_last();
-    for i in (0..n).rev() {
-        assert!(iter_ref.valid());
-        let v = iter_ref.value();
-        assert_eq!(*v, new_value(i));
-        iter_ref.prev();
-    }
-    assert!(!iter_ref.valid());
+    let list = Skiplist::with_capacity(comp, ARENA_SIZE, allow_concurrent_write);
+    f(list);
+}
+
+fn test_iterator_prev_imp(allow_concurrent_write: bool) {
+    with_skl_test(allow_concurrent_write, |list| {
+        let n = 100;
+        let mut iter_ref = list.iter_ref();
+        assert!(!iter_ref.valid());
+        iter_ref.seek_to_last();
+        assert!(!iter_ref.valid());
+        for i in (0..n).rev() {
+            let key = key_with_ts(format!("{:05}", i).as_str(), 0);
+            list.put(key, new_value(i));
+        }
+        iter_ref.seek_to_last();
+        for i in (0..n).rev() {
+            assert!(iter_ref.valid());
+            let v = iter_ref.value();
+            assert_eq!(*v, new_value(i));
+            iter_ref.prev();
+        }
+        assert!(!iter_ref.valid());
+    });
 }
 
 #[test]

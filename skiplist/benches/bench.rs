@@ -163,10 +163,50 @@ fn bench_write_skiplist(c: &mut Criterion) {
     j.join().unwrap();
 }
 
+fn bench_reverse_scan_skiplist(c: &mut Criterion) {
+    let comp = FixedLengthSuffixComparator::new(8);
+    let list = Skiplist::with_capacity(comp, 16 << 20, true);
+    let value = Bytes::from_static(b"0123456789abcdefghijklmkopqrstuvwxyz");
+    let mut rng = rand::thread_rng();
+    for _ in 0..10000 {
+        list.put(random_key(&mut rng), value.clone());
+    }
+    c.bench_function("skiplist_reverse_scan", |b| {
+        b.iter(|| {
+            let mut iter = list.iter_ref();
+            iter.seek_to_last();
+            while iter.valid() {
+                iter.prev();
+            }
+        })
+    });
+}
+
+fn bench_reverse_scan_skiplist_fast(c: &mut Criterion) {
+    let comp = FixedLengthSuffixComparator::new(8);
+    let list = Skiplist::with_capacity(comp, 16 << 20, false);
+    let value = Bytes::from_static(b"0123456789abcdefghijklmkopqrstuvwxyz");
+    let mut rng = rand::thread_rng();
+    for _ in 0..10000 {
+        list.put(random_key(&mut rng), value.clone());
+    }
+    c.bench_function("skiplist_reverse_scan_fast", |b| {
+        b.iter(|| {
+            let mut iter = list.iter_ref();
+            iter.seek_to_last();
+            while iter.valid() {
+                iter.prev();
+            }
+        })
+    });
+}
+
 criterion_group!(
     benches,
+    bench_reverse_scan_skiplist,
+    bench_reverse_scan_skiplist_fast,
     bench_read_write_skiplist,
     bench_read_write_map,
-    bench_write_skiplist
+    bench_write_skiplist,
 );
 criterion_main!(benches);
