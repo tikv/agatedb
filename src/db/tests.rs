@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use bytes::{Bytes, BytesMut};
 use tempdir::TempDir;
 use tempfile::tempdir;
@@ -56,10 +58,10 @@ fn test_ensure_room_for_write() {
     // 2*value_log_file_size - MAX_HEADER_SIZE.
     opts.value_log_file_size = 25;
 
-    let inner = Core::new(opts).unwrap();
+    let core = Core::new(&opts).unwrap();
 
     {
-        let mts = inner.mts.read().unwrap();
+        let mts = core.mts.read().unwrap();
         assert_eq!(mts.nums_of_memtable(), 1);
 
         let mt = mts.mut_table();
@@ -72,9 +74,9 @@ fn test_ensure_room_for_write() {
         mt.put(key, value).unwrap();
     }
 
-    inner.ensure_room_for_write().unwrap();
+    core.ensure_room_for_write().unwrap();
 
-    let mts = inner.mts.read().unwrap();
+    let mts = core.mts.read().unwrap();
     assert_eq!(mts.nums_of_memtable(), 2);
 }
 
@@ -106,22 +108,41 @@ pub fn helper_dump_dir(path: &Path) {
     }
 }
 
-fn with_agate_test(in_memory: bool, f: impl FnOnce(Agate)) {
+pub fn with_payload(mut buf: BytesMut, payload: usize, fill_char: u8) -> Bytes {
+    let mut payload_buf = vec![];
+    payload_buf.resize(payload, fill_char);
+    buf.extend_from_slice(&payload_buf);
+    buf.freeze()
+}
+
+pub fn run_agate_test<F>(opts: Option<AgateOptions>, test_fn: F)
+where
+    F: FnOnce(Arc<Agate>),
+{
     let tmp_dir = TempDir::new("agatedb").unwrap();
-    let agate = AgateOptions::default()
-        .set_create_if_not_exists(true)
-        .set_in_memory(in_memory)
-        .set_value_log_file_size(4096)
-        .open(&tmp_dir)
-        .unwrap();
-    f(agate);
+
+    let mut opts = if let Some(opts) = opts {
+        opts
+    } else {
+        AgateOptions::default()
+    };
+
+    if !opts.in_memory {
+        opts.dir = tmp_dir.as_ref().to_path_buf();
+        opts.value_dir = tmp_dir.as_ref().to_path_buf();
+    }
+
+    let agate = Arc::new(opts.open().unwrap());
+
+    test_fn(agate);
+
     helper_dump_dir(tmp_dir.path());
     tmp_dir.close().unwrap();
 }
 
 #[test]
 fn test_simple_get_put() {
-    with_agate_test(false, |agate| {
+    run_agate_test(None, |agate| {
         let key = key_with_ts(BytesMut::from("2333"), 0);
         let value = Bytes::from("2333333333333333");
         let req = Request {
@@ -162,7 +183,7 @@ fn verify_requests(n: usize, agate: &Agate) {
 
 #[test]
 fn test_flush_memtable() {
-    with_agate_test(false, |agate| {
+    run_agate_test(None, |agate| {
         agate.write_requests(generate_requests(2000)).unwrap();
         verify_requests(2000, &agate);
     });
@@ -170,7 +191,7 @@ fn test_flush_memtable() {
 
 #[test]
 fn test_in_memory_agate() {
-    with_agate_test(true, |agate| {
+    run_agate_test(None, |agate| {
         agate.write_requests(generate_requests(10)).unwrap();
         verify_requests(10, &agate);
     });
@@ -178,7 +199,7 @@ fn test_in_memory_agate() {
 
 #[test]
 fn test_flush_l1() {
-    with_agate_test(false, |agate| {
+    run_agate_test(None, |agate| {
         let requests = generate_requests(10000);
         for request in requests.chunks(100) {
             agate.write_requests(request.to_vec()).unwrap();

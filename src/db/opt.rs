@@ -1,6 +1,8 @@
-use getset::Setters;
+use skiplist::MAX_NODE_SIZE;
 
 use super::*;
+use getset::Setters;
+
 use crate::{entry::Entry, opt};
 use std::cmp;
 
@@ -132,6 +134,15 @@ pub struct AgateOptions {
     /// The default value of `create_if_not_exists` is false
     #[getset(set = "pub")]
     pub create_if_not_exists: bool,
+
+    /// Max entries in batch.
+    ///
+    /// The default value of `max_batch_count` is `max_batch_size` / `MAX_NODE_SIZE`.
+    pub max_batch_count: u64,
+    /// Max batch size in bytes.
+    ///
+    /// The default value of `max_batch_size` is (15 * `mem_table_size`) / 100.
+    pub max_batch_size: u64,
 }
 
 impl Default for AgateOptions {
@@ -171,6 +182,9 @@ impl Default for AgateOptions {
             managed_txns: false,
 
             create_if_not_exists: false,
+
+            max_batch_count: 0,
+            max_batch_size: 0,
         }
         // TODO: add other options
     }
@@ -183,7 +197,32 @@ impl AgateOptions {
             self.sync_writes = false;
         }
 
+        self.max_batch_size = (15 * self.mem_table_size) / 100;
+        self.max_batch_count = self.max_batch_size / MAX_NODE_SIZE as u64;
+
         Ok(())
+    }
+
+    pub fn open(&mut self) -> Result<Agate> {
+        self.fix_options()?;
+
+        if !self.in_memory {
+            if !self.dir.exists() {
+                if self.read_only {
+                    return Err(Error::Config(format!("{:?} doesn't exist", self.dir)));
+                }
+                fs::create_dir_all(&self.dir)?;
+            }
+            if !self.value_dir.exists() {
+                if self.read_only {
+                    return Err(Error::Config(format!("{:?} doesn't exist", self.value_dir)));
+                }
+                fs::create_dir_all(&self.value_dir)?;
+            }
+            // TODO: Acquire database path lock.
+        }
+
+        Ok(Agate::new(Arc::new(Core::new(self)?)))
     }
 
     pub fn skip_vlog(&self, entry: &Entry) -> bool {
@@ -196,27 +235,6 @@ impl AgateOptions {
         // to a bit of larger than the memtable size to prevent arena's grow in most cases.
         let extra_size = cmp::min((self.mem_table_size as f64 * 0.1) as u64, 1024 * 1024);
         self.mem_table_size + extra_size
-    }
-
-    pub fn open<P: AsRef<Path>>(&mut self, path: P) -> Result<Agate> {
-        self.fix_options()?;
-
-        self.dir = path.as_ref().to_path_buf();
-        self.value_dir = self.dir.clone();
-
-        if !self.in_memory && !self.dir.exists() {
-            if !self.create_if_not_exists {
-                return Err(Error::Config(format!("{:?} doesn't exist", self.dir)));
-            }
-            fs::create_dir_all(&self.dir)?;
-        }
-
-        if !self.in_memory {
-            // TODO: create wal path, acquire database path lock
-        }
-
-        // TODO: open or create manifest
-        Ok(Agate::new(Arc::new(Core::new(self.clone())?)))
     }
 }
 

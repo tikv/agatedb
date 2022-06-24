@@ -10,6 +10,7 @@ mod format;
 mod iterator;
 mod iterator_trait;
 mod levels;
+mod managed_db;
 mod manifest;
 mod memtable;
 mod ops;

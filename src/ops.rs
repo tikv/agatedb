@@ -1,3 +1,6 @@
 pub mod oracle;
-mod snapshot;
-mod transaction;
+pub mod snapshot;
+pub mod transaction;
+
+#[cfg(test)]
+mod transaction_test;
