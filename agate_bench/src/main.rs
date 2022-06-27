@@ -123,6 +123,7 @@ fn main() {
                 create_if_not_exists: true,
                 dir: directory.clone(),
                 value_dir: directory,
+                managed_txns: true,
                 ..Default::default()
             };
             let agate = Arc::new(options.open().unwrap());
@@ -196,6 +197,7 @@ fn main() {
                 sync_writes: true,
                 dir: directory.clone(),
                 value_dir: directory,
+                managed_txns: true,
                 ..Default::default()
             };
             let agate = Arc::new(options.open().unwrap());
