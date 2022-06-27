@@ -23,6 +23,7 @@ fn bench_iterator(c: &mut Criterion) {
     let mut opt = get_test_options();
     opt.dir = dir.path().to_path_buf();
     opt.value_dir = dir.path().to_path_buf();
+    opt.managed_txns = true;
     let db = opt.open().unwrap();
     const N: usize = 100000; // around 80 SST
 
