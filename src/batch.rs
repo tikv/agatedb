@@ -8,38 +8,50 @@ use std::sync::Arc;
 /// WriteBatch helps write multiple entries to database
 pub struct WriteBatch {
     txn: Transaction,
+    core: Arc<crate::db::Core>,
+    err: Option<Error>,
+
     is_managed: bool,
     commit_ts: u64,
-    err: Option<Error>,
-    core: Arc<crate::db::Core>,
+    // TODO: Add finished and support concurrency.
 }
 
 impl Agate {
+    /// Creates a new [`WriteBatch`]. This provides a way to conveniently do a lot of writes,
+    /// batching them up as tightly as possible in a single transaction, thus achieving good
+    /// performance. This API hides away the logic of creating and committing transactions.
+    /// Due to the nature of SSI guaratees provided by Agate, blind writes can never encounter
+    /// transaction conflicts.
     pub fn new_write_batch(&self) -> WriteBatch {
         if self.core.opts.managed_txns {
-            panic!("cannot use new_write_batch in managed mode");
+            panic!("Cannot use new_write_batch in managed mode. Use new_write_batch_at instead");
         }
+
         WriteBatch {
-            txn: self.new_transaction(true),
+            txn: self.core.new_transaction(true, true),
+            core: self.core.clone(),
+            err: None,
             is_managed: false,
             commit_ts: 0,
-            err: None,
-            core: self.core.clone(),
         }
     }
 
+    /// Similar to `new_write_batch` but it allows user to set the commit timestamp.
     pub fn new_write_batch_at(&self, commit_ts: u64) -> WriteBatch {
         if !self.core.opts.managed_txns {
-            panic!("cannot use new_write_batch_at in non-managed mode");
+            panic!(
+                "Cannot use new_write_batch_at in non-managed mode. Use new_write_batch instead."
+            );
         }
+
         let mut txn = self.core.new_transaction(true, true);
         txn.commit_ts = commit_ts;
         WriteBatch {
             txn,
-            commit_ts,
-            is_managed: true,
-            err: None,
             core: self.core.clone(),
+            err: None,
+            is_managed: true,
+            commit_ts,
         }
     }
 }
@@ -77,7 +89,8 @@ impl WriteBatch {
         if let Some(err) = &self.err {
             return Err(err.clone());
         }
-        let mut new_txn = self.core.new_transaction(true, true);
+
+        let mut new_txn = self.core.new_transaction(true, self.is_managed);
         new_txn.commit_ts = self.commit_ts;
         let txn = std::mem::replace(&mut self.txn, new_txn);
         txn.commit()?;
@@ -91,7 +104,9 @@ impl WriteBatch {
                 return Err(err);
             }
         }
+
         self.commit()?;
+
         if let Err(err) = self.txn.delete(key) {
             self.err = Some(err.clone());
             return Err(err);
@@ -100,6 +115,8 @@ impl WriteBatch {
         Ok(())
     }
 
+    /// Must be called at the end to ensure that any pending writes get committed to Agate.
+    /// Returns any error stored by [`WriteBatch`].
     fn flush(mut self) -> Result<()> {
         self.commit()?;
         Ok(())
@@ -120,8 +137,9 @@ mod tests {
 
         run_agate_test(Some(opts), move |agate| {
             let mut wb = agate.new_write_batch_at(1);
-            const N: usize = 1000;
-            const M: usize = 500;
+            // Do not set too large to avoid out of memory.
+            const N: usize = 100;
+            const M: usize = 100;
             for i in 0..N {
                 wb.set(key(i), value(i)).unwrap();
             }
