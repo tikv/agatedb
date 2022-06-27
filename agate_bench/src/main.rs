@@ -2,6 +2,7 @@ use agatedb::AgateOptions;
 use bytes::{Bytes, BytesMut};
 use clap::clap_app;
 use indicatif::ProgressBar;
+use std::path::PathBuf;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -47,7 +48,7 @@ fn main() {
     )
     .get_matches();
 
-    let directory = matches.value_of("directory").unwrap();
+    let directory = PathBuf::from(matches.value_of("directory").unwrap());
     let threads: usize = matches.value_of("threads").unwrap().parse().unwrap();
     let pool = yatp::Builder::new("agatedb_bench")
         .max_thread_count(threads)
@@ -61,9 +62,13 @@ fn main() {
             let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
             let chunk_size: u64 = sub_matches.value_of("chunk_size").unwrap().parse().unwrap();
 
-            let mut options = AgateOptions::default();
-            options.create_if_not_exists = true;
-            let agate = Arc::new(options.open(directory).unwrap());
+            let mut options = AgateOptions {
+                create_if_not_exists: true,
+                dir: directory.clone(),
+                value_dir: directory,
+                ..Default::default()
+            };
+            let agate = Arc::new(options.open().unwrap());
             let mut expected = 0;
             let pb = ProgressBar::new(key_nums);
 

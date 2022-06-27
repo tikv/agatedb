@@ -6,11 +6,11 @@ edition = "2018"
 
 [dependencies]
 agatedb = { path = "../" }
-clap = "2.33"
-rand = "0.7"
 bytes = "1.0"
-yatp = { git = "https://github.com/tikv/yatp.git" }
+clap = "2.33"
 indicatif = "0.15"
+rand = "0.7"
+yatp = { git = "https://github.com/tikv/yatp.git" }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.4.0"
