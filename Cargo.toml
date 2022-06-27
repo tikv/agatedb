@@ -34,8 +34,7 @@ tikv-jemallocator = "0.4.0"
 
 [workspace]
 members = [
-    "agate_bench"
-,
+    "agate_bench",
     "proto",
     "skiplist"]
 
