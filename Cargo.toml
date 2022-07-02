@@ -36,7 +36,8 @@ tikv-jemallocator = "0.4.0"
 members = [
     "agate_bench",
     "proto",
-    "skiplist"]
+    "skiplist"
+]
 
 [[bench]]
 name = "bench_common"

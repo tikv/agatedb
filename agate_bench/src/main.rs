@@ -65,14 +65,14 @@ impl Default for Rate {
 fn main() {
     let matches = clap_app!(agate_bench =>
         (version: "1.0")
-        (author: "Alex Chi <iskyzh@gmail.com>")
+        (author: "TiKV authors")
         (about: "Benchmark for AgateDB")
         (@arg directory: --directory +takes_value +required "database directory")
         (@arg threads: --threads +takes_value default_value("8") "threads")
         (@subcommand populate =>
             (about: "build a database with given keys")
             (version: "1.0")
-            (author: "Alex Chi <iskyzh@gmail.com>")
+            (author: "TiKV authors")
             (@arg key_nums: --key_nums +takes_value default_value("1024") "key numbers")
             (@arg seq: --seq +takes_value default_value("true") "write sequentially")
             (@arg value_size: --value_size +takes_value default_value("1024") "value size")
@@ -81,7 +81,7 @@ fn main() {
         (@subcommand randread =>
             (about: "randomly read from database")
             (version: "1.0")
-            (author: "Alex Chi <iskyzh@gmail.com>")
+            (author: "TiKV authors")
             (@arg key_nums: --key_nums +takes_value default_value("1024") "key numbers")
             (@arg times: --times +takes_value default_value("5") "read how many times")
             (@arg value_size: --value_size +takes_value default_value("1024") "value size")
@@ -90,14 +90,14 @@ fn main() {
         (@subcommand iterate =>
             (about: "iterate database")
             (version: "1.0")
-            (author: "Alex Chi <iskyzh@gmail.com>")
+            (author: "TiKV authors")
             (@arg times: --times +takes_value default_value("5") "read how many times")
             (@arg value_size: --value_size +takes_value default_value("1024") "value size")
         )
         (@subcommand rocks_populate =>
             (about: "build a database with given keys")
             (version: "1.0")
-            (author: "Alex Chi <iskyzh@gmail.com>")
+            (author: "TiKV authors")
             (@arg key_nums: --key_nums +takes_value default_value("1024") "key numbers")
             (@arg seq: --seq +takes_value default_value("true") "write sequentially")
             (@arg value_size: --value_size +takes_value default_value("1024") "value size")
@@ -106,7 +106,7 @@ fn main() {
         (@subcommand rocks_randread =>
             (about: "randomly read from database")
             (version: "1.0")
-            (author: "Alex Chi <iskyzh@gmail.com>")
+            (author: "TiKV authors")
             (@arg key_nums: --key_nums +takes_value default_value("1024") "key numbers")
             (@arg times: --times +takes_value default_value("5") "read how many times")
             (@arg value_size: --value_size +takes_value default_value("1024") "value size")
@@ -115,7 +115,7 @@ fn main() {
         (@subcommand rocks_iterate =>
             (about: "iterate database")
             (version: "1.0")
-            (author: "Alex Chi <iskyzh@gmail.com>")
+            (author: "TiKV authors")
             (@arg times: --times +takes_value default_value("5") "read how many times")
             (@arg value_size: --value_size +takes_value default_value("1024") "value size")
         )
