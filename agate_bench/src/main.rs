@@ -141,7 +141,6 @@ fn main() {
             };
             let agate = Arc::new(options.open().unwrap());
             let mut expected = 0;
-            // let pb = ProgressBar::new(key_nums);
             let pb = ProgressBar::hidden();
             pb.set_style(ProgressStyle::default_bar()
             .template(
@@ -338,7 +337,6 @@ fn main() {
 
             let db = Arc::new(rocksdb::DB::open(&opts, directory).unwrap());
             let mut expected = 0;
-            // let pb = ProgressBar::new(key_nums);
             let pb = ProgressBar::hidden();
             pb.set_style(ProgressStyle::default_bar()
             .template(
