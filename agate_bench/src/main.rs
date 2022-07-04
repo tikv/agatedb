@@ -25,11 +25,10 @@ fn gen_kv_pair(key: u64, value_size: usize) -> (Bytes, Bytes) {
 }
 
 pub fn unix_time() -> u64 {
-    let start = SystemTime::now();
-    let since_the_epoch = start
-        .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards");
-    since_the_epoch.as_millis() as u64
+    UNIX_EPOCH
+        .elapsed()
+        .expect("Time went backwards")
+        .as_millis() as u64
 }
 
 pub struct Rate {
@@ -321,11 +320,11 @@ fn main() {
                     }
                 }
             }
-            let now = std::time::Instant::now();
+
             println!(
                 "read total {} keys in {}",
                 total.now(),
-                now.duration_since(begin).as_secs_f64()
+                begin.elapsed().as_secs_f64()
             )
         }
         #[cfg(feature = "enable-rocksdb")]
@@ -506,11 +505,11 @@ fn main() {
                     }
                 }
             }
-            let now = std::time::Instant::now();
+
             println!(
                 "read total {} keys in {}",
                 total.now(),
-                now.duration_since(begin).as_secs_f64()
+                begin.elapsed().as_secs_f64()
             )
         }
         _ => panic!("unsupported command"),
