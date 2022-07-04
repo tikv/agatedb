@@ -29,5 +29,8 @@ pub use iterator::IteratorOptions;
 pub use iterator_trait::AgateIterator;
 pub use opt::{ChecksumVerificationMode, Options as TableOptions};
 pub use skiplist::Skiplist;
+pub use table::merge_iterator::Iterators;
+pub use table::ConcatIterator;
+pub use table::MergeIterator;
 pub use table::{builder::Builder as TableBuilder, Table};
 pub use value::Value;
