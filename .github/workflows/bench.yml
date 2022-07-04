@@ -2,9 +2,15 @@ on:
   workflow_dispatch:
     inputs:
       reason:
-        description: 'reason to trigger this build'
+        description: "reason to trigger this build"
         required: false
-  
+
+permissions:
+  # deployments permission to deploy GitHub pages website
+  deployments: write
+  # contents permission to update benchmark contents in gh-pages branch
+  contents: write
+
 name: Bench
 
 jobs:
@@ -26,11 +32,17 @@ jobs:
         with:
           toolchain: nightly
           default: true
-      - uses: actions-rs/cargo@v1
-        name: Benchmark 🚀
+      - name: Benchmark 🚀
+        run: cargo +nightly bench --all-features --workspace -- --output-format bencher | tee output.txt
+      - uses: benchmark-action/github-action-benchmark@v1
+        name: Store benchmark result
         with:
-          command: bench
-          args: --all-features --workspace  
+          tool: "cargo"
+          output-file-path: output.txt
+          # Access token to deploy GitHub Pages branch
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # Push and deploy GitHub pages branch automatically
+          auto-push: true
   sanitizer_bench:
     name: Bench with Sanitizer
     runs-on: ubuntu-latest

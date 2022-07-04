@@ -10,3 +10,6 @@ prost = "0.8"
 
 [build-dependencies]
 prost-build = { version = "0.8" }
+
+[lib]
+bench = false
