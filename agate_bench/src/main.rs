@@ -5,7 +5,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use rand::Rng;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 use std::{sync::mpsc::channel, time::Duration};
 
 #[cfg(not(target_env = "msvc"))]
