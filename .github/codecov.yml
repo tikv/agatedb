@@ -1,2 +1,2 @@
 ignore:
-  - "agate_bench/**/*" # ignore bench script
+  - "agate_bench" # ignore bench script
