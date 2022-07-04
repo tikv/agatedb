@@ -69,6 +69,7 @@ impl WriteBatch {
     fn handle_entry(&mut self, entry: Entry) -> Result<()> {
         if let Err(err) = self.txn.set_entry(entry.clone()) {
             if !matches!(err, crate::Error::TxnTooBig) {
+                self.err = Some(err.clone());
                 return Err(err);
             }
         } else {
@@ -101,6 +102,7 @@ impl WriteBatch {
     fn delete(&mut self, key: Bytes) -> Result<()> {
         if let Err(err) = self.txn.delete(key.clone()) {
             if !matches!(err, Error::TxnTooBig) {
+                self.err = Some(err.clone());
                 return Err(err);
             }
         }
