@@ -1,9 +1,12 @@
 on:
-  workflow_dispatch:
-    inputs:
-      reason:
-        description: "reason to trigger this build"
-        required: false
+  push:
+    branches:
+      - master
+      - develop
+  pull_request:
+    branches:
+      - master
+      - develop
 
 permissions:
   # deployments permission to deploy GitHub pages website
