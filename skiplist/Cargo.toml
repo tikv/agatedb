@@ -2,18 +2,18 @@
 name = "skiplist"
 version = "0.1.0"
 authors = ["Jay Lee <busyjaylee@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
-bytes = "1.0"
-rand = "0.7"
+bytes = "1.1.0"
+rand = "0.8.5"
 
 [dev-dependencies]
-criterion = "0.3"
+criterion = "0.3.5"
 yatp = { git = "https://github.com/tikv/yatp.git" }
 
 [target.'cfg(not(target_env = "msvc"))'.dev-dependencies]
-tikv-jemallocator = "0.4.0"
+tikv-jemallocator = "0.5.0"
 
 [[bench]]
 name = "bench"

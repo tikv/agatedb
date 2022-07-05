@@ -89,7 +89,7 @@ fn bench_table(c: &mut Criterion) {
 
         b.iter_batched(
             || {
-                let i = rng.gen_range(0, n);
+                let i = rng.gen_range(0..n);
                 (
                     Bytes::from(format!("{:016x}", i)),
                     Bytes::from(i.to_string()),
