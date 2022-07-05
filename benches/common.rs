@@ -1,17 +1,19 @@
 #![allow(dead_code)]
+use std::ops::{Deref, DerefMut};
+
 use agatedb::{
     opt::build_table_options, AgateOptions, ChecksumVerificationMode::NoVerification, Table,
     TableBuilder, Value,
 };
 use bytes::Bytes;
 use rand::{distributions::Alphanumeric, Rng};
-use std::ops::{Deref, DerefMut};
 use tempdir::TempDir;
 
 pub fn rand_value() -> String {
     rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .take(32)
+        .map(char::from)
         .collect::<String>()
 }
 

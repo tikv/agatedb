@@ -1,13 +1,16 @@
 
 SANITIZER_FLAGS=-Zsanitizer=address
 
+upgrade:
+	cargo upgrade --workspace
+
 pre-format:
 	@rustup component add rustfmt
-	@cargo install -q cargo-sort 
+	@cargo install -q cargo-sort
 
 format: pre-format
 	@cargo fmt
-	@cargo sort -w ./Cargo.toml ./*/Cargo.toml > /dev/null 
+	@cargo sort -w ./Cargo.toml ./*/Cargo.toml > /dev/null
 
 clippy:
 	cargo clippy --all-targets --all-features --workspace -- -D "warnings"

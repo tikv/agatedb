@@ -87,11 +87,7 @@ impl Transaction {
         let mut entries: Vec<_> = self.pending_writes.values().cloned().collect();
         entries.sort_by(|x, y| {
             let cmp = COMPARATOR.compare_key(&x.key, &y.key);
-            if reversed {
-                cmp.reverse()
-            } else {
-                cmp
-            }
+            if reversed { cmp.reverse() } else { cmp }
         });
 
         Some(PendingWritesIterator::new(self.read_ts, reversed, entries))
@@ -458,7 +454,7 @@ impl AgateIterator for PendingWritesIterator {
         let key = user_key(key);
         self.next_idx = crate::util::search(self.entries.len(), |idx| {
             // Should not use COMPARATOR when compare without ts.
-            let cmp = (&self.entries[idx].key[..]).cmp(key);
+            let cmp = self.entries[idx].key[..].cmp(key);
             if !self.reversed {
                 cmp != Less
             } else {
