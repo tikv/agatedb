@@ -12,3 +12,6 @@ coverage:
       default:
         target: auto
         threshold: 3%
+
+ignore:
+  - "agate_bench" # ignore bench script
