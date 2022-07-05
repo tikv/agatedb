@@ -196,7 +196,7 @@ impl Transaction {
     }
 
     /// Looks for key and returns corresponding Item.
-    pub(crate) fn get(&self, key: &Bytes) -> Result<Item> {
+    pub fn get(&self, key: &Bytes) -> Result<Item> {
         if key.is_empty() {
             return Err(Error::EmptyKey);
         } else if self.discarded {
