@@ -3,9 +3,12 @@ use agatedb::{
     opt::build_table_options, AgateOptions, ChecksumVerificationMode::NoVerification, Table,
     TableBuilder, Value,
 };
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use rand::{distributions::Alphanumeric, Rng};
-use std::ops::{Deref, DerefMut};
+use std::{
+    ops::{Deref, DerefMut},
+    time::UNIX_EPOCH,
+};
 use tempdir::TempDir;
 
 pub fn rand_value() -> String {
@@ -63,4 +66,20 @@ pub fn get_table_for_benchmark(count: usize) -> TableGuard {
         table: Table::create(&filename, builder.finish(), opts).unwrap(),
         _tmp_dir: tmp_dir,
     }
+}
+
+pub fn gen_kv_pair(key: u64, value_size: usize) -> (Bytes, Bytes) {
+    let key = Bytes::from(format!("vsz={:05}-k={:010}", value_size, key));
+
+    let mut value = BytesMut::with_capacity(value_size);
+    value.resize(value_size, 0);
+
+    (key, value.freeze())
+}
+
+pub fn unix_time() -> u64 {
+    UNIX_EPOCH
+        .elapsed()
+        .expect("Time went backwards")
+        .as_millis() as u64
 }

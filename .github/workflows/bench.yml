@@ -32,7 +32,7 @@ jobs:
           toolchain: nightly
           default: true
       - name: Benchmark 🚀
-        run: cargo +nightly bench --all-features --workspace -- --output-format bencher | tee output.txt
+        run: cargo +nightly bench --all-features --workspace --bench benches_badger_rocks -- --output-format bencher | tee output.txt
       - uses: benchmark-action/github-action-benchmark@v1
         name: Store benchmark result
         with:
