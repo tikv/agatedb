@@ -18,7 +18,7 @@ const BATCH_SIZE: u64 = 1000;
 const SMALL_VALUE_SIZE: usize = 32;
 const LARGE_VALUE_SIZE: usize = 102400;
 
-fn badger_populate(agate: Arc<Agate>, value_size: usize) {
+fn agate_populate(agate: Arc<Agate>, value_size: usize) {
     let mut txn = agate.new_transaction_at(unix_time(), true);
 
     for i in 0..BATCH_SIZE {
@@ -29,7 +29,7 @@ fn badger_populate(agate: Arc<Agate>, value_size: usize) {
     txn.commit_at(unix_time()).unwrap();
 }
 
-fn badger_randread(agate: Arc<Agate>, value_size: usize, rng: &mut ThreadRng) {
+fn agate_randread(agate: Arc<Agate>, value_size: usize, rng: &mut ThreadRng) {
     let txn = agate.new_transaction_at(unix_time(), false);
 
     for _ in 0..BATCH_SIZE {
@@ -40,7 +40,7 @@ fn badger_randread(agate: Arc<Agate>, value_size: usize, rng: &mut ThreadRng) {
     }
 }
 
-fn badger_iterate(agate: Arc<Agate>, value_size: usize) {
+fn agate_iterate(agate: Arc<Agate>, value_size: usize) {
     let txn = agate.new_transaction_at(unix_time(), false);
     let opts = IteratorOptions::default();
     let mut iter = txn.new_iterator(&opts);
@@ -86,7 +86,7 @@ fn rocks_iterate(db: Arc<DB>, value_size: usize) {
     }
 }
 
-fn bench_badger(c: &mut Criterion) {
+fn bench_agate(c: &mut Criterion) {
     let mut rng = rand::thread_rng();
 
     let dir = TempDir::new("agatedb-bench-small-value").unwrap();
@@ -100,7 +100,7 @@ fn bench_badger(c: &mut Criterion) {
         ..Default::default()
     };
 
-    c.bench_function("badger populate small value", |b| {
+    c.bench_function("agate populate small value", |b| {
         b.iter_custom(|iters| {
             let mut total = Duration::new(0, 0);
 
@@ -109,7 +109,7 @@ fn bench_badger(c: &mut Criterion) {
                 let agate = Arc::new(opts.open().unwrap());
 
                 let now = Instant::now();
-                badger_populate(agate, SMALL_VALUE_SIZE);
+                agate_populate(agate, SMALL_VALUE_SIZE);
                 total = total.add(now.elapsed());
             });
 
@@ -119,15 +119,15 @@ fn bench_badger(c: &mut Criterion) {
 
     let agate = Arc::new(opts.open().unwrap());
 
-    c.bench_function("badger randread small value", |b| {
+    c.bench_function("agate randread small value", |b| {
         b.iter(|| {
-            badger_randread(agate.clone(), SMALL_VALUE_SIZE, &mut rng);
+            agate_randread(agate.clone(), SMALL_VALUE_SIZE, &mut rng);
         });
     });
 
-    c.bench_function("badger iterate small value", |b| {
+    c.bench_function("agate iterate small value", |b| {
         b.iter(|| {
-            badger_iterate(agate.clone(), SMALL_VALUE_SIZE);
+            agate_iterate(agate.clone(), SMALL_VALUE_SIZE);
         });
     });
 
@@ -137,7 +137,7 @@ fn bench_badger(c: &mut Criterion) {
     opts.dir = dir_path.to_path_buf();
     opts.value_dir = dir_path.to_path_buf();
 
-    c.bench_function("badger populate large value", |b| {
+    c.bench_function("agate populate large value", |b| {
         b.iter_custom(|iters| {
             let mut total = Duration::new(0, 0);
 
@@ -146,7 +146,7 @@ fn bench_badger(c: &mut Criterion) {
                 let agate = Arc::new(opts.open().unwrap());
 
                 let now = Instant::now();
-                badger_populate(agate, LARGE_VALUE_SIZE);
+                agate_populate(agate, LARGE_VALUE_SIZE);
                 total = total.add(now.elapsed());
             });
 
@@ -156,15 +156,15 @@ fn bench_badger(c: &mut Criterion) {
 
     let agate = Arc::new(opts.open().unwrap());
 
-    c.bench_function("badger randread large value", |b| {
+    c.bench_function("agate randread large value", |b| {
         b.iter(|| {
-            badger_randread(agate.clone(), LARGE_VALUE_SIZE, &mut rng);
+            agate_randread(agate.clone(), LARGE_VALUE_SIZE, &mut rng);
         });
     });
 
-    c.bench_function("badger iterate large value", |b| {
+    c.bench_function("agate iterate large value", |b| {
         b.iter(|| {
-            badger_iterate(agate.clone(), LARGE_VALUE_SIZE);
+            agate_iterate(agate.clone(), LARGE_VALUE_SIZE);
         });
     });
 
@@ -246,9 +246,9 @@ fn bench_rocks(c: &mut Criterion) {
 }
 
 criterion_group! {
-  name = benches_badger_rocks;
+  name = benches_agate_rocks;
   config = Criterion::default();
-  targets = bench_badger, bench_rocks
+  targets = bench_agate, bench_rocks
 }
 
-criterion_main!(benches_badger_rocks);
+criterion_main!(benches_agate_rocks);

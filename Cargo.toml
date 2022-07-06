@@ -57,7 +57,7 @@ name = "bench_iterator"
 harness = false
 
 [[bench]]
-name = "benches_badger_rocks"
+name = "benches_agate_rocks"
 harness = false
 
 [profile.bench]
