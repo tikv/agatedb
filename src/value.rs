@@ -29,7 +29,7 @@ pub struct Value {
 impl From<Value> for Bytes {
     fn from(value: Value) -> Bytes {
         // TODO: we can reduce unnecessary copy by re-writing `encode`
-        let mut buf = BytesMut::new();
+        let mut buf = BytesMut::with_capacity(value.encoded_size() as usize);
         value.encode(&mut buf);
         buf.freeze()
     }
