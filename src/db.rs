@@ -21,7 +21,7 @@ use yatp::task::callback::Handle;
 use crate::{
     closer::Closer,
     entry::Entry,
-    get_ts,
+    get_ts, key_with_ts,
     levels::LevelsController,
     manifest::ManifestFile,
     memtable::{MemTable, MemTables},
@@ -87,16 +87,15 @@ impl FlushTask {
 
 impl Agate {
     /*
-    pub fn get_with_ts(&self, key: &[u8], ts: u64) -> Result<Option<Bytes>> {
-        let key = format::key_with_ts(key, ts);
-        let view = self.core.memtable.view();
-        if let Some(value) = view.get(&key) {
-            return Ok(Some(value.clone()));
-        }
-        unimplemented!()
-    }
+      pub fn get_with_ts(&self, key: &[u8], ts: u64) -> Result<Option<Bytes>> {
+          let key = format::key_with_ts(key, ts);
+          let view = self.core.memtable.view();
+          if let Some(value) = view.get(&key) {
+              return Ok(Some(value.clone()));
+          }
+          unimplemented!()
+      }
     */
-
     fn new(core: Arc<Core>) -> Self {
         let closer = Closer::new();
         let pool = Arc::new(
@@ -131,8 +130,19 @@ impl Agate {
         }
     }
 
-    pub fn get(&self, key: &Bytes) -> Result<Value> {
-        self.core.get(key)
+    pub fn get(&self, key: impl Into<BytesMut>) -> Result<Value> {
+        let key = key_with_ts(key.into(), 0);
+        self.core.get(&key)
+    }
+
+    pub fn put(&self, key: impl Into<BytesMut>, value: impl Into<Bytes>) -> Result<()> {
+        let key = key_with_ts(key.into(), 0);
+        let req = Request {
+            entries: vec![Entry::new(key, value.into())],
+            ptrs: vec![],
+            done: None,
+        };
+        self.write_to_lsm(req)
     }
 
     pub fn write_to_lsm(&self, request: Request) -> Result<()> {
@@ -579,12 +589,12 @@ impl Core {
 
             // We wait until there is at least one request.
             select! {
-                recv(core.write_channel.1) -> req_recv => {
-                    req = req_recv.unwrap();
-                }
-                recv(closer.get_receiver()) -> _ => {
-                    break STATUS_CLOSED;
-                }
+              recv(core.write_channel.1) -> req_recv => {
+                req = req_recv.unwrap();
+              }
+              recv(closer.get_receiver()) -> _ => {
+                break STATUS_CLOSED;
+              }
             }
 
             reqs.push(req);
@@ -596,17 +606,17 @@ impl Core {
                 }
 
                 select! {
-                    // Either push to pending, or continue to pick from write_channel.
-                    recv(core.write_channel.1) -> req => {
-                        let req = req.unwrap();
-                        reqs.push(req);
-                    }
-                    send(pending_tx, ()) -> _ => {
-                        break STATUS_WRITE;
-                    }
-                    recv(closer.get_receiver()) -> _ => {
-                        break STATUS_CLOSED;
-                    }
+                  // Either push to pending, or continue to pick from write_channel.
+                  recv(core.write_channel.1) -> req => {
+                    let req = req.unwrap();
+                    reqs.push(req);
+                  }
+                  send(pending_tx, ()) -> _ => {
+                    break STATUS_WRITE;
+                  }
+                  recv(closer.get_receiver()) -> _ => {
+                    break STATUS_CLOSED;
+                  }
                 }
             };
 
@@ -630,15 +640,15 @@ impl Core {
             // Don't close the write_channel, because it has be used in several places.
             loop {
                 select! {
-                    recv(core.write_channel.1) -> req => {
-                        reqs.push(req.unwrap());
+                  recv(core.write_channel.1) -> req => {
+                    reqs.push(req.unwrap());
+                  }
+                  default => {
+                    if let Err(err) = core.write_requests(reqs) {
+                      log::error!("failed to write: {:?}", err);
                     }
-                    default => {
-                        if let Err(err) = core.write_requests(reqs) {
-                            log::error!("failed to write: {:?}", err);
-                        }
-                        return Ok(());
-                    }
+                    return Ok(());
+                  }
                 }
             }
         }

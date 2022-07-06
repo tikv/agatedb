@@ -143,16 +143,11 @@ where
 #[test]
 fn test_simple_get_put() {
     run_agate_test(None, |agate| {
-        let key = key_with_ts(BytesMut::from("2333"), 0);
-        let value = Bytes::from("2333333333333333");
-        let req = Request {
-            entries: vec![Entry::new(key.clone(), value)],
-            ptrs: vec![],
-            done: None,
-        };
-        agate.write_to_lsm(req).unwrap();
-        let value = agate.get(&key).unwrap();
-        assert_eq!(value.value, Bytes::from("2333333333333333"));
+        let key = "2333";
+        let val = "2333333333333333";
+        agate.put(key, val).unwrap();
+        let value = agate.get(key).unwrap();
+        assert_eq!(value.value, val);
     });
 }
 
@@ -171,12 +166,7 @@ fn generate_requests(n: usize) -> Vec<Request> {
 
 fn verify_requests(n: usize, agate: &Agate) {
     for i in 0..n {
-        let value = agate
-            .get(&key_with_ts(
-                BytesMut::from(format!("{:08x}", i).as_str()),
-                0,
-            ))
-            .unwrap();
+        let value = agate.get(format!("{:08x}", i).as_str()).unwrap();
         assert_eq!(value.value, i.to_string());
     }
 }
