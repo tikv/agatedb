@@ -134,6 +134,7 @@ fn main() {
 
             let mut options = AgateOptions {
                 create_if_not_exists: true,
+                sync_writes: true,
                 dir: directory.clone(),
                 value_dir: directory,
                 managed_txns: true,

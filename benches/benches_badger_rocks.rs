@@ -87,6 +87,7 @@ fn bench_badger(c: &mut Criterion) {
     let dir = TempDir::new("agatedb-bench-small-value").unwrap();
     let mut opts = AgateOptions {
         create_if_not_exists: true,
+        sync_writes: true,
         dir: dir.as_ref().to_path_buf(),
         value_dir: dir.as_ref().to_path_buf(),
         managed_txns: true,
