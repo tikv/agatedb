@@ -137,8 +137,13 @@ mod tests {
         let key = |i| Bytes::from(format!("{:10}", i));
         let value = |i| Bytes::from(format!("{:128}", i));
 
-        run_agate_test(Some(opts), move |agate| {
-            let mut wb = agate.new_write_batch_at(1);
+        run_agate_test(Some(opts.clone()), move |agate| {
+            let mut wb = if !opts.managed_txns {
+                agate.new_write_batch()
+            } else {
+                agate.new_write_batch_at(1)
+            };
+
             // Do not set too large to avoid out of memory.
             const N: usize = 100;
             const M: usize = 100;
@@ -155,21 +160,32 @@ mod tests {
     #[test]
     fn test_on_disk() {
         let mut opts = generate_test_agate_options();
-        opts.managed_txns = true;
         opts.value_threshold = 32;
+
+        test_with_options(opts.clone());
+
+        opts.managed_txns = true;
         test_with_options(opts);
     }
 
     #[test]
     fn test_in_memory() {
         let mut opts = generate_test_agate_options();
-        opts.managed_txns = true;
         opts.in_memory = true;
+
+        test_with_options(opts.clone());
+
+        opts.managed_txns = true;
         test_with_options(opts);
     }
 
     #[test]
     fn test_empty_write_batch() {
+        run_agate_test(None, |agate| {
+            let wb = agate.new_write_batch();
+            wb.flush().unwrap();
+        });
+
         let opts = AgateOptions {
             managed_txns: true,
             ..Default::default()
