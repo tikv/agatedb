@@ -235,8 +235,10 @@ impl AgateIterator for MergeIterator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assert_bytes_eq;
-    use crate::format::{key_with_ts, user_key};
+    use crate::{
+        assert_bytes_eq,
+        format::{key_with_ts, user_key},
+    };
 
     pub struct VecIterator {
         vec: Vec<Bytes>,

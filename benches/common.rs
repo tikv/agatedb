@@ -1,16 +1,17 @@
 #![allow(dead_code)]
-use agatedb::{
-    opt::build_table_options, util::sync_dir, AgateOptions,
-    ChecksumVerificationMode::NoVerification, Table, TableBuilder, Value,
-};
-use bytes::{Bytes, BytesMut};
-use rand::{distributions::Alphanumeric, Rng};
 use std::{
     fs::{read_dir, remove_file},
     ops::{Deref, DerefMut},
     path::Path,
     time::UNIX_EPOCH,
 };
+
+use agatedb::{
+    opt::build_table_options, util::sync_dir, AgateOptions,
+    ChecksumVerificationMode::NoVerification, Table, TableBuilder, Value,
+};
+use bytes::{Bytes, BytesMut};
+use rand::{distributions::Alphanumeric, Rng};
 use tempdir::TempDir;
 
 pub fn rand_value() -> String {

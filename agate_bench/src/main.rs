@@ -1,13 +1,14 @@
+use std::{
+    path::PathBuf,
+    sync::{mpsc::channel, Arc},
+    time::{Duration, UNIX_EPOCH},
+};
+
 use agatedb::{AgateOptions, IteratorOptions};
 use bytes::{Bytes, BytesMut};
 use clap::clap_app;
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::Rng;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::UNIX_EPOCH;
-use std::{sync::mpsc::channel, time::Duration};
-
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
 

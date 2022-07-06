@@ -69,6 +69,3 @@ incremental = false
 debug-assertions = false
 overflow-checks = false
 rpath = false
-
-[lib]
-bench = false

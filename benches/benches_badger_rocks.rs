@@ -1,18 +1,17 @@
 #![cfg(feature = "enable-rocksdb")]
 mod common;
 
-use agatedb::Agate;
-use agatedb::AgateOptions;
-use agatedb::IteratorOptions;
+use std::{
+    ops::Add,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
+use agatedb::{Agate, AgateOptions, IteratorOptions};
 use common::{gen_kv_pair, remove_files, unix_time};
 use criterion::{criterion_group, criterion_main, Criterion};
-use rand::prelude::ThreadRng;
-use rand::Rng;
+use rand::{prelude::ThreadRng, Rng};
 use rocksdb::DB;
-use std::ops::Add;
-use std::sync::Arc;
-use std::time::Duration;
-use std::time::Instant;
 use tempdir::TempDir;
 
 const BATCH_SIZE: u64 = 1000;
