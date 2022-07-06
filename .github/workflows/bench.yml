@@ -31,11 +31,12 @@ jobs:
         with:
           toolchain: nightly
           default: true
-      - name: Benchmark with RocksDB
+      - name: Benchmark 🚀
         run: cargo +nightly bench --all-features --workspace --bench benches_agate_rocks -- --output-format bencher | tee output.txt
       - uses: benchmark-action/github-action-benchmark@v1
         name: Store benchmark result
         with:
+          name: Benchmark with RocksDB
           tool: "cargo"
           output-file-path: output.txt
           # Access token to deploy GitHub Pages branch
