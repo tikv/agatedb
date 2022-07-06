@@ -6,7 +6,9 @@ use agatedb::{
 use bytes::{Bytes, BytesMut};
 use rand::{distributions::Alphanumeric, Rng};
 use std::{
+    fs::{read_dir, remove_file},
     ops::{Deref, DerefMut},
+    path::Path,
     time::UNIX_EPOCH,
 };
 use tempdir::TempDir;
@@ -82,4 +84,11 @@ pub fn unix_time() -> u64 {
         .elapsed()
         .expect("Time went backwards")
         .as_millis() as u64
+}
+
+pub fn remove_files(path: &Path) {
+    read_dir(path).unwrap().into_iter().for_each(|entry| {
+        let entry = entry.unwrap();
+        remove_file(entry.path()).unwrap();
+    });
 }
