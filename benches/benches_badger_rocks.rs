@@ -9,7 +9,10 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use rand::prelude::ThreadRng;
 use rand::Rng;
 use rocksdb::DB;
+use std::ops::Add;
 use std::sync::Arc;
+use std::time::Duration;
+use std::time::Instant;
 use tempdir::TempDir;
 
 const BATCH_SIZE: u64 = 1000;
@@ -92,23 +95,27 @@ fn bench_badger(c: &mut Criterion) {
     let mut opts = AgateOptions {
         create_if_not_exists: true,
         sync_writes: true,
+        dir: dir_path.to_path_buf(),
+        value_dir: dir_path.to_path_buf(),
         managed_txns: true,
         ..Default::default()
     };
 
     c.bench_function("badger populate small value", |b| {
-        b.iter_batched(
-            || {
+        b.iter_custom(|iters| {
+            let mut total = Duration::new(0, 0);
+
+            (0..iters).into_iter().for_each(|_| {
                 remove_files(dir_path);
-                opts.dir = dir_path.to_path_buf();
-                opts.value_dir = dir_path.to_path_buf();
-                Arc::new(opts.open().unwrap())
-            },
-            |agate| {
+                let agate = Arc::new(opts.open().unwrap());
+
+                let now = Instant::now();
                 badger_populate(agate, SMALL_VALUE_SIZE);
-            },
-            criterion::BatchSize::SmallInput,
-        );
+                total = total.add(now.elapsed());
+            });
+
+            total
+        });
     });
 
     let agate = Arc::new(opts.open().unwrap());
@@ -128,20 +135,24 @@ fn bench_badger(c: &mut Criterion) {
     dir.close().unwrap();
     let dir = TempDir::new("agatedb-bench-large-value").unwrap();
     let dir_path = dir.path();
+    opts.dir = dir_path.to_path_buf();
+    opts.value_dir = dir_path.to_path_buf();
 
     c.bench_function("badger populate large value", |b| {
-        b.iter_batched(
-            || {
+        b.iter_custom(|iters| {
+            let mut total = Duration::new(0, 0);
+
+            (0..iters).into_iter().for_each(|_| {
                 remove_files(dir_path);
-                opts.dir = dir_path.to_path_buf();
-                opts.value_dir = dir_path.to_path_buf();
-                Arc::new(opts.open().unwrap())
-            },
-            |agate| {
+                let agate = Arc::new(opts.open().unwrap());
+
+                let now = Instant::now();
                 badger_populate(agate, LARGE_VALUE_SIZE);
-            },
-            criterion::BatchSize::SmallInput,
-        );
+                total = total.add(now.elapsed());
+            });
+
+            total
+        });
     });
 
     let agate = Arc::new(opts.open().unwrap());
@@ -171,16 +182,20 @@ fn bench_rocks(c: &mut Criterion) {
     opts.set_compression_type(rocksdb::DBCompressionType::None);
 
     c.bench_function("rocks populate small value", |b| {
-        b.iter_batched(
-            || {
+        b.iter_custom(|iters| {
+            let mut total = Duration::new(0, 0);
+
+            (0..iters).into_iter().for_each(|_| {
                 remove_files(dir_path);
-                Arc::new(rocksdb::DB::open(&opts, &dir).unwrap())
-            },
-            |db| {
+                let db = Arc::new(rocksdb::DB::open(&opts, &dir).unwrap());
+
+                let now = Instant::now();
                 rocks_populate(db, SMALL_VALUE_SIZE);
-            },
-            criterion::BatchSize::SmallInput,
-        );
+                total = total.add(now.elapsed());
+            });
+
+            total
+        });
     });
 
     let db = Arc::new(rocksdb::DB::open(&opts, &dir).unwrap());
@@ -200,16 +215,20 @@ fn bench_rocks(c: &mut Criterion) {
     let dir_path = dir.path();
 
     c.bench_function("rocks populate large value", |b| {
-        b.iter_batched(
-            || {
+        b.iter_custom(|iters| {
+            let mut total = Duration::new(0, 0);
+
+            (0..iters).into_iter().for_each(|_| {
                 remove_files(dir_path);
-                Arc::new(rocksdb::DB::open(&opts, &dir).unwrap())
-            },
-            |db| {
+                let db = Arc::new(rocksdb::DB::open(&opts, &dir).unwrap());
+
+                let now = Instant::now();
                 rocks_populate(db, LARGE_VALUE_SIZE);
-            },
-            criterion::BatchSize::SmallInput,
-        );
+                total = total.add(now.elapsed());
+            });
+
+            total
+        });
     });
 
     let db = Arc::new(rocksdb::DB::open(&opts, &dir).unwrap());
