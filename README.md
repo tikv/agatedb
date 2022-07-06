@@ -16,7 +16,7 @@ optimizations that have been made in [unistore][4].
 
 [1]: https://github.com/tikv/tikv
 [2]: https://github.com/tikv/agatedb/projects/1
-[3]: https://github.com/dgraph-io/badger/tree/45bca18f24ef5cc04701a1e17448ddfce9372da0
+[3]: https://github.com/outcaste-io/badger/tree/45bca18f24ef5cc04701a1e17448ddfce9372da0
 [4]: https://github.com/ngaut/unistore
 
 AgateDB is under active development on [develop](https://github.com/tikv/agatedb/tree/develop)
