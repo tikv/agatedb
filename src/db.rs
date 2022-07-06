@@ -416,7 +416,7 @@ impl Core {
             } else {
                 0
             };
-            builder.add(iter.key(), &vs, vlog_len); // TODO: support vlog length
+            builder.add(iter.key(), &vs, vlog_len);
             iter.next();
         }
         builder
