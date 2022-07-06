@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use agatedb::{
-    opt::build_table_options, AgateOptions, ChecksumVerificationMode::NoVerification, Table,
-    TableBuilder, Value,
+    opt::build_table_options, util::sync_dir, AgateOptions,
+    ChecksumVerificationMode::NoVerification, Table, TableBuilder, Value,
 };
 use bytes::{Bytes, BytesMut};
 use rand::{distributions::Alphanumeric, Rng};
@@ -91,4 +91,5 @@ pub fn remove_files(path: &Path) {
         let entry = entry.unwrap();
         remove_file(entry.path()).unwrap();
     });
+    sync_dir(&path).unwrap();
 }
