@@ -92,10 +92,9 @@ fn bench_agate(c: &mut Criterion) {
     let dir = TempDir::new("agatedb-bench-small-value").unwrap();
     let dir_path = dir.path();
     let mut opts = AgateOptions {
-        create_if_not_exists: true,
-        sync_writes: true,
         dir: dir_path.to_path_buf(),
         value_dir: dir_path.to_path_buf(),
+        sync_writes: true,
         managed_txns: true,
         ..Default::default()
     };
