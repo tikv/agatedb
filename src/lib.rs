@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+mod batch;
 mod bloom;
 mod checksum;
 mod closer;

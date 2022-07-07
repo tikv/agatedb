@@ -191,10 +191,16 @@ fn test_flush_memtable() {
 
 #[test]
 fn test_in_memory_agate() {
-    run_agate_test(None, |agate| {
-        agate.write_requests(generate_requests(10)).unwrap();
-        verify_requests(10, &agate);
-    });
+    run_agate_test(
+        Some(AgateOptions {
+            in_memory: true,
+            ..Default::default()
+        }),
+        |agate| {
+            agate.write_requests(generate_requests(10)).unwrap();
+            verify_requests(10, &agate);
+        },
+    );
 }
 
 #[test]
