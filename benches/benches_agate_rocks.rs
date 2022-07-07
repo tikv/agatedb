@@ -10,85 +10,203 @@ use std::{
 use agatedb::{Agate, AgateOptions, IteratorOptions};
 use common::{gen_kv_pair, remove_files, unix_time};
 use criterion::{criterion_group, criterion_main, Criterion};
-use rand::{prelude::ThreadRng, Rng};
+use rand::Rng;
 use rocksdb::DB;
 use tempdir::TempDir;
 
-const BATCH_SIZE: u64 = 1000;
+// We will process `CHUNK_SIZE` items in a thread, and in one certain thread,
+// we will process `BATCH_SIZE` items in a transaction or write batch.
+const KEY_NUMS: u64 = 160_000;
+const CHUNK_SIZE: u64 = 10_000;
+const BATCH_SIZE: u64 = 100;
+
 const SMALL_VALUE_SIZE: usize = 32;
-const LARGE_VALUE_SIZE: usize = 102400;
+const LARGE_VALUE_SIZE: usize = 4096;
 
-fn agate_populate(agate: Arc<Agate>, value_size: usize) {
-    let mut txn = agate.new_transaction_at(unix_time(), true);
+pub fn agate_populate(
+    agate: Arc<Agate>,
+    key_nums: u64,
+    chunk_size: u64,
+    batch_size: u64,
+    value_size: usize,
+) {
+    let mut handles = vec![];
 
-    for i in 0..BATCH_SIZE {
-        let (key, value) = gen_kv_pair(i, value_size);
-        txn.set(key, value).unwrap();
+    for chunk_start in (0..key_nums).step_by(chunk_size as usize) {
+        let agate = agate.clone();
+
+        handles.push(std::thread::spawn(move || {
+            let range = chunk_start..chunk_start + chunk_size;
+
+            for batch_start in range.step_by(batch_size as usize) {
+                let mut txn = agate.new_transaction_at(unix_time(), true);
+
+                (batch_start..batch_start + batch_size).for_each(|key| {
+                    let (key, value) = gen_kv_pair(key, value_size);
+                    txn.set(key, value).unwrap();
+                });
+
+                txn.commit_at(unix_time()).unwrap();
+            }
+        }));
     }
 
-    txn.commit_at(unix_time()).unwrap();
+    handles
+        .into_iter()
+        .for_each(|handle| handle.join().unwrap());
 }
 
-fn agate_randread(agate: Arc<Agate>, value_size: usize, rng: &mut ThreadRng) {
-    let txn = agate.new_transaction_at(unix_time(), false);
+pub fn agate_randread(agate: Arc<Agate>, key_nums: u64, chunk_size: u64, value_size: usize) {
+    let mut handles = vec![];
 
-    for _ in 0..BATCH_SIZE {
-        let (key, value) = gen_kv_pair(rng.gen_range(0, BATCH_SIZE), value_size);
+    for chunk_start in (0..key_nums).step_by(chunk_size as usize) {
+        let agate = agate.clone();
 
-        let item = txn.get(&key).unwrap();
-        assert_eq!(item.value(), value);
+        handles.push(std::thread::spawn(move || {
+            let mut rng = rand::thread_rng();
+            let range = chunk_start..chunk_start + chunk_size;
+            let txn = agate.new_transaction_at(unix_time(), false);
+
+            for _ in range {
+                let (key, _) = gen_kv_pair(rng.gen_range(0, key_nums), value_size);
+                match txn.get(&key) {
+                    Ok(item) => {
+                        assert_eq!(item.value().len(), value_size);
+                    }
+                    Err(err) => {
+                        if matches!(err, agatedb::Error::KeyNotFound(_)) {
+                            continue;
+                        } else {
+                            panic!("{:?}", err);
+                        }
+                    }
+                }
+            }
+        }));
     }
+
+    handles
+        .into_iter()
+        .for_each(|handle| handle.join().unwrap());
 }
 
-fn agate_iterate(agate: Arc<Agate>, value_size: usize) {
-    let txn = agate.new_transaction_at(unix_time(), false);
-    let opts = IteratorOptions::default();
-    let mut iter = txn.new_iterator(&opts);
-    iter.rewind();
+pub fn agate_iterate(agate: Arc<Agate>, key_nums: u64, chunk_size: u64, value_size: usize) {
+    let mut handles = vec![];
 
-    while iter.valid() {
-        let item = iter.item();
-        assert_eq!(item.value().len(), value_size);
+    for _ in (0..key_nums).step_by(chunk_size as usize) {
+        let agate = agate.clone();
 
-        iter.next();
+        handles.push(std::thread::spawn(move || {
+            let txn = agate.new_transaction_at(unix_time(), false);
+            let opts = IteratorOptions::default();
+            let mut iter = txn.new_iterator(&opts);
+            iter.rewind();
+
+            while iter.valid() {
+                let item = iter.item();
+                assert_eq!(item.value().len(), value_size);
+
+                iter.next();
+            }
+        }));
     }
+
+    handles
+        .into_iter()
+        .for_each(|handle| handle.join().unwrap());
 }
 
-fn rocks_populate(db: Arc<DB>, value_size: usize) {
+pub fn rocks_populate(
+    db: Arc<DB>,
+    key_nums: u64,
+    chunk_size: u64,
+    batch_size: u64,
+    value_size: usize,
+) {
     let mut write_options = rocksdb::WriteOptions::default();
     write_options.set_sync(true);
     write_options.disable_wal(false);
+    let write_options = Arc::new(write_options);
 
-    let mut batch = rocksdb::WriteBatch::default();
+    let mut handles = vec![];
 
-    for i in 0..BATCH_SIZE {
-        let (key, value) = gen_kv_pair(i, value_size);
-        batch.put(key, value);
+    for chunk_start in (0..key_nums).step_by(chunk_size as usize) {
+        let db = db.clone();
+        let write_options = write_options.clone();
+
+        handles.push(std::thread::spawn(move || {
+            let range = chunk_start..chunk_start + chunk_size;
+
+            for batch_start in range.step_by(batch_size as usize) {
+                let mut batch = rocksdb::WriteBatch::default();
+
+                (batch_start..batch_start + batch_size).for_each(|key| {
+                    let (key, value) = gen_kv_pair(key, value_size);
+                    batch.put(key, value);
+                });
+
+                db.write_opt(batch, &write_options).unwrap();
+            }
+        }));
     }
 
-    db.write_opt(batch, &write_options).unwrap();
+    handles
+        .into_iter()
+        .for_each(|handle| handle.join().unwrap());
 }
 
-fn rocks_randread(db: Arc<DB>, value_size: usize, rng: &mut ThreadRng) {
-    for _ in 0..BATCH_SIZE {
-        let (key, value) = gen_kv_pair(rng.gen_range(0, BATCH_SIZE), value_size);
+pub fn rocks_randread(db: Arc<DB>, key_nums: u64, chunk_size: u64, value_size: usize) {
+    let mut handles = vec![];
 
-        let find = db.get(key).unwrap();
-        assert_eq!(find.unwrap(), value)
+    for chunk_start in (0..key_nums).step_by(chunk_size as usize) {
+        let db = db.clone();
+
+        handles.push(std::thread::spawn(move || {
+            let mut rng = rand::thread_rng();
+            let range = chunk_start..chunk_start + chunk_size;
+
+            for _ in range {
+                let (key, _) = gen_kv_pair(rng.gen_range(0, key_nums), value_size);
+                match db.get(key) {
+                    Ok(item) => {
+                        if item.is_some() {
+                            assert_eq!(item.unwrap().len(), value_size);
+                        }
+                    }
+                    Err(err) => {
+                        panic!("{:?}", err);
+                    }
+                }
+            }
+        }));
     }
+
+    handles
+        .into_iter()
+        .for_each(|handle| handle.join().unwrap());
 }
 
-fn rocks_iterate(db: Arc<DB>, value_size: usize) {
-    let iter = db.iterator(rocksdb::IteratorMode::Start);
+pub fn rocks_iterate(db: Arc<DB>, key_nums: u64, chunk_size: u64, value_size: usize) {
+    let mut handles = vec![];
 
-    for (_, value) in iter {
-        assert_eq!(value.len(), value_size);
+    for _ in (0..key_nums).step_by(chunk_size as usize) {
+        let db = db.clone();
+
+        handles.push(std::thread::spawn(move || {
+            let iter = db.iterator(rocksdb::IteratorMode::Start);
+
+            for (_, value) in iter {
+                assert_eq!(value.len(), value_size);
+            }
+        }));
     }
+
+    handles
+        .into_iter()
+        .for_each(|handle| handle.join().unwrap());
 }
 
 fn bench_agate(c: &mut Criterion) {
-    let mut rng = rand::thread_rng();
-
     let dir = TempDir::new("agatedb-bench-small-value").unwrap();
     let dir_path = dir.path();
     let mut opts = AgateOptions {
@@ -108,7 +226,7 @@ fn bench_agate(c: &mut Criterion) {
                 let agate = Arc::new(opts.open().unwrap());
 
                 let now = Instant::now();
-                agate_populate(agate, SMALL_VALUE_SIZE);
+                agate_populate(agate, KEY_NUMS, CHUNK_SIZE, BATCH_SIZE, SMALL_VALUE_SIZE);
                 total = total.add(now.elapsed());
             });
 
@@ -120,13 +238,13 @@ fn bench_agate(c: &mut Criterion) {
 
     c.bench_function("agate randread small value", |b| {
         b.iter(|| {
-            agate_randread(agate.clone(), SMALL_VALUE_SIZE, &mut rng);
+            agate_randread(agate.clone(), KEY_NUMS, CHUNK_SIZE, SMALL_VALUE_SIZE);
         });
     });
 
     c.bench_function("agate iterate small value", |b| {
         b.iter(|| {
-            agate_iterate(agate.clone(), SMALL_VALUE_SIZE);
+            agate_iterate(agate.clone(), KEY_NUMS, CHUNK_SIZE, SMALL_VALUE_SIZE);
         });
     });
 
@@ -145,7 +263,7 @@ fn bench_agate(c: &mut Criterion) {
                 let agate = Arc::new(opts.open().unwrap());
 
                 let now = Instant::now();
-                agate_populate(agate, LARGE_VALUE_SIZE);
+                agate_populate(agate, KEY_NUMS, CHUNK_SIZE, BATCH_SIZE, LARGE_VALUE_SIZE);
                 total = total.add(now.elapsed());
             });
 
@@ -157,13 +275,13 @@ fn bench_agate(c: &mut Criterion) {
 
     c.bench_function("agate randread large value", |b| {
         b.iter(|| {
-            agate_randread(agate.clone(), LARGE_VALUE_SIZE, &mut rng);
+            agate_randread(agate.clone(), KEY_NUMS, CHUNK_SIZE, LARGE_VALUE_SIZE);
         });
     });
 
     c.bench_function("agate iterate large value", |b| {
         b.iter(|| {
-            agate_iterate(agate.clone(), LARGE_VALUE_SIZE);
+            agate_iterate(agate.clone(), KEY_NUMS, CHUNK_SIZE, LARGE_VALUE_SIZE);
         });
     });
 
@@ -171,8 +289,6 @@ fn bench_agate(c: &mut Criterion) {
 }
 
 fn bench_rocks(c: &mut Criterion) {
-    let mut rng = rand::thread_rng();
-
     let dir = TempDir::new("rocks-bench-small-value").unwrap();
     let dir_path = dir.path();
     let mut opts = rocksdb::Options::default();
@@ -188,7 +304,7 @@ fn bench_rocks(c: &mut Criterion) {
                 let db = Arc::new(rocksdb::DB::open(&opts, &dir).unwrap());
 
                 let now = Instant::now();
-                rocks_populate(db, SMALL_VALUE_SIZE);
+                rocks_populate(db, KEY_NUMS, CHUNK_SIZE, BATCH_SIZE, SMALL_VALUE_SIZE);
                 total = total.add(now.elapsed());
             });
 
@@ -200,12 +316,12 @@ fn bench_rocks(c: &mut Criterion) {
 
     c.bench_function("rocks randread small value", |b| {
         b.iter(|| {
-            rocks_randread(db.clone(), SMALL_VALUE_SIZE, &mut rng);
+            rocks_randread(db.clone(), KEY_NUMS, CHUNK_SIZE, SMALL_VALUE_SIZE);
         });
     });
 
     c.bench_function("rocks iterate small value", |b| {
-        b.iter(|| rocks_iterate(db.clone(), SMALL_VALUE_SIZE));
+        b.iter(|| rocks_iterate(db.clone(), KEY_NUMS, CHUNK_SIZE, SMALL_VALUE_SIZE));
     });
 
     dir.close().unwrap();
@@ -221,7 +337,7 @@ fn bench_rocks(c: &mut Criterion) {
                 let db = Arc::new(rocksdb::DB::open(&opts, &dir).unwrap());
 
                 let now = Instant::now();
-                rocks_populate(db, LARGE_VALUE_SIZE);
+                rocks_populate(db, KEY_NUMS, CHUNK_SIZE, BATCH_SIZE, LARGE_VALUE_SIZE);
                 total = total.add(now.elapsed());
             });
 
@@ -233,12 +349,12 @@ fn bench_rocks(c: &mut Criterion) {
 
     c.bench_function("rocks randread large value", |b| {
         b.iter(|| {
-            rocks_randread(db.clone(), LARGE_VALUE_SIZE, &mut rng);
+            rocks_randread(db.clone(), KEY_NUMS, CHUNK_SIZE, LARGE_VALUE_SIZE);
         });
     });
 
     c.bench_function("rocks iterate large value", |b| {
-        b.iter(|| rocks_iterate(db.clone(), LARGE_VALUE_SIZE));
+        b.iter(|| rocks_iterate(db.clone(), KEY_NUMS, CHUNK_SIZE, LARGE_VALUE_SIZE));
     });
 
     dir.close().unwrap();
