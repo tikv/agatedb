@@ -1,8 +1,6 @@
-use crate::db::Agate;
-use crate::ops::transaction::Transaction;
-use crate::Result;
-
 use std::sync::Arc;
+
+use crate::{db::Agate, ops::transaction::Transaction, Result};
 
 impl crate::db::Core {
     /// Follows the same logic as `new_transaction`, but uses the provided read timestamp.

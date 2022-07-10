@@ -1,13 +1,14 @@
+use std::{
+    path::PathBuf,
+    sync::{mpsc::channel, Arc},
+    time::{Duration, UNIX_EPOCH},
+};
+
 use agatedb::{AgateOptions, IteratorOptions};
 use bytes::{Bytes, BytesMut};
 use clap::clap_app;
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::Rng;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::UNIX_EPOCH;
-use std::{sync::mpsc::channel, time::Duration};
-
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
 
@@ -126,14 +127,13 @@ fn main() {
     let pool = threadpool::ThreadPool::new(threads);
     let (tx, rx) = channel();
 
-    match matches.subcommand() {
-        ("populate", Some(sub_matches)) => {
+    match matches.subcommand().unwrap() {
+        ("populate", sub_matches) => {
             let key_nums: u64 = sub_matches.value_of("key_nums").unwrap().parse().unwrap();
             let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
             let chunk_size: u64 = sub_matches.value_of("chunk_size").unwrap().parse().unwrap();
 
             let mut options = AgateOptions {
-                create_if_not_exists: true,
                 dir: directory.clone(),
                 value_dir: directory,
                 managed_txns: true,
@@ -169,7 +169,7 @@ fn main() {
                         let (key, value) = if seq {
                             gen_kv_pair(j, value_size)
                         } else {
-                            gen_kv_pair(rng.gen_range(0, key_nums), value_size)
+                            gen_kv_pair(rng.gen_range(0..key_nums), value_size)
                         };
                         txn.set(key, value).unwrap();
                         write.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -198,14 +198,13 @@ fn main() {
             }
             pb.finish_with_message("done");
         }
-        ("randread", Some(sub_matches)) => {
+        ("randread", sub_matches) => {
             let key_nums: u64 = sub_matches.value_of("key_nums").unwrap().parse().unwrap();
             let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
             let chunk_size: u64 = sub_matches.value_of("chunk_size").unwrap().parse().unwrap();
             let times: u64 = sub_matches.value_of("times").unwrap().parse().unwrap();
 
             let mut options = AgateOptions {
-                create_if_not_exists: true,
                 sync_writes: true,
                 dir: directory.clone(),
                 value_dir: directory,
@@ -236,7 +235,7 @@ fn main() {
                         let txn = agate.new_transaction_at(unix_time(), false);
                         let mut rng = rand::thread_rng();
                         for _ in range {
-                            let (key, _) = gen_kv_pair(rng.gen_range(0, key_nums), value_size);
+                            let (key, _) = gen_kv_pair(rng.gen_range(0..key_nums), value_size);
                             match txn.get(&key) {
                                 Ok(item) => {
                                     assert_eq!(item.value().len(), value_size);
@@ -276,12 +275,11 @@ fn main() {
             }
             pb.finish_with_message("done");
         }
-        ("iterate", Some(sub_matches)) => {
+        ("iterate", sub_matches) => {
             let times: u64 = sub_matches.value_of("times").unwrap().parse().unwrap();
             let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
 
             let mut options = AgateOptions {
-                create_if_not_exists: true,
                 sync_writes: true,
                 dir: directory.clone(),
                 value_dir: directory,
@@ -327,7 +325,7 @@ fn main() {
             )
         }
         #[cfg(feature = "enable-rocksdb")]
-        ("rocks_populate", Some(sub_matches)) => {
+        ("rocks_populate", sub_matches) => {
             let key_nums: u64 = sub_matches.value_of("key_nums").unwrap().parse().unwrap();
             let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
             let chunk_size: u64 = sub_matches.value_of("chunk_size").unwrap().parse().unwrap();
@@ -369,7 +367,7 @@ fn main() {
                         let (key, value) = if seq {
                             gen_kv_pair(j, value_size)
                         } else {
-                            gen_kv_pair(rng.gen_range(0, key_nums), value_size)
+                            gen_kv_pair(rng.gen_range(0..key_nums), value_size)
                         };
                         batch.put(key, value);
                         write.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -399,7 +397,7 @@ fn main() {
             pb.finish_with_message("done");
         }
         #[cfg(feature = "enable-rocksdb")]
-        ("rocks_randread", Some(sub_matches)) => {
+        ("rocks_randread", sub_matches) => {
             let key_nums: u64 = sub_matches.value_of("key_nums").unwrap().parse().unwrap();
             let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
             let chunk_size: u64 = sub_matches.value_of("chunk_size").unwrap().parse().unwrap();
@@ -431,7 +429,7 @@ fn main() {
                         let range = (i * chunk_size)..((i + 1) * chunk_size);
                         let mut rng = rand::thread_rng();
                         for _ in range {
-                            let (key, _) = gen_kv_pair(rng.gen_range(0, key_nums), value_size);
+                            let (key, _) = gen_kv_pair(rng.gen_range(0..key_nums), value_size);
                             match db.get(&key) {
                                 Ok(Some(value)) => {
                                     assert_eq!(value.len(), value_size);
@@ -471,7 +469,7 @@ fn main() {
             pb.finish_with_message("done");
         }
         #[cfg(feature = "enable-rocksdb")]
-        ("rocks_iterate", Some(sub_matches)) => {
+        ("rocks_iterate", sub_matches) => {
             let times: u64 = sub_matches.value_of("times").unwrap().parse().unwrap();
             let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
 

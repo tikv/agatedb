@@ -36,7 +36,7 @@ jobs:
         name: Setup Cargo Toolchain 🛎️
         with:
           components: rustfmt, clippy, llvm-tools-preview
-          toolchain: stable
+          toolchain: nightly
           default: true
       - name: Check Code Format 🔧
         run: |

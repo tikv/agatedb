@@ -7,7 +7,6 @@ use std::{
 };
 
 use bytes::{Buf, BufMut, BytesMut};
-use crc::crc32;
 use prost::Message;
 use proto::meta::{
     manifest_change::Operation as ManifestChangeOp, ManifestChange, ManifestChangeSet,
@@ -134,7 +133,7 @@ impl Manifest {
 
             offset += length;
 
-            if crc32::checksum_castagnoli(&buf) != (&len_crc_buf[4..]).get_u32() {
+            if crc32fast::hash(&buf) != (&len_crc_buf[4..]).get_u32() {
                 return Err(Error::CustomError("bad checksum".to_string()));
             }
 
@@ -241,7 +240,7 @@ impl ManifestFile {
 
         let mut len_crc_buf = vec![0; 8];
         (&mut len_crc_buf[..4]).put_u32(change_buf.len() as u32);
-        (&mut len_crc_buf[4..]).put_u32(crc32::checksum_castagnoli(&change_buf));
+        (&mut len_crc_buf[4..]).put_u32(crc32fast::hash(&change_buf));
 
         buf.extend_from_slice(&len_crc_buf);
         buf.extend_from_slice(&change_buf);
@@ -294,7 +293,7 @@ impl ManifestFile {
         } else {
             let mut len_crc_buf = vec![0; 8];
             (&mut len_crc_buf[..4]).put_u32(buf.len() as u32);
-            (&mut len_crc_buf[4..]).put_u32(crc32::checksum_castagnoli(&buf));
+            (&mut len_crc_buf[4..]).put_u32(crc32fast::hash(&buf));
             len_crc_buf.extend_from_slice(&buf);
 
             inner.file.as_mut().unwrap().write_all(&len_crc_buf)?;

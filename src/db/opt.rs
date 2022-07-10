@@ -1,10 +1,10 @@
+use std::cmp;
+
+use getset::Setters;
 use skiplist::MAX_NODE_SIZE;
 
 use super::*;
-use getset::Setters;
-
 use crate::{entry::Entry, opt};
-use std::cmp;
 
 #[derive(Clone, Setters)]
 pub struct AgateOptions {
@@ -129,12 +129,6 @@ pub struct AgateOptions {
     /// The default value of `managed_txns` is false.
     pub managed_txns: bool,
 
-    /// Create the directory if the provided open path doesn't exists.
-    ///
-    /// The default value of `create_if_not_exists` is false
-    #[getset(set = "pub")]
-    pub create_if_not_exists: bool,
-
     /// Max entries in batch.
     ///
     /// The default value of `max_batch_count` is `max_batch_size` / `MAX_NODE_SIZE`.
@@ -180,8 +174,6 @@ impl Default for AgateOptions {
             detect_conflicts: true,
 
             managed_txns: false,
-
-            create_if_not_exists: false,
 
             max_batch_count: 0,
             max_batch_size: 0,
@@ -245,14 +237,14 @@ mod tests {
     #[test]
     fn test_options_set() {
         let mut opt = AgateOptions::default();
-        opt.set_create_if_not_exists(true)
-            .set_in_memory(true)
+
+        opt.set_in_memory(true)
             .set_value_log_file_size(256)
             .set_num_memtables(3)
             .set_value_log_max_entries(96)
             .set_sync_writes(true)
             .set_mem_table_size(1024);
-        assert!(opt.create_if_not_exists);
+
         assert!(opt.in_memory);
         assert_eq!(opt.value_log_file_size, 256);
         assert_eq!(opt.num_memtables, 3);

@@ -10,13 +10,13 @@ enable-rocksdb = ["rocksdb"]
 
 [dependencies]
 agatedb = { path = "../" }
-bytes = "1.0"
-clap = "2.33"
-indicatif = "0.15"
-rand = "0.7"
-rocksdb = { version = "0.15", optional = true }
-threadpool = "1.8"
+bytes = "1.1.0"
+clap = "3.2.8"
+indicatif = "0.16.2"
+rand = "0.8.5"
+rocksdb = { version = "0.18.0", optional = true }
+threadpool = "1.8.1"
 yatp = { git = "https://github.com/tikv/yatp.git" }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = "0.4.0"
+tikv-jemallocator = "0.5.0"

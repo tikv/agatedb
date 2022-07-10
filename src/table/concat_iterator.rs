@@ -153,7 +153,7 @@ mod tests {
         let mut rng = thread_rng();
 
         for i in 0..20 {
-            let size = rng.gen_range(100, 200);
+            let size = rng.gen_range(100..200);
             let data: Vec<(Bytes, Bytes)> = (cnt..cnt + size)
                 .map(|x| {
                     (
