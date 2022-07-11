@@ -114,7 +114,7 @@ pub struct AgateOptions {
     pub num_compactors: usize,
     /// Indicates when the db should verify checksums for SSTable blocks.
     ///
-    /// The default value of `checksum_mode` is [`ChecksumVerificationMode`].
+    /// The default value of `checksum_mode` is [`NoVerification`].
     pub checksum_mode: opt::ChecksumVerificationMode,
 
     /// Determines whether the transactions would be checked for conflicts.
