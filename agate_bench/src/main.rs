@@ -171,7 +171,7 @@ fn main() {
             let agate = Arc::new(agate_opts.open().unwrap());
             let chunk_size = key_nums / threads;
 
-            let pb = ProgressBar::new(times);
+            let pb = ProgressBar::new(key_nums * times);
             pb.set_style(ProgressStyle::default_bar()
             .template(
                 "{prefix:.bold.dim} [{elapsed_precise}] [{bar:40}] [{per_sec}] ({pos}/{len}) {msg}",
@@ -182,7 +182,7 @@ fn main() {
 
             for _ in 0..times {
                 agate_iterate(agate.clone(), key_nums, chunk_size, value_size);
-                pb.inc(1);
+                pb.inc(key_nums);
             }
 
             pb.finish_with_message("done");
@@ -251,7 +251,7 @@ fn main() {
             let db = Arc::new(rocksdb::DB::open(&rocks_opts, &directory).unwrap());
             let chunk_size = key_nums / threads;
 
-            let pb = ProgressBar::new(times);
+            let pb = ProgressBar::new(key_nums * times);
             pb.set_style(ProgressStyle::default_bar()
             .template(
                 "{prefix:.bold.dim} [{elapsed_precise}] [{bar:40}] [{per_sec}] ({pos}/{len}) {msg}",
@@ -262,7 +262,7 @@ fn main() {
 
             for _ in 0..times {
                 rocks_iterate(db.clone(), key_nums, chunk_size, value_size);
-                pb.inc(1);
+                pb.inc(key_nums);
             }
 
             pb.finish_with_message("done");
