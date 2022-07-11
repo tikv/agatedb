@@ -6,7 +6,6 @@ edition = "2018"
 
 [features]
 default = []
-enable-rocksdb = ["rocksdb"]
 
 [dependencies]
 bytes = "1.0"
@@ -24,7 +23,7 @@ parking_lot = "0.11"
 prost = "0.8"
 proto = { path = "proto" }
 rand = "0.7"
-rocksdb = { version = "0.15", optional = true }
+rocksdb = "0.15"
 skiplist = { path = "skiplist" }
 tempdir = "0.3"
 thiserror = "1.0"

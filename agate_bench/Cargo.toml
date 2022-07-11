@@ -6,7 +6,6 @@ edition = "2018"
 
 [features]
 default = []
-enable-rocksdb = ["rocksdb"]
 
 [dependencies]
 agatedb = { path = "../" }
@@ -14,7 +13,8 @@ bytes = "1.0"
 clap = "2.33"
 indicatif = "0.15"
 rand = "0.7"
-rocksdb = { version = "0.15", optional = true }
+rocksdb = "0.15"
+tempdir = "0.3"
 threadpool = "1.8"
 yatp = { git = "https://github.com/tikv/yatp.git" }
 

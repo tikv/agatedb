@@ -1,4 +1,3 @@
-#![cfg(feature = "enable-rocksdb")]
 mod common;
 
 use std::{
@@ -7,11 +6,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use agatedb::{Agate, AgateOptions, IteratorOptions};
-use common::{gen_kv_pair, remove_files, unix_time};
+use agatedb::AgateOptions;
+use common::{
+    agate_iterate, agate_populate, agate_randread, remove_files, rocks_iterate, rocks_populate,
+    rocks_randread,
+};
 use criterion::{criterion_group, criterion_main, Criterion};
-use rand::Rng;
-use rocksdb::DB;
 use tempdir::TempDir;
 
 // We will process `CHUNK_SIZE` items in a thread, and in one certain thread,
@@ -22,189 +22,6 @@ const BATCH_SIZE: u64 = 100;
 
 const SMALL_VALUE_SIZE: usize = 32;
 const LARGE_VALUE_SIZE: usize = 4096;
-
-pub fn agate_populate(
-    agate: Arc<Agate>,
-    key_nums: u64,
-    chunk_size: u64,
-    batch_size: u64,
-    value_size: usize,
-) {
-    let mut handles = vec![];
-
-    for chunk_start in (0..key_nums).step_by(chunk_size as usize) {
-        let agate = agate.clone();
-
-        handles.push(std::thread::spawn(move || {
-            let range = chunk_start..chunk_start + chunk_size;
-
-            for batch_start in range.step_by(batch_size as usize) {
-                let mut txn = agate.new_transaction_at(unix_time(), true);
-
-                (batch_start..batch_start + batch_size).for_each(|key| {
-                    let (key, value) = gen_kv_pair(key, value_size);
-                    txn.set(key, value).unwrap();
-                });
-
-                txn.commit_at(unix_time()).unwrap();
-            }
-        }));
-    }
-
-    handles
-        .into_iter()
-        .for_each(|handle| handle.join().unwrap());
-}
-
-pub fn agate_randread(agate: Arc<Agate>, key_nums: u64, chunk_size: u64, value_size: usize) {
-    let mut handles = vec![];
-
-    for chunk_start in (0..key_nums).step_by(chunk_size as usize) {
-        let agate = agate.clone();
-
-        handles.push(std::thread::spawn(move || {
-            let mut rng = rand::thread_rng();
-            let range = chunk_start..chunk_start + chunk_size;
-            let txn = agate.new_transaction_at(unix_time(), false);
-
-            for _ in range {
-                let (key, _) = gen_kv_pair(rng.gen_range(0, key_nums), value_size);
-                match txn.get(&key) {
-                    Ok(item) => {
-                        assert_eq!(item.value().len(), value_size);
-                    }
-                    Err(err) => {
-                        if matches!(err, agatedb::Error::KeyNotFound(_)) {
-                            continue;
-                        } else {
-                            panic!("{:?}", err);
-                        }
-                    }
-                }
-            }
-        }));
-    }
-
-    handles
-        .into_iter()
-        .for_each(|handle| handle.join().unwrap());
-}
-
-pub fn agate_iterate(agate: Arc<Agate>, key_nums: u64, chunk_size: u64, value_size: usize) {
-    let mut handles = vec![];
-
-    for _ in (0..key_nums).step_by(chunk_size as usize) {
-        let agate = agate.clone();
-
-        handles.push(std::thread::spawn(move || {
-            let txn = agate.new_transaction_at(unix_time(), false);
-            let opts = IteratorOptions::default();
-            let mut iter = txn.new_iterator(&opts);
-            iter.rewind();
-
-            while iter.valid() {
-                let item = iter.item();
-                assert_eq!(item.value().len(), value_size);
-
-                iter.next();
-            }
-        }));
-    }
-
-    handles
-        .into_iter()
-        .for_each(|handle| handle.join().unwrap());
-}
-
-pub fn rocks_populate(
-    db: Arc<DB>,
-    key_nums: u64,
-    chunk_size: u64,
-    batch_size: u64,
-    value_size: usize,
-) {
-    let mut write_options = rocksdb::WriteOptions::default();
-    write_options.set_sync(true);
-    write_options.disable_wal(false);
-    let write_options = Arc::new(write_options);
-
-    let mut handles = vec![];
-
-    for chunk_start in (0..key_nums).step_by(chunk_size as usize) {
-        let db = db.clone();
-        let write_options = write_options.clone();
-
-        handles.push(std::thread::spawn(move || {
-            let range = chunk_start..chunk_start + chunk_size;
-
-            for batch_start in range.step_by(batch_size as usize) {
-                let mut batch = rocksdb::WriteBatch::default();
-
-                (batch_start..batch_start + batch_size).for_each(|key| {
-                    let (key, value) = gen_kv_pair(key, value_size);
-                    batch.put(key, value);
-                });
-
-                db.write_opt(batch, &write_options).unwrap();
-            }
-        }));
-    }
-
-    handles
-        .into_iter()
-        .for_each(|handle| handle.join().unwrap());
-}
-
-pub fn rocks_randread(db: Arc<DB>, key_nums: u64, chunk_size: u64, value_size: usize) {
-    let mut handles = vec![];
-
-    for chunk_start in (0..key_nums).step_by(chunk_size as usize) {
-        let db = db.clone();
-
-        handles.push(std::thread::spawn(move || {
-            let mut rng = rand::thread_rng();
-            let range = chunk_start..chunk_start + chunk_size;
-
-            for _ in range {
-                let (key, _) = gen_kv_pair(rng.gen_range(0, key_nums), value_size);
-                match db.get(key) {
-                    Ok(item) => {
-                        if item.is_some() {
-                            assert_eq!(item.unwrap().len(), value_size);
-                        }
-                    }
-                    Err(err) => {
-                        panic!("{:?}", err);
-                    }
-                }
-            }
-        }));
-    }
-
-    handles
-        .into_iter()
-        .for_each(|handle| handle.join().unwrap());
-}
-
-pub fn rocks_iterate(db: Arc<DB>, key_nums: u64, chunk_size: u64, value_size: usize) {
-    let mut handles = vec![];
-
-    for _ in (0..key_nums).step_by(chunk_size as usize) {
-        let db = db.clone();
-
-        handles.push(std::thread::spawn(move || {
-            let iter = db.iterator(rocksdb::IteratorMode::Start);
-
-            for (_, value) in iter {
-                assert_eq!(value.len(), value_size);
-            }
-        }));
-    }
-
-    handles
-        .into_iter()
-        .for_each(|handle| handle.join().unwrap());
-}
 
 fn bench_agate(c: &mut Criterion) {
     let dir = TempDir::new("agatedb-bench-small-value").unwrap();
