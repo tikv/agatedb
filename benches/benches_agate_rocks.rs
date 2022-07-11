@@ -1,3 +1,4 @@
+#![cfg(feature = "enable-rocksdb")]
 mod common;
 
 use std::{

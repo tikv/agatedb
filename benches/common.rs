@@ -13,6 +13,7 @@ use agatedb::{
 };
 use bytes::{Bytes, BytesMut};
 use rand::{distributions::Alphanumeric, Rng};
+#[cfg(feature = "enable-rocksdb")]
 use rocksdb::DB;
 use tempdir::TempDir;
 
@@ -197,6 +198,7 @@ pub fn agate_iterate(agate: Arc<Agate>, key_nums: u64, chunk_size: u64, value_si
         .for_each(|handle| handle.join().unwrap());
 }
 
+#[cfg(feature = "enable-rocksdb")]
 pub fn rocks_populate(
     db: Arc<DB>,
     key_nums: u64,
@@ -236,6 +238,7 @@ pub fn rocks_populate(
         .for_each(|handle| handle.join().unwrap());
 }
 
+#[cfg(feature = "enable-rocksdb")]
 pub fn rocks_randread(db: Arc<DB>, key_nums: u64, chunk_size: u64, value_size: usize) {
     let mut handles = vec![];
 
@@ -267,6 +270,7 @@ pub fn rocks_randread(db: Arc<DB>, key_nums: u64, chunk_size: u64, value_size: u
         .for_each(|handle| handle.join().unwrap());
 }
 
+#[cfg(feature = "enable-rocksdb")]
 pub fn rocks_iterate(db: Arc<DB>, key_nums: u64, chunk_size: u64, value_size: usize) {
     let mut handles = vec![];
 
