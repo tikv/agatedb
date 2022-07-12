@@ -104,6 +104,7 @@ pub fn agate_populate(
     chunk_size: u64,
     batch_size: u64,
     value_size: usize,
+    seq: bool,
 ) {
     let mut handles = vec![];
 
@@ -111,13 +112,18 @@ pub fn agate_populate(
         let agate = agate.clone();
 
         handles.push(std::thread::spawn(move || {
+            let mut rng = rand::thread_rng();
             let range = chunk_start..chunk_start + chunk_size;
 
             for batch_start in range.step_by(batch_size as usize) {
                 let mut txn = agate.new_transaction_at(unix_time(), true);
 
                 (batch_start..batch_start + batch_size).for_each(|key| {
-                    let (key, value) = gen_kv_pair(key, value_size);
+                    let (key, value) = if seq {
+                        gen_kv_pair(key, value_size)
+                    } else {
+                        gen_kv_pair(rng.gen_range(0, key_nums), value_size)
+                    };
                     txn.set(key, value).unwrap();
                 });
 
@@ -205,6 +211,7 @@ pub fn rocks_populate(
     chunk_size: u64,
     batch_size: u64,
     value_size: usize,
+    seq: bool,
 ) {
     let mut write_options = rocksdb::WriteOptions::default();
     write_options.set_sync(true);
@@ -221,10 +228,15 @@ pub fn rocks_populate(
             let range = chunk_start..chunk_start + chunk_size;
 
             for batch_start in range.step_by(batch_size as usize) {
+                let mut rng = rand::thread_rng();
                 let mut batch = rocksdb::WriteBatch::default();
 
                 (batch_start..batch_start + batch_size).for_each(|key| {
-                    let (key, value) = gen_kv_pair(key, value_size);
+                    let (key, value) = if seq {
+                        gen_kv_pair(key, value_size)
+                    } else {
+                        gen_kv_pair(rng.gen_range(0, key_nums), value_size)
+                    };
                     batch.put(key, value);
                 });
 

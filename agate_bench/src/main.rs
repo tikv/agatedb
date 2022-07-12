@@ -55,6 +55,7 @@ fn main() {
             (@arg key_nums: --key_nums +takes_value default_value("1024") "key numbers")
             (@arg batch_size: --batch_size +takes_value default_value("1000") "pairs in one txn")
             (@arg value_size: --value_size +takes_value default_value("1024") "value size")
+            (@arg seq: --seq +takes_value default_value("true") "write sequentially")
         )
         (@subcommand randread =>
             (about: "randomly read from database")
@@ -79,6 +80,7 @@ fn main() {
             (@arg key_nums: --key_nums +takes_value default_value("1024") "key numbers")
             (@arg batch_size: --batch_size +takes_value default_value("1000") "pairs in one txn")
             (@arg value_size: --value_size +takes_value default_value("1024") "value size")
+            (@arg seq: --seq +takes_value default_value("true") "write sequentially")
         )
         (@subcommand rocks_randread =>
             (about: "randomly read from database")
@@ -119,13 +121,14 @@ fn main() {
             let key_nums: u64 = sub_matches.value_of("key_nums").unwrap().parse().unwrap();
             let batch_size: u64 = sub_matches.value_of("batch_size").unwrap().parse().unwrap();
             let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
+            let seq: bool = sub_matches.value_of("seq").unwrap().parse().unwrap();
 
             let agate = Arc::new(agate_opts.open().unwrap());
             let chunk_size = key_nums / threads;
 
             let begin = Instant::now();
 
-            agate_populate(agate, key_nums, chunk_size, batch_size, value_size);
+            agate_populate(agate, key_nums, chunk_size, batch_size, value_size, seq);
 
             let cost = begin.elapsed();
 
@@ -199,13 +202,14 @@ fn main() {
             let key_nums: u64 = sub_matches.value_of("key_nums").unwrap().parse().unwrap();
             let batch_size: u64 = sub_matches.value_of("batch_size").unwrap().parse().unwrap();
             let value_size: usize = sub_matches.value_of("value_size").unwrap().parse().unwrap();
+            let seq: bool = sub_matches.value_of("seq").unwrap().parse().unwrap();
 
             let db = Arc::new(rocksdb::DB::open(&rocks_opts, &directory).unwrap());
             let chunk_size = key_nums / threads;
 
             let begin = Instant::now();
 
-            rocks_populate(db, key_nums, chunk_size, batch_size, value_size);
+            rocks_populate(db, key_nums, chunk_size, batch_size, value_size, seq);
 
             let cost = begin.elapsed();
 

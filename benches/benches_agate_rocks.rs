@@ -35,7 +35,7 @@ fn bench_agate(c: &mut Criterion) {
         ..Default::default()
     };
 
-    c.bench_function("agate populate small value", |b| {
+    c.bench_function("agate sequentially populate small value", |b| {
         b.iter_custom(|iters| {
             let mut total = Duration::new(0, 0);
 
@@ -44,7 +44,38 @@ fn bench_agate(c: &mut Criterion) {
                 let agate = Arc::new(opts.open().unwrap());
 
                 let now = Instant::now();
-                agate_populate(agate, KEY_NUMS, CHUNK_SIZE, BATCH_SIZE, SMALL_VALUE_SIZE);
+                agate_populate(
+                    agate,
+                    KEY_NUMS,
+                    CHUNK_SIZE,
+                    BATCH_SIZE,
+                    SMALL_VALUE_SIZE,
+                    true,
+                );
+                total = total.add(now.elapsed());
+            });
+
+            total
+        });
+    });
+
+    c.bench_function("agate randomly populate small value", |b| {
+        b.iter_custom(|iters| {
+            let mut total = Duration::new(0, 0);
+
+            (0..iters).into_iter().for_each(|_| {
+                remove_files(dir_path);
+                let agate = Arc::new(opts.open().unwrap());
+
+                let now = Instant::now();
+                agate_populate(
+                    agate,
+                    KEY_NUMS,
+                    CHUNK_SIZE,
+                    BATCH_SIZE,
+                    SMALL_VALUE_SIZE,
+                    false,
+                );
                 total = total.add(now.elapsed());
             });
 
@@ -72,7 +103,7 @@ fn bench_agate(c: &mut Criterion) {
     opts.dir = dir_path.to_path_buf();
     opts.value_dir = dir_path.to_path_buf();
 
-    c.bench_function("agate populate large value", |b| {
+    c.bench_function("agate sequentially populate large value", |b| {
         b.iter_custom(|iters| {
             let mut total = Duration::new(0, 0);
 
@@ -81,7 +112,38 @@ fn bench_agate(c: &mut Criterion) {
                 let agate = Arc::new(opts.open().unwrap());
 
                 let now = Instant::now();
-                agate_populate(agate, KEY_NUMS, CHUNK_SIZE, BATCH_SIZE, LARGE_VALUE_SIZE);
+                agate_populate(
+                    agate,
+                    KEY_NUMS,
+                    CHUNK_SIZE,
+                    BATCH_SIZE,
+                    LARGE_VALUE_SIZE,
+                    true,
+                );
+                total = total.add(now.elapsed());
+            });
+
+            total
+        });
+    });
+
+    c.bench_function("agate randomly populate large value", |b| {
+        b.iter_custom(|iters| {
+            let mut total = Duration::new(0, 0);
+
+            (0..iters).into_iter().for_each(|_| {
+                remove_files(dir_path);
+                let agate = Arc::new(opts.open().unwrap());
+
+                let now = Instant::now();
+                agate_populate(
+                    agate,
+                    KEY_NUMS,
+                    CHUNK_SIZE,
+                    BATCH_SIZE,
+                    LARGE_VALUE_SIZE,
+                    false,
+                );
                 total = total.add(now.elapsed());
             });
 
@@ -113,7 +175,7 @@ fn bench_rocks(c: &mut Criterion) {
     opts.create_if_missing(true);
     opts.set_compression_type(rocksdb::DBCompressionType::None);
 
-    c.bench_function("rocks populate small value", |b| {
+    c.bench_function("rocks sequentially populate small value", |b| {
         b.iter_custom(|iters| {
             let mut total = Duration::new(0, 0);
 
@@ -122,7 +184,31 @@ fn bench_rocks(c: &mut Criterion) {
                 let db = Arc::new(rocksdb::DB::open(&opts, &dir).unwrap());
 
                 let now = Instant::now();
-                rocks_populate(db, KEY_NUMS, CHUNK_SIZE, BATCH_SIZE, SMALL_VALUE_SIZE);
+                rocks_populate(db, KEY_NUMS, CHUNK_SIZE, BATCH_SIZE, SMALL_VALUE_SIZE, true);
+                total = total.add(now.elapsed());
+            });
+
+            total
+        });
+    });
+
+    c.bench_function("rocks randomly populate small value", |b| {
+        b.iter_custom(|iters| {
+            let mut total = Duration::new(0, 0);
+
+            (0..iters).into_iter().for_each(|_| {
+                remove_files(dir_path);
+                let db = Arc::new(rocksdb::DB::open(&opts, &dir).unwrap());
+
+                let now = Instant::now();
+                rocks_populate(
+                    db,
+                    KEY_NUMS,
+                    CHUNK_SIZE,
+                    BATCH_SIZE,
+                    SMALL_VALUE_SIZE,
+                    false,
+                );
                 total = total.add(now.elapsed());
             });
 
@@ -146,7 +232,7 @@ fn bench_rocks(c: &mut Criterion) {
     let dir = TempDir::new("rocks-bench-large-value").unwrap();
     let dir_path = dir.path();
 
-    c.bench_function("rocks populate large value", |b| {
+    c.bench_function("rocks sequentially populate large value", |b| {
         b.iter_custom(|iters| {
             let mut total = Duration::new(0, 0);
 
@@ -155,7 +241,31 @@ fn bench_rocks(c: &mut Criterion) {
                 let db = Arc::new(rocksdb::DB::open(&opts, &dir).unwrap());
 
                 let now = Instant::now();
-                rocks_populate(db, KEY_NUMS, CHUNK_SIZE, BATCH_SIZE, LARGE_VALUE_SIZE);
+                rocks_populate(db, KEY_NUMS, CHUNK_SIZE, BATCH_SIZE, LARGE_VALUE_SIZE, true);
+                total = total.add(now.elapsed());
+            });
+
+            total
+        });
+    });
+
+    c.bench_function("rocks randomly populate large value", |b| {
+        b.iter_custom(|iters| {
+            let mut total = Duration::new(0, 0);
+
+            (0..iters).into_iter().for_each(|_| {
+                remove_files(dir_path);
+                let db = Arc::new(rocksdb::DB::open(&opts, &dir).unwrap());
+
+                let now = Instant::now();
+                rocks_populate(
+                    db,
+                    KEY_NUMS,
+                    CHUNK_SIZE,
+                    BATCH_SIZE,
+                    LARGE_VALUE_SIZE,
+                    false,
+                );
                 total = total.add(now.elapsed());
             });
 
