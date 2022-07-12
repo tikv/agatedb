@@ -71,6 +71,7 @@ pub struct AgateOptions {
     /// LSM tree or separately in the log value files.
     ///
     /// The default value of `value_threshold` is 1 << 10 bytes.
+    /// 0 means trun off key value separation.
     pub value_threshold: usize,
     /// Sets the maximum number of tables to keep in memory before stalling.
     ///
@@ -226,7 +227,7 @@ impl AgateOptions {
     }
 
     pub fn skip_vlog(&self, entry: &Entry) -> bool {
-        entry.value.len() < self.value_threshold
+        self.value_threshold == 0 || entry.value.len() < self.value_threshold
     }
 
     pub fn arena_size(&self) -> u64 {
