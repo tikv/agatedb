@@ -1,17 +1,15 @@
-use crate::Error;
-
-use crate::assert_bytes_eq;
+use crate::{assert_bytes_eq, Error};
 
 /// Tests in managed mode.
 mod managed_db {
+    use bytes::{Bytes, BytesMut};
+
+    use super::*;
     use crate::{
         db::tests::{generate_test_agate_options, run_agate_test, with_payload},
         entry::Entry,
         AgateOptions,
     };
-    use bytes::{Bytes, BytesMut};
-
-    use super::*;
 
     fn default_test_managed_opts() -> AgateOptions {
         let mut opts = generate_test_agate_options();
@@ -136,6 +134,12 @@ mod normal_db {
         Arc,
     };
 
+    use bytes::{Bytes, BytesMut};
+    use crossbeam_channel::select;
+    use rand::Rng;
+    use yatp::{task::callback::Handle, Builder};
+
+    use super::*;
     use crate::{
         closer::Closer,
         db::tests::{generate_test_agate_options, run_agate_test},
@@ -146,12 +150,6 @@ mod normal_db {
         value::VALUE_DELETE,
         Agate, AgateOptions,
     };
-    use bytes::{Bytes, BytesMut};
-    use crossbeam_channel::select;
-    use rand::Rng;
-    use yatp::{task::callback::Handle, Builder};
-
-    use super::*;
 
     #[test]
     fn test_txn_simple() {
