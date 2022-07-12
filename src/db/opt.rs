@@ -1,10 +1,10 @@
+use std::cmp;
+
+use getset::Setters;
 use skiplist::MAX_NODE_SIZE;
 
 use super::*;
-use getset::Setters;
-
 use crate::{entry::Entry, opt};
-use std::cmp;
 
 #[derive(Clone, Setters)]
 pub struct AgateOptions {
@@ -114,7 +114,7 @@ pub struct AgateOptions {
     pub num_compactors: usize,
     /// Indicates when the db should verify checksums for SSTable blocks.
     ///
-    /// The default value of `checksum_mode` is [`ChecksumVerificationMode`].
+    /// The default value of `checksum_mode` is [`NoVerification`].
     pub checksum_mode: opt::ChecksumVerificationMode,
 
     /// Determines whether the transactions would be checked for conflicts.

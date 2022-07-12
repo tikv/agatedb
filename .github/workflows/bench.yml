@@ -1,10 +1,15 @@
+# Do not run this workflow on pull request since this workflow has permission to modify contents.
 on:
-  workflow_dispatch:
-    inputs:
-      reason:
-        description: 'reason to trigger this build'
-        required: false
-  
+  push:
+    branches:
+      - master
+
+permissions:
+  # deployments permission to deploy GitHub pages website
+  deployments: write
+  # contents permission to update benchmark contents in gh-pages branch
+  contents: write
+
 name: Bench
 
 jobs:
@@ -26,55 +31,15 @@ jobs:
         with:
           toolchain: nightly
           default: true
-      - uses: actions-rs/cargo@v1
-        name: Benchmark 🚀
+      - name: Benchmark 🚀
+        run: cargo +nightly bench --all-features --workspace --bench benches_agate_rocks -- --output-format bencher | tee output.txt
+      - uses: benchmark-action/github-action-benchmark@v1
+        name: Store benchmark result
         with:
-          command: bench
-          args: --all-features --workspace  
-  sanitizer_bench:
-    name: Bench with Sanitizer
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-        name: Checkout 🛎️
-      - uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-sanitizer-bench
-      - uses: actions-rs/toolchain@v1
-        name: Setup Cargo Toolchain 🛎️
-        with:
-          components: rust-src
-          toolchain: nightly
-          default: true
-      - uses: actions-rs/cargo@v1
-        name: Bench with Address Sanitizer 🚀
-        with:
-          command: bench
-          args: --all-features -Zbuild-std --target x86_64-unknown-linux-gnu
-        env:
-          RUSTFLAGS: "-Zsanitizer=address"
-      - uses: actions-rs/cargo@v1
-        name: Bench with Leak Sanitizer 🚀
-        with:
-          command: bench
-          args: --all-features -Zbuild-std --target x86_64-unknown-linux-gnu
-        env:
-          RUSTFLAGS: "-Zsanitizer=leak"
-      - uses: actions-rs/cargo@v1
-        name: Bench with Memory Sanitizer 🚀
-        with:
-          command: bench
-          args: --all-features -Zbuild-std --target x86_64-unknown-linux-gnu
-        env:
-          RUSTFLAGS: "-Zsanitizer=memory"
-      - uses: actions-rs/cargo@v1
-        name: Bench with Thread Sanitizer 🚀
-        with:
-          command: bench
-          args: --all-features -Zbuild-std --target x86_64-unknown-linux-gnu
-        env:
-          RUSTFLAGS: "-Zsanitizer=thread"
+          name: Benchmark with RocksDB
+          tool: "cargo"
+          output-file-path: output.txt
+          # Access token to deploy GitHub Pages branch
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # Push and deploy GitHub pages branch automatically
+          auto-push: true
