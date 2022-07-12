@@ -284,10 +284,10 @@ mod tests {
         let v_len = v.len();
         let e = Entry::new(k, v);
         opt.value_threshold = v_len + 1;
-        assert!(opt.skip_vlog(&e), true);
+        assert!(opt.skip_vlog(&e));
         opt.value_threshold = v_len - 1;
         assert!(!opt.skip_vlog(&e));
         opt.value_threshold = 0;
-        assert!(opt.skip_vlog(&e), true);
+        assert!(opt.skip_vlog(&e));
     }
 }
