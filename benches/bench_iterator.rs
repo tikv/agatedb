@@ -1,12 +1,8 @@
 mod common;
 
-use agatedb::util::unix_time;
-use agatedb::AgateIterator;
-use agatedb::AgateOptions;
-use agatedb::ConcatIterator;
-use agatedb::Iterators;
-use agatedb::MergeIterator;
-
+use agatedb::{
+    util::unix_time, AgateIterator, AgateOptions, ConcatIterator, Iterators, MergeIterator,
+};
 use bytes::Bytes;
 use common::get_table_for_benchmark;
 use criterion::{criterion_group, criterion_main, Criterion};

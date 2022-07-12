@@ -1,10 +1,10 @@
+use std::cmp;
+
+use getset::Setters;
 use skiplist::MAX_NODE_SIZE;
 
 use super::*;
-use getset::Setters;
-
 use crate::{entry::Entry, opt};
-use std::cmp;
 
 #[derive(Clone, Setters)]
 pub struct AgateOptions {
