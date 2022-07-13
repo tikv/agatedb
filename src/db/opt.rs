@@ -70,7 +70,8 @@ pub struct AgateOptions {
     /// Sets the threshold used to decide whether a value is stored directly in the
     /// LSM tree or separately in the log value files.
     ///
-    /// The default value of `value_threshold` is 1 << 10 bytes.
+    /// The default value of `value_threshold` is 1 << 10 bytes. 0 means trun off key
+    /// value separation.
     pub value_threshold: usize,
     /// Sets the maximum number of tables to keep in memory before stalling.
     ///
@@ -226,7 +227,7 @@ impl AgateOptions {
     }
 
     pub fn skip_vlog(&self, entry: &Entry) -> bool {
-        entry.value.len() < self.value_threshold
+        self.value_threshold == 0 || entry.value.len() < self.value_threshold
     }
 
     pub fn arena_size(&self) -> u64 {
@@ -274,5 +275,19 @@ mod tests {
         opt.set_mem_table_size(4096);
         assert!(opt.arena_size() > opt.mem_table_size);
         assert!(opt.arena_size() <= (opt.mem_table_size as f64 * 1.1) as u64);
+    }
+
+    #[test]
+    fn test_skip_vlog() {
+        let mut opt = AgateOptions::default();
+        let (k, v) = (Bytes::from("key"), Bytes::from("value"));
+        let v_len = v.len();
+        let e = Entry::new(k, v);
+        opt.value_threshold = v_len + 1;
+        assert!(opt.skip_vlog(&e));
+        opt.value_threshold = v_len - 1;
+        assert!(!opt.skip_vlog(&e));
+        opt.value_threshold = 0;
+        assert!(opt.skip_vlog(&e));
     }
 }
