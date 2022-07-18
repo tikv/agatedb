@@ -472,6 +472,22 @@ impl<T: AsRef<TableInner>> AgateIterator for TableRefIterator<T> {
     fn valid(&self) -> bool {
         self.err.is_none()
     }
+
+    fn prev(&mut self) {
+        if self.opt & ITERATOR_REVERSED == 0 {
+            self.prev_inner();
+        } else {
+            self.next_inner();
+        }
+    }
+
+    fn to_last(&mut self) {
+        if self.opt & ITERATOR_REVERSED == 0 {
+            self.seek_to_last();
+        } else {
+            self.seek_to_first();
+        }
+    }
 }
 
 #[cfg(test)]

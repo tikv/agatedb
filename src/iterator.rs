@@ -190,6 +190,22 @@ impl<C: KeyComparator> AgateIterator for SkiplistIterator<C> {
     fn valid(&self) -> bool {
         self.skl_iter.valid()
     }
+
+    fn prev(&mut self) {
+        if !self.reversed {
+            self.skl_iter.prev();
+        } else {
+            self.skl_iter.next();
+        }
+    }
+
+    fn to_last(&mut self) {
+        if !self.reversed {
+            self.skl_iter.seek_to_last();
+        } else {
+            self.skl_iter.seek_to_first();
+        }
+    }
 }
 
 pub struct Iterator<'a> {

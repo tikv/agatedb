@@ -50,7 +50,7 @@ pub struct Transaction {
 
 pub struct PendingWritesIterator {
     entries: Vec<Entry>,
-    next_idx: usize,
+    next_idx: i64,
     read_ts: u64,
     reversed: bool,
     key: BytesMut,
@@ -433,7 +433,7 @@ impl PendingWritesIterator {
 
     fn update_key(&mut self) {
         if self.valid() {
-            let entry = &self.entries[self.next_idx];
+            let entry = &self.entries[self.next_idx as usize];
             self.key.clear();
             self.key.extend_from_slice(&entry.key);
             append_ts(&mut self.key, self.read_ts);
@@ -464,7 +464,7 @@ impl AgateIterator for PendingWritesIterator {
             } else {
                 cmp != Greater
             }
-        });
+        }) as i64;
 
         self.update_key();
     }
@@ -476,7 +476,7 @@ impl AgateIterator for PendingWritesIterator {
 
     fn value(&self) -> Value {
         assert!(self.valid());
-        let entry = &self.entries[self.next_idx];
+        let entry = &self.entries[self.next_idx as usize];
         Value {
             meta: entry.meta,
             user_meta: entry.user_meta,
@@ -487,7 +487,18 @@ impl AgateIterator for PendingWritesIterator {
     }
 
     fn valid(&self) -> bool {
-        self.next_idx < self.entries.len()
+        self.next_idx >= 0 && self.next_idx < self.entries.len() as i64
+    }
+
+    fn prev(&mut self) {
+        assert!(self.next_idx > 0);
+        self.next_idx -= 1;
+        self.update_key();
+    }
+
+    fn to_last(&mut self) {
+        self.next_idx = self.entries.len() as i64 - 1;
+        self.update_key();
     }
 }
 
@@ -556,5 +567,96 @@ impl Agate {
         txn.commit()?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::get_ts;
+
+    use super::*;
+
+    #[test]
+    fn pending_writes_iterator() {
+        let n = 100;
+
+        let mut entries = Vec::new();
+
+        let key = |i| BytesMut::from(format!("key-{:012x}", i).as_bytes());
+        let value = |i| Bytes::from(format!("value-{:012x}", i));
+
+        for i in 0..n {
+            let entry = Entry::new(key(i).freeze(), value(i));
+            entries.push(entry);
+        }
+
+        let check = |read_ts: u64, reversed: bool, entries: Vec<Entry>| {
+            let mut pending_writes = PendingWritesIterator::new(read_ts, reversed, entries);
+            pending_writes.rewind();
+
+            // test iterate
+            let mut cnt = 0;
+            while pending_writes.valid() {
+                let k = pending_writes.key();
+                let v = pending_writes.value();
+
+                if !reversed {
+                    assert_eq!(user_key(k), key(cnt).to_vec());
+                    assert_eq!(v.value, value(cnt));
+                } else {
+                    assert_eq!(user_key(k), key(n - 1 - cnt).to_vec());
+                    assert_eq!(v.value, value(n - 1 - cnt));
+                }
+
+                assert_eq!(get_ts(k), read_ts);
+                assert_eq!(v.version, read_ts);
+
+                cnt += 1;
+                pending_writes.next();
+            }
+            assert_eq!(cnt, n);
+
+            // test seek
+            for i in 10..n - 10 {
+                pending_writes.seek(&key_with_ts(key(i), read_ts));
+
+                for j in 0..10 {
+                    if !reversed {
+                        assert_eq!(user_key(pending_writes.key()), key(i + j).to_vec());
+                    } else {
+                        assert_eq!(user_key(pending_writes.key()), key(i - j).to_vec());
+                    }
+                    pending_writes.next();
+                }
+            }
+
+            // test prev
+            for i in 10..n - 10 {
+                pending_writes.seek(&key_with_ts(key(i), read_ts));
+
+                for j in 0..10 {
+                    if !reversed {
+                        assert_eq!(user_key(pending_writes.key()), key(i - j).to_vec());
+                    } else {
+                        assert_eq!(user_key(pending_writes.key()), key(i + j).to_vec());
+                    }
+                    pending_writes.prev();
+                }
+            }
+
+            // test to_last
+            pending_writes.to_last();
+            if !reversed {
+                assert_eq!(user_key(pending_writes.key()), key(n - 1).to_vec());
+            } else {
+                assert_eq!(user_key(pending_writes.key()), key(0).to_vec());
+            }
+        };
+
+        check(0, false, entries.clone());
+
+        entries.reverse();
+
+        check(0, true, entries.clone());
     }
 }
