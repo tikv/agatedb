@@ -8,7 +8,7 @@ use crate::{
 
 /// ConcatIterator iterates on SSTs with no overlap keys.
 pub struct ConcatIterator {
-    cur: Option<usize>,
+    cur: usize,
     iters: Vec<Option<TableIterator>>,
     tables: Vec<Table>,
     opt: usize,
@@ -21,7 +21,7 @@ impl ConcatIterator {
         let iters = tables.iter().map(|_| None).collect();
 
         ConcatIterator {
-            cur: None,
+            cur: 0,
             iters,
             tables,
             opt,
@@ -29,48 +29,65 @@ impl ConcatIterator {
     }
 
     fn set_idx(&mut self, idx: usize) {
-        if idx >= self.iters.len() {
-            self.cur = None;
+        assert!(idx == std::usize::MAX || idx <= self.tables.len());
+        self.cur = idx;
+
+        if idx == std::usize::MAX || idx == self.iters.len() {
             return;
         }
+
         if self.iters[idx].is_none() {
             self.iters[idx] = Some(self.tables[idx].new_iterator(self.opt));
         }
-        self.cur = Some(idx);
     }
 
     fn iter_mut(&mut self) -> &mut TableIterator {
-        self.iters[self.cur.unwrap()].as_mut().unwrap()
+        self.iters[self.cur].as_mut().unwrap()
     }
 
     fn iter_ref(&self) -> &TableIterator {
-        self.iters[self.cur.unwrap()].as_ref().unwrap()
+        self.iters[self.cur].as_ref().unwrap()
     }
 }
 
 impl AgateIterator for ConcatIterator {
     fn next(&mut self) {
-        let cur = self.cur.unwrap();
-        let cur_iter = self.iter_mut();
-        cur_iter.next();
-        if cur_iter.valid() {
-            return;
+        if self.cur != std::usize::MAX && self.cur < self.iters.len() {
+            let cur_iter = self.iter_mut();
+            cur_iter.next();
+            if cur_iter.valid() {
+                return;
+            }
         }
+
+        #[allow(clippy::collapsible_else_if)]
         loop {
             if self.opt & ITERATOR_REVERSED == 0 {
-                self.set_idx(cur + 1);
-            } else if cur == 0 {
-                self.cur = None;
-            } else {
-                self.set_idx(cur - 1);
-            }
+                if self.cur == std::usize::MAX {
+                    self.rewind();
+                    return;
+                } else if self.cur < self.iters.len() {
+                    self.set_idx(self.cur + 1);
 
-            if self.cur.is_some() {
-                self.iter_mut().rewind();
-                if self.iter_ref().valid() {
+                    if self.cur == self.iters.len() {
+                        return;
+                    }
+                } else {
                     return;
                 }
             } else {
+                if self.cur == std::usize::MAX {
+                    return;
+                } else if self.cur > 0 {
+                    self.set_idx(self.cur - 1);
+                } else {
+                    self.set_idx(std::usize::MAX);
+                    return;
+                }
+            }
+
+            self.iter_mut().rewind();
+            if self.iter_ref().valid() {
                 return;
             }
         }
@@ -96,8 +113,8 @@ impl AgateIterator for ConcatIterator {
             idx = crate::util::search(self.tables.len(), |idx| {
                 COMPARATOR.compare_key(self.tables[idx].biggest(), key) != Less
             });
+            self.set_idx(idx);
             if idx >= self.tables.len() {
-                self.cur = None;
                 return;
             }
         } else {
@@ -105,8 +122,8 @@ impl AgateIterator for ConcatIterator {
             let ridx = crate::util::search(self.tables.len(), |idx| {
                 COMPARATOR.compare_key(self.tables[n - 1 - idx].smallest(), key) != Greater
             });
+            self.set_idx(ridx);
             if ridx >= self.tables.len() {
-                self.cur = None;
                 return;
             }
             idx = n - 1 - ridx;
@@ -125,7 +142,7 @@ impl AgateIterator for ConcatIterator {
     }
 
     fn valid(&self) -> bool {
-        if self.cur.is_some() {
+        if self.cur != std::usize::MAX && self.cur < self.iters.len() {
             self.iter_ref().valid()
         } else {
             false
@@ -133,30 +150,42 @@ impl AgateIterator for ConcatIterator {
     }
 
     fn prev(&mut self) {
-        let cur = self.cur.unwrap();
-        let cur_iter = self.iter_mut();
-        cur_iter.prev();
-        if cur_iter.valid() {
-            return;
+        if self.cur != std::usize::MAX && self.cur < self.iters.len() {
+            let cur_iter = self.iter_mut();
+            cur_iter.prev();
+            if cur_iter.valid() {
+                return;
+            }
         }
 
+        #[allow(clippy::collapsible_else_if)]
         loop {
             if self.opt & ITERATOR_REVERSED == 0 {
-                if cur == 0 {
-                    self.cur = None
+                if self.cur == std::usize::MAX {
+                    return;
+                } else if self.cur > 0 {
+                    self.set_idx(self.cur - 1);
                 } else {
-                    self.set_idx(cur - 1);
-                }
-            } else {
-                self.set_idx(cur + 1);
-            }
-
-            if self.cur.is_some() {
-                self.iter_mut().to_last();
-                if self.iter_ref().valid() {
+                    self.set_idx(std::usize::MAX);
                     return;
                 }
             } else {
+                if self.cur == std::usize::MAX {
+                    self.to_last();
+                    return;
+                } else if self.cur < self.iters.len() {
+                    self.set_idx(self.cur + 1);
+
+                    if self.cur == self.iters.len() {
+                        return;
+                    }
+                } else {
+                    return;
+                }
+            }
+
+            self.iter_mut().to_last();
+            if self.iter_ref().valid() {
                 return;
             }
         }
@@ -273,6 +302,62 @@ mod tests {
 
             // test to_last
             iter.to_last();
+            if !reversed {
+                assert_eq!(user_key(iter.key()), format!("{:012x}", cnt - 1).as_bytes());
+            } else {
+                assert_eq!(user_key(iter.key()), format!("{:012x}", 0).as_bytes());
+            }
+        };
+
+        check(tables.clone(), false);
+
+        check(tables, true);
+    }
+
+    #[test]
+    fn test_concat_iterator_out_of_bound() {
+        let (tables, cnt) = build_test_tables();
+
+        let check = |tables: Vec<Table>, reversed: bool| {
+            let opt = if reversed { ITERATOR_REVERSED } else { 0 };
+            let mut iter = ConcatIterator::from_tables(tables, opt);
+
+            iter.rewind();
+            iter.prev();
+            assert!(!iter.valid());
+            iter.prev();
+            assert!(!iter.valid());
+            iter.next();
+            assert!(iter.valid());
+
+            iter.prev();
+            assert!(!iter.valid());
+            iter.prev();
+            assert!(!iter.valid());
+            iter.next();
+            assert!(iter.valid());
+
+            if !reversed {
+                assert_eq!(user_key(iter.key()), format!("{:012x}", 0).as_bytes());
+            } else {
+                assert_eq!(user_key(iter.key()), format!("{:012x}", cnt - 1).as_bytes());
+            }
+
+            iter.to_last();
+            iter.next();
+            assert!(!iter.valid());
+            iter.next();
+            assert!(!iter.valid());
+            iter.prev();
+            assert!(iter.valid());
+
+            iter.next();
+            assert!(!iter.valid());
+            iter.next();
+            assert!(!iter.valid());
+            iter.prev();
+            assert!(iter.valid());
+
             if !reversed {
                 assert_eq!(user_key(iter.key()), format!("{:012x}", cnt - 1).as_bytes());
             } else {

@@ -422,7 +422,7 @@ where
 
 impl<T: AsRef<Skiplist<C>>, C: KeyComparator> IterRef<T, C> {
     pub fn valid(&self) -> bool {
-        !self.cursor.is_null()
+        !(self.cursor.is_null() || self.cursor == self.list.as_ref().inner.head.as_ptr())
     }
 
     pub fn key(&self) -> &Bytes {
@@ -436,7 +436,13 @@ impl<T: AsRef<Skiplist<C>>, C: KeyComparator> IterRef<T, C> {
     }
 
     pub fn next(&mut self) {
-        assert!(self.valid());
+        if self.cursor.is_null() {
+            return;
+        } else if self.cursor == self.list.as_ref().inner.head.as_ptr() {
+            self.seek_to_first();
+            return;
+        }
+
         unsafe {
             let cursor_offset = (&*self.cursor).next_offset(0);
             self.cursor = self.list.as_ref().inner.arena.get_mut(cursor_offset);
@@ -444,20 +450,27 @@ impl<T: AsRef<Skiplist<C>>, C: KeyComparator> IterRef<T, C> {
     }
 
     pub fn prev(&mut self) {
-        assert!(self.valid());
+        if self.cursor.is_null() {
+            self.seek_to_last();
+            return;
+        } else if self.cursor == self.list.as_ref().inner.head.as_ptr() {
+            return;
+        }
+
         if self.list.as_ref().allow_concurrent_write {
             unsafe {
-                self.cursor = self.list.as_ref().find_near(self.key(), true, false);
+                let node = self.list.as_ref().find_near(self.key(), true, false);
+                if node.is_null() {
+                    self.cursor = self.list.as_ref().inner.head.as_ptr();
+                } else {
+                    self.cursor = node
+                }
             }
         } else {
             unsafe {
                 let prev_offset = (*self.cursor).prev.load(Ordering::Acquire);
                 let node = self.list.as_ref().inner.arena.get_mut(prev_offset);
-                if node != self.list.as_ref().inner.head.as_ptr() {
-                    self.cursor = node;
-                } else {
-                    self.cursor = ptr::null();
-                }
+                self.cursor = node;
             }
         }
     }

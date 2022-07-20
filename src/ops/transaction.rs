@@ -7,15 +7,13 @@ use std::{
 };
 
 use bytes::{Bytes, BytesMut};
-use skiplist::KeyComparator;
 
+use crate::util::default_hash;
 use crate::{
     entry::Entry,
     format::{append_ts, user_key},
     iterator::{is_deleted_or_expired, Item},
-    key_with_ts,
-    util::{default_hash, COMPARATOR},
-    Agate, AgateIterator, Error, Result, Value,
+    key_with_ts, Agate, AgateIterator, Error, Result, Value,
 };
 
 const MAX_KEY_LENGTH: usize = 65000;
@@ -50,7 +48,7 @@ pub struct Transaction {
 
 pub struct PendingWritesIterator {
     entries: Vec<Entry>,
-    next_idx: i64,
+    next_idx: usize,
     read_ts: u64,
     reversed: bool,
     key: BytesMut,
@@ -86,7 +84,7 @@ impl Transaction {
         // As each entry saves key / value as Bytes, there will only be overhead of pointer clone.
         let mut entries: Vec<_> = self.pending_writes.values().cloned().collect();
         entries.sort_by(|x, y| {
-            let cmp = COMPARATOR.compare_key(&x.key, &y.key);
+            let cmp = (&x.key).cmp(&y.key);
             if reversed {
                 cmp.reverse()
             } else {
@@ -443,8 +441,12 @@ impl PendingWritesIterator {
 
 impl AgateIterator for PendingWritesIterator {
     fn next(&mut self) {
-        self.next_idx += 1;
-        self.update_key();
+        if self.next_idx == std::usize::MAX {
+            self.rewind();
+        } else if self.next_idx < self.entries.len() {
+            self.next_idx += 1;
+            self.update_key();
+        }
     }
 
     fn rewind(&mut self) {
@@ -464,7 +466,7 @@ impl AgateIterator for PendingWritesIterator {
             } else {
                 cmp != Greater
             }
-        }) as i64;
+        });
 
         self.update_key();
     }
@@ -487,18 +489,24 @@ impl AgateIterator for PendingWritesIterator {
     }
 
     fn valid(&self) -> bool {
-        self.next_idx >= 0 && self.next_idx < self.entries.len() as i64
+        self.next_idx != std::usize::MAX && self.next_idx < self.entries.len()
     }
 
     fn prev(&mut self) {
-        assert!(self.next_idx > 0);
-        self.next_idx -= 1;
-        self.update_key();
+        if self.next_idx == std::usize::MAX {
+        } else if self.next_idx > 0 {
+            self.next_idx -= 1;
+            self.update_key();
+        } else {
+            self.next_idx = std::usize::MAX;
+        }
     }
 
     fn to_last(&mut self) {
-        self.next_idx = self.entries.len() as i64 - 1;
-        self.update_key();
+        if !self.entries.is_empty() {
+            self.next_idx = self.entries.len() - 1;
+            self.update_key();
+        }
     }
 }
 
@@ -577,7 +585,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pending_writes_iterator() {
+    fn test_pending_writes_iterator() {
         let n = 100;
 
         let mut entries = Vec::new();
@@ -650,6 +658,73 @@ mod tests {
                 assert_eq!(user_key(pending_writes.key()), key(n - 1).to_vec());
             } else {
                 assert_eq!(user_key(pending_writes.key()), key(0).to_vec());
+            }
+        };
+
+        check(0, false, entries.clone());
+
+        entries.reverse();
+
+        check(0, true, entries.clone());
+    }
+
+    #[test]
+    fn test_pending_writes_iterator_out_of_bound() {
+        let n = 100;
+
+        let mut entries = Vec::new();
+
+        let key = |i| BytesMut::from(format!("key-{:012x}", i).as_bytes());
+        let value = |i| Bytes::from(format!("value-{:012x}", i));
+
+        for i in 0..n {
+            let entry = Entry::new(key(i).freeze(), value(i));
+            entries.push(entry);
+        }
+
+        let check = |read_ts: u64, reversed: bool, entries: Vec<Entry>| {
+            let mut iter = PendingWritesIterator::new(read_ts, reversed, entries);
+
+            iter.rewind();
+            iter.prev();
+            assert!(!iter.valid());
+            iter.prev();
+            assert!(!iter.valid());
+            iter.next();
+            assert!(iter.valid());
+
+            iter.prev();
+            assert!(!iter.valid());
+            iter.prev();
+            assert!(!iter.valid());
+            iter.next();
+            assert!(iter.valid());
+
+            if !reversed {
+                assert_eq!(user_key(iter.key()), key(0).to_vec());
+            } else {
+                assert_eq!(user_key(iter.key()), key(n - 1).to_vec());
+            }
+
+            iter.to_last();
+            iter.next();
+            assert!(!iter.valid());
+            iter.next();
+            assert!(!iter.valid());
+            iter.prev();
+            assert!(iter.valid());
+
+            iter.next();
+            assert!(!iter.valid());
+            iter.next();
+            assert!(!iter.valid());
+            iter.prev();
+            assert!(iter.valid());
+
+            if !reversed {
+                assert_eq!(user_key(iter.key()), key(n - 1).to_vec());
+            } else {
+                assert_eq!(user_key(iter.key()), key(0).to_vec());
             }
         };
 

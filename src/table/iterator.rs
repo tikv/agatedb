@@ -104,8 +104,11 @@ impl BlockIterator {
     }
 
     fn set_idx(&mut self, i: usize) {
+        // Before first and from first to after last.
+        assert!(self.idx == std::usize::MAX || self.idx <= self.entry_offsets().len());
+
         self.idx = i;
-        if i >= self.entry_offsets().len() {
+        if self.idx == std::usize::MAX || i >= self.entry_offsets().len() {
             self.err = Some(IteratorError::Eof);
             return;
         }
@@ -187,7 +190,7 @@ impl BlockIterator {
 
     pub fn seek_to_last(&mut self) {
         if self.entry_offsets().is_empty() {
-            self.idx = std::usize::MAX;
+            self.idx = 0;
             self.err = Some(IteratorError::Eof);
         } else {
             self.set_idx(self.entry_offsets().len() - 1);
@@ -195,15 +198,28 @@ impl BlockIterator {
     }
 
     pub fn next(&mut self) {
-        self.set_idx(self.idx + 1);
+        if self.idx == std::usize::MAX {
+            // Before first.
+            self.set_idx(0);
+        } else if self.idx < self.entry_offsets().len() {
+            // Normal.
+            self.set_idx(self.idx + 1);
+        } else {
+            // After last.
+            assert!(!self.valid());
+        }
     }
 
     pub fn prev(&mut self) {
-        if self.idx == 0 {
-            self.idx = std::usize::MAX;
-            self.err = Some(IteratorError::Eof);
-        } else {
+        if self.idx == std::usize::MAX {
+            // Before first.
+            assert!(!self.valid());
+        } else if self.idx > 0 {
+            // Normal.
             self.set_idx(self.idx - 1);
+        } else {
+            // At first.
+            self.set_idx(std::usize::MAX);
         }
     }
 
@@ -364,7 +380,10 @@ impl<T: AsRef<TableInner>> TableRefIterator<T> {
     pub(crate) fn next_inner(&mut self) {
         self.err = None;
 
-        if self.bpos >= self.table.as_ref().offsets_length() {
+        if self.bpos == std::usize::MAX {
+            self.seek_to_first();
+            return;
+        } else if self.bpos >= self.table.as_ref().offsets_length() {
             self.err = Some(IteratorError::Eof);
             return;
         }
@@ -398,6 +417,9 @@ impl<T: AsRef<TableInner>> TableRefIterator<T> {
         if self.bpos == std::usize::MAX {
             self.err = Some(IteratorError::Eof);
             return;
+        } else if self.bpos >= self.table.as_ref().offsets_length() {
+            self.seek_to_last();
+            return;
         }
 
         if BlockIterator::is_ready(&self.block_iterator) {
@@ -413,8 +435,12 @@ impl<T: AsRef<TableInner>> TableRefIterator<T> {
             let bi = self.block_iterator.as_mut().unwrap();
             bi.prev();
             if !bi.valid() {
-                self.bpos = self.bpos.wrapping_sub(1);
-                // bpos will become -1 or usize::MAX if it moves before zero position.
+                // bpos will become usize::MAX if it moves before zero position.
+                if self.bpos == 0 {
+                    self.bpos = std::usize::MAX;
+                } else {
+                    self.bpos -= 1;
+                }
                 bi.data.clear();
                 self.prev_inner();
             }
