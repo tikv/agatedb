@@ -84,6 +84,7 @@ impl Transaction {
         // As each entry saves key / value as Bytes, there will only be overhead of pointer clone.
         let mut entries: Vec<_> = self.pending_writes.values().cloned().collect();
         entries.sort_by(|x, y| {
+            // Note, we should not use COMPARATOR when compare without ts.
             let cmp = (&x.key).cmp(&y.key);
             if reversed {
                 cmp.reverse()
@@ -431,7 +432,7 @@ impl PendingWritesIterator {
 
     fn update_key(&mut self) {
         if self.valid() {
-            let entry = &self.entries[self.next_idx as usize];
+            let entry = &self.entries[self.next_idx];
             self.key.clear();
             self.key.extend_from_slice(&entry.key);
             append_ts(&mut self.key, self.read_ts);
@@ -478,7 +479,7 @@ impl AgateIterator for PendingWritesIterator {
 
     fn value(&self) -> Value {
         assert!(self.valid());
-        let entry = &self.entries[self.next_idx as usize];
+        let entry = &self.entries[self.next_idx];
         Value {
             meta: entry.meta,
             user_meta: entry.user_meta,
@@ -580,7 +581,7 @@ impl Agate {
 
 #[cfg(test)]
 mod tests {
-    use crate::get_ts;
+    use crate::util::test::{check_iterator_normal_operation, check_iterator_out_of_bound};
 
     use super::*;
 
@@ -590,82 +591,21 @@ mod tests {
 
         let mut entries = Vec::new();
 
-        let key = |i| BytesMut::from(format!("key-{:012x}", i).as_bytes());
-        let value = |i| Bytes::from(format!("value-{:012x}", i));
+        let key = |i| BytesMut::from(format!("{:012x}", i).as_bytes());
+        let value = |i| Bytes::from(format!("{:012x}", i));
 
         for i in 0..n {
             let entry = Entry::new(key(i).freeze(), value(i));
             entries.push(entry);
         }
 
-        let check = |read_ts: u64, reversed: bool, entries: Vec<Entry>| {
-            let mut pending_writes = PendingWritesIterator::new(read_ts, reversed, entries);
-            pending_writes.rewind();
-
-            // test iterate
-            let mut cnt = 0;
-            while pending_writes.valid() {
-                let k = pending_writes.key();
-                let v = pending_writes.value();
-
-                if !reversed {
-                    assert_eq!(user_key(k), key(cnt).to_vec());
-                    assert_eq!(v.value, value(cnt));
-                } else {
-                    assert_eq!(user_key(k), key(n - 1 - cnt).to_vec());
-                    assert_eq!(v.value, value(n - 1 - cnt));
-                }
-
-                assert_eq!(get_ts(k), read_ts);
-                assert_eq!(v.version, read_ts);
-
-                cnt += 1;
-                pending_writes.next();
-            }
-            assert_eq!(cnt, n);
-
-            // test seek
-            for i in 10..n - 10 {
-                pending_writes.seek(&key_with_ts(key(i), read_ts));
-
-                for j in 0..10 {
-                    if !reversed {
-                        assert_eq!(user_key(pending_writes.key()), key(i + j).to_vec());
-                    } else {
-                        assert_eq!(user_key(pending_writes.key()), key(i - j).to_vec());
-                    }
-                    pending_writes.next();
-                }
-            }
-
-            // test prev
-            for i in 10..n - 10 {
-                pending_writes.seek(&key_with_ts(key(i), read_ts));
-
-                for j in 0..10 {
-                    if !reversed {
-                        assert_eq!(user_key(pending_writes.key()), key(i - j).to_vec());
-                    } else {
-                        assert_eq!(user_key(pending_writes.key()), key(i + j).to_vec());
-                    }
-                    pending_writes.prev();
-                }
-            }
-
-            // test to_last
-            pending_writes.to_last();
-            if !reversed {
-                assert_eq!(user_key(pending_writes.key()), key(n - 1).to_vec());
-            } else {
-                assert_eq!(user_key(pending_writes.key()), key(0).to_vec());
-            }
-        };
-
-        check(0, false, entries.clone());
+        let iter = PendingWritesIterator::new(0, false, entries.clone());
+        check_iterator_normal_operation(iter, n, false);
 
         entries.reverse();
 
-        check(0, true, entries.clone());
+        let iter = PendingWritesIterator::new(0, true, entries);
+        check_iterator_normal_operation(iter, n, true);
     }
 
     #[test]
@@ -674,64 +614,20 @@ mod tests {
 
         let mut entries = Vec::new();
 
-        let key = |i| BytesMut::from(format!("key-{:012x}", i).as_bytes());
-        let value = |i| Bytes::from(format!("value-{:012x}", i));
+        let key = |i| BytesMut::from(format!("{:012x}", i).as_bytes());
+        let value = |i| Bytes::from(format!("{:012x}", i));
 
         for i in 0..n {
             let entry = Entry::new(key(i).freeze(), value(i));
             entries.push(entry);
         }
 
-        let check = |read_ts: u64, reversed: bool, entries: Vec<Entry>| {
-            let mut iter = PendingWritesIterator::new(read_ts, reversed, entries);
-
-            iter.rewind();
-            iter.prev();
-            assert!(!iter.valid());
-            iter.prev();
-            assert!(!iter.valid());
-            iter.next();
-            assert!(iter.valid());
-
-            iter.prev();
-            assert!(!iter.valid());
-            iter.prev();
-            assert!(!iter.valid());
-            iter.next();
-            assert!(iter.valid());
-
-            if !reversed {
-                assert_eq!(user_key(iter.key()), key(0).to_vec());
-            } else {
-                assert_eq!(user_key(iter.key()), key(n - 1).to_vec());
-            }
-
-            iter.to_last();
-            iter.next();
-            assert!(!iter.valid());
-            iter.next();
-            assert!(!iter.valid());
-            iter.prev();
-            assert!(iter.valid());
-
-            iter.next();
-            assert!(!iter.valid());
-            iter.next();
-            assert!(!iter.valid());
-            iter.prev();
-            assert!(iter.valid());
-
-            if !reversed {
-                assert_eq!(user_key(iter.key()), key(n - 1).to_vec());
-            } else {
-                assert_eq!(user_key(iter.key()), key(0).to_vec());
-            }
-        };
-
-        check(0, false, entries.clone());
+        let iter = PendingWritesIterator::new(0, false, entries.clone());
+        check_iterator_out_of_bound(iter, n, false);
 
         entries.reverse();
 
-        check(0, true, entries.clone());
+        let iter = PendingWritesIterator::new(0, true, entries);
+        check_iterator_out_of_bound(iter, n, true);
     }
 }

@@ -540,7 +540,11 @@ impl<'a> Drop for Iterator<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{db::tests::*, entry::Entry, util::make_comparator};
+    use crate::{
+        db::tests::*,
+        entry::Entry,
+        util::{make_comparator, test::check_iterator_out_of_bound},
+    };
 
     #[test]
     fn test_skl_iterator_out_of_bound() {
@@ -552,55 +556,11 @@ mod tests {
             skl.put(key, Bytes::new());
         }
 
-        let check = |skl: Skiplist<skiplist::FixedLengthSuffixComparator>, reversed: bool| {
-            let mut iter = TableIterators::from(SkiplistIterator::new(skl.iter(), reversed));
+        let iter = TableIterators::from(SkiplistIterator::new(skl.iter(), false));
+        check_iterator_out_of_bound(iter, n, false);
 
-            iter.rewind();
-            iter.prev();
-            assert!(!iter.valid());
-            iter.prev();
-            assert!(!iter.valid());
-            iter.next();
-            assert!(iter.valid());
-
-            iter.prev();
-            assert!(!iter.valid());
-            iter.prev();
-            assert!(!iter.valid());
-            iter.next();
-            assert!(iter.valid());
-
-            if !reversed {
-                assert_eq!(user_key(iter.key()), format!("{:012x}", 0).as_bytes());
-            } else {
-                assert_eq!(user_key(iter.key()), format!("{:012x}", n - 1).as_bytes());
-            }
-
-            iter.to_last();
-            iter.next();
-            assert!(!iter.valid());
-            iter.next();
-            assert!(!iter.valid());
-            iter.prev();
-            assert!(iter.valid());
-
-            iter.next();
-            assert!(!iter.valid());
-            iter.next();
-            assert!(!iter.valid());
-            iter.prev();
-            assert!(iter.valid());
-
-            if !reversed {
-                assert_eq!(user_key(iter.key()), format!("{:012x}", n - 1).as_bytes());
-            } else {
-                assert_eq!(user_key(iter.key()), format!("{:012x}", 0).as_bytes());
-            }
-        };
-
-        check(skl.clone(), false);
-
-        check(skl, true);
+        let iter = TableIterators::from(SkiplistIterator::new(skl.iter(), true));
+        check_iterator_out_of_bound(iter, n, true);
     }
 
     #[test]

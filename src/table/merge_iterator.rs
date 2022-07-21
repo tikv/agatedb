@@ -273,7 +273,7 @@ impl AgateIterator for MergeIterator {
     }
 
     fn valid(&self) -> bool {
-        self.smaller().valid || self.bigger().valid
+        self.smaller().valid
     }
 
     fn prev(&mut self) {
@@ -348,6 +348,7 @@ mod tests {
     use crate::{
         assert_bytes_eq,
         format::{key_with_ts, user_key},
+        util::test::{check_iterator_normal_operation, check_iterator_out_of_bound},
     };
 
     pub struct VecIterator {
@@ -426,84 +427,12 @@ mod tests {
             .collect()
     }
 
-    fn check_sequence_both(mut iter: Box<Iterators>, n: usize, reversed: bool) {
-        // test sequentially iterate
-        let mut cnt = 0;
-        iter.rewind();
-        while iter.valid() {
-            let check_cnt = if reversed { n - 1 - cnt } else { cnt };
-            assert_bytes_eq!(
-                user_key(iter.key()),
-                format!("{:012x}", check_cnt).as_bytes()
-            );
-            cnt += 1;
-            iter.next();
-        }
-        assert_eq!(cnt, n);
-
-        iter.rewind();
-
-        // test seek
-        for i in 10..n - 10 {
-            iter.seek(&key_with_ts(
-                BytesMut::from(format!("{:012x}", i).as_bytes()),
-                0,
-            ));
-            for j in 0..10 {
-                assert!(iter.valid());
-                let expected_key = if reversed {
-                    format!("{:012x}", i - j).to_string()
-                } else {
-                    format!("{:012x}", i + j).to_string()
-                };
-                assert_bytes_eq!(user_key(iter.key()), expected_key.as_bytes());
-                iter.next();
-            }
-        }
-
-        iter.rewind();
-
-        // test prev
-        for i in 0..n {
-            iter.seek(&key_with_ts(
-                BytesMut::from(format!("{:012x}", i).as_bytes()),
-                0,
-            ));
-
-            iter.prev();
-
-            if reversed {
-                if i == n - 1 {
-                    assert!(!iter.valid());
-                } else {
-                    let expected_key = format!("{:012x}", i + 1).to_string();
-                    assert_bytes_eq!(user_key(iter.key()), expected_key.as_bytes());
-                }
-            } else if i == 0 {
-                assert!(!iter.valid());
-            } else {
-                let expected_key = format!("{:012x}", i - 1).to_string();
-                assert_bytes_eq!(user_key(iter.key()), expected_key.as_bytes());
-            }
-        }
-
-        // test to_last
-        iter.to_last();
-        assert!(iter.valid());
-        let expected_key = if reversed {
-            format!("{:012x}", 0)
-        } else {
-            format!("{:012x}", n - 1)
-        };
-        assert_bytes_eq!(user_key(iter.key()), expected_key.as_bytes());
-    }
-
     fn check_sequence(iter: Box<Iterators>, n: usize) {
-        check_sequence_both(iter, n, false);
+        check_iterator_normal_operation(*iter, n, false);
     }
 
     fn check_reverse_sequence(iter: Box<Iterators>, n: usize) {
-        check_sequence_both(iter, n, true);
+        check_iterator_normal_operation(*iter, n, true);
     }
 
     #[test]
@@ -573,60 +502,15 @@ mod tests {
     #[test]
     fn test_vec_out_of_bound() {
         let n = 100;
-        let data = gen_vec_data(n, |_| true);
+        let mut data = gen_vec_data(n, |_| true);
 
-        let check = |mut data: Vec<Bytes>, reversed: bool| {
-            if reversed {
-                data.reverse();
-            }
-            let mut iter = VecIterator::new(data, reversed);
+        let iter = VecIterator::new(data.clone(), false);
+        check_iterator_out_of_bound(iter, n, false);
 
-            iter.rewind();
-            iter.prev();
-            assert!(!iter.valid());
-            iter.prev();
-            assert!(!iter.valid());
-            iter.next();
-            assert!(iter.valid());
+        data.reverse();
 
-            iter.prev();
-            assert!(!iter.valid());
-            iter.prev();
-            assert!(!iter.valid());
-            iter.next();
-            assert!(iter.valid());
-
-            if !reversed {
-                assert_eq!(user_key(iter.key()), format!("{:012x}", 0).as_bytes());
-            } else {
-                assert_eq!(user_key(iter.key()), format!("{:012x}", n - 1).as_bytes());
-            }
-
-            iter.to_last();
-            iter.next();
-            assert!(!iter.valid());
-            iter.next();
-            assert!(!iter.valid());
-            iter.prev();
-            assert!(iter.valid());
-
-            iter.next();
-            assert!(!iter.valid());
-            iter.next();
-            assert!(!iter.valid());
-            iter.prev();
-            assert!(iter.valid());
-
-            if !reversed {
-                assert_eq!(user_key(iter.key()), format!("{:012x}", n - 1).as_bytes());
-            } else {
-                assert_eq!(user_key(iter.key()), format!("{:012x}", 0).as_bytes());
-            }
-        };
-
-        check(data.clone(), false);
-
-        check(data, true);
+        let iter = VecIterator::new(data, false);
+        check_iterator_out_of_bound(iter, n, true);
     }
 
     #[test]
@@ -709,66 +593,16 @@ mod tests {
         let mut rev_b = b.clone();
         rev_b.reverse();
 
-        let check = |mut iter: Box<Iterators>, reversed: bool| {
-            iter.rewind();
-            iter.prev();
-            assert!(!iter.valid());
-            iter.prev();
-            assert!(!iter.valid());
-            iter.next();
-            assert!(iter.valid());
-
-            iter.prev();
-            assert!(!iter.valid());
-            iter.prev();
-            assert!(!iter.valid());
-            iter.next();
-            assert!(iter.valid());
-
-            if !reversed {
-                assert_eq!(user_key(iter.key()), format!("{:012x}", 0).as_bytes());
-            } else {
-                assert_eq!(
-                    user_key(iter.key()),
-                    format!("{:012x}", 0xfff - 1).as_bytes()
-                );
-            }
-
-            iter.to_last();
-            iter.next();
-            assert!(!iter.valid());
-            iter.next();
-            assert!(!iter.valid());
-            iter.prev();
-            assert!(iter.valid());
-
-            iter.next();
-            assert!(!iter.valid());
-            iter.next();
-            assert!(!iter.valid());
-            iter.prev();
-            assert!(iter.valid());
-
-            if !reversed {
-                assert_eq!(
-                    user_key(iter.key()),
-                    format!("{:012x}", 0xfff - 1).as_bytes()
-                );
-            } else {
-                assert_eq!(user_key(iter.key()), format!("{:012x}", 0).as_bytes());
-            }
-        };
-
         let iter_a = Iterators::from(VecIterator::new(a, false));
         let iter_b = Iterators::from(VecIterator::new(b, false));
         let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], false);
 
-        check(merge_iter, false);
+        check_iterator_out_of_bound(*merge_iter, 0xfff, false);
 
         let iter_a = Iterators::from(VecIterator::new(rev_a, true));
         let iter_b = Iterators::from(VecIterator::new(rev_b, true));
         let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], true);
 
-        check(merge_iter, true);
+        check_iterator_out_of_bound(*merge_iter, 0xfff, true);
     }
 }

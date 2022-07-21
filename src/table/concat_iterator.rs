@@ -208,16 +208,16 @@ impl AgateIterator for ConcatIterator {
 
 #[cfg(test)]
 mod tests {
-    use bytes::{Bytes, BytesMut};
+    use bytes::Bytes;
     use rand::prelude::*;
 
     use super::*;
     use crate::{
-        format::{key_with_ts, user_key},
         table::{
             tests::{build_table_data, get_test_table_options},
             Table,
         },
+        util::test::{check_iterator_normal_operation, check_iterator_out_of_bound},
     };
 
     fn build_test_tables() -> (Vec<Table>, usize) {
@@ -247,126 +247,21 @@ mod tests {
     fn test_concat_iterator() {
         let (tables, cnt) = build_test_tables();
 
-        let check = |tables: Vec<Table>, reversed: bool| {
-            let opt = if reversed { ITERATOR_REVERSED } else { 0 };
-            let mut iter = ConcatIterator::from_tables(tables, opt);
+        let iter = ConcatIterator::from_tables(tables.clone(), 0);
+        check_iterator_normal_operation(iter, cnt, false);
 
-            iter.rewind();
-
-            // test iterate
-            for i in 0..cnt {
-                assert!(iter.valid());
-                if !reversed {
-                    assert_eq!(user_key(iter.key()), format!("{:012x}", i).as_bytes());
-                } else {
-                    assert_eq!(
-                        user_key(iter.key()),
-                        format!("{:012x}", cnt - i - 1).as_bytes()
-                    );
-                }
-                iter.next();
-            }
-            assert!(!iter.valid());
-
-            // test seek
-            for i in 10..cnt - 10 {
-                iter.seek(&key_with_ts(
-                    BytesMut::from(format!("{:012x}", i).as_bytes()),
-                    0,
-                ));
-                for j in 0..10 {
-                    if !reversed {
-                        assert_eq!(user_key(iter.key()), format!("{:012x}", i + j).as_bytes());
-                    } else {
-                        assert_eq!(user_key(iter.key()), format!("{:012x}", i - j).as_bytes());
-                    }
-                    iter.next();
-                }
-            }
-
-            // test prev
-            for i in 10..cnt - 10 {
-                iter.seek(&key_with_ts(
-                    BytesMut::from(format!("{:012x}", i).as_bytes()),
-                    0,
-                ));
-                for j in 0..10 {
-                    if !reversed {
-                        assert_eq!(user_key(iter.key()), format!("{:012x}", i - j).as_bytes());
-                    } else {
-                        assert_eq!(user_key(iter.key()), format!("{:012x}", i + j).as_bytes());
-                    }
-                    iter.prev();
-                }
-            }
-
-            // test to_last
-            iter.to_last();
-            if !reversed {
-                assert_eq!(user_key(iter.key()), format!("{:012x}", cnt - 1).as_bytes());
-            } else {
-                assert_eq!(user_key(iter.key()), format!("{:012x}", 0).as_bytes());
-            }
-        };
-
-        check(tables.clone(), false);
-
-        check(tables, true);
+        let iter = ConcatIterator::from_tables(tables, ITERATOR_REVERSED);
+        check_iterator_normal_operation(iter, cnt, true);
     }
 
     #[test]
     fn test_concat_iterator_out_of_bound() {
         let (tables, cnt) = build_test_tables();
 
-        let check = |tables: Vec<Table>, reversed: bool| {
-            let opt = if reversed { ITERATOR_REVERSED } else { 0 };
-            let mut iter = ConcatIterator::from_tables(tables, opt);
+        let iter = ConcatIterator::from_tables(tables.clone(), 0);
+        check_iterator_out_of_bound(iter, cnt, false);
 
-            iter.rewind();
-            iter.prev();
-            assert!(!iter.valid());
-            iter.prev();
-            assert!(!iter.valid());
-            iter.next();
-            assert!(iter.valid());
-
-            iter.prev();
-            assert!(!iter.valid());
-            iter.prev();
-            assert!(!iter.valid());
-            iter.next();
-            assert!(iter.valid());
-
-            if !reversed {
-                assert_eq!(user_key(iter.key()), format!("{:012x}", 0).as_bytes());
-            } else {
-                assert_eq!(user_key(iter.key()), format!("{:012x}", cnt - 1).as_bytes());
-            }
-
-            iter.to_last();
-            iter.next();
-            assert!(!iter.valid());
-            iter.next();
-            assert!(!iter.valid());
-            iter.prev();
-            assert!(iter.valid());
-
-            iter.next();
-            assert!(!iter.valid());
-            iter.next();
-            assert!(!iter.valid());
-            iter.prev();
-            assert!(iter.valid());
-
-            if !reversed {
-                assert_eq!(user_key(iter.key()), format!("{:012x}", cnt - 1).as_bytes());
-            } else {
-                assert_eq!(user_key(iter.key()), format!("{:012x}", 0).as_bytes());
-            }
-        };
-
-        check(tables.clone(), false);
-
-        check(tables, true);
+        let iter = ConcatIterator::from_tables(tables, ITERATOR_REVERSED);
+        check_iterator_out_of_bound(iter, cnt, true);
     }
 }
