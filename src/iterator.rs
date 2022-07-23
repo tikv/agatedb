@@ -215,9 +215,6 @@ pub struct Iterator<'a> {
 
     pub(crate) opt: IteratorOptions,
     item: Option<Item>,
-
-    /// Used to skip over multiple versions of the same key.
-    last_key: BytesMut,
 }
 
 impl Transaction {
@@ -263,7 +260,6 @@ impl Transaction {
             read_ts: self.read_ts,
             opt: opt.clone(),
             item: None,
-            last_key: BytesMut::new(),
         }
     }
 }
@@ -290,6 +286,12 @@ impl<'a> Iterator<'a> {
 
     // Advances the iterator by one.
     pub fn next(&mut self) {
+        let key = BytesMut::from(&self.item().key.clone()[..]);
+        let key_with_ts = key_with_ts(key, self.item().version);
+
+        self.table_iter.seek(&key_with_ts);
+        self.table_iter.next();
+
         while self.table_iter.valid() {
             if self.parse_item() {
                 return;
@@ -300,8 +302,12 @@ impl<'a> Iterator<'a> {
     }
 
     pub fn prev(&mut self) {
-        self.table_iter.seek(&self.last_key.clone().freeze());
+        let key = BytesMut::from(&self.item().key.clone()[..]);
+        let key_with_ts = key_with_ts(key, self.item().version);
+
+        self.table_iter.seek(&key_with_ts);
         self.table_iter.prev();
+
         while self.table_iter.valid() {
             if self.parse_item_for_prev() {
                 return;
@@ -344,20 +350,26 @@ impl<'a> Iterator<'a> {
             return true;
         }
 
-        // To support prev, we also should track last_key in forward direction.
-        let key_changed = if !crate::util::same_key(&self.last_key, key) {
-            self.last_key.clear();
-            self.last_key.extend_from_slice(key);
-            true
-        } else {
-            false
-        };
-
         // If iterating in forward direction, then just checking the last key against
         // current key would be sufficient.
-        if !self.opt.reverse && !key_changed {
+        if !self.opt.reverse {
+            self.table_iter.prev();
+
+            // Only track in forward direction.
+            // We should update last_key as soon as we find a different key in our snapshot.
+            // Consider keys: a 5, b 7 (del), b 5. When iterating, last_key = a.
+            // Then we see b 7, which is deleted. If we don't store last_key = b, we'll then
+            // return b 5, which is wrong. Therefore, update last_key here.
+            if self.table_iter.valid()
+                && crate::util::same_key(self.table_iter.key(), key)
+                && get_ts(self.table_iter.key()) <= self.read_ts
+            {
+                self.table_iter.next();
+                self.table_iter.next();
+                return false;
+            }
+
             self.table_iter.next();
-            return false;
         }
 
         loop {
@@ -368,10 +380,14 @@ impl<'a> Iterator<'a> {
             }
 
             let mut item = Item::new(self.txn.core.clone());
-            Self::fill_item(&mut item, key, &self.table_iter.value(), &self.opt);
+            Self::fill_item(
+                &mut item,
+                self.table_iter.key(),
+                &self.table_iter.value(),
+                &self.opt,
+            );
 
             self.table_iter.next();
-
             if !self.opt.reverse || !self.table_iter.valid() {
                 self.item = Some(item);
                 return true;
@@ -379,11 +395,11 @@ impl<'a> Iterator<'a> {
 
             // Reverse direction.
             let next_ts = get_ts(self.table_iter.key());
-            let key_without_ts = user_key(self.table_iter.key());
-            if next_ts <= self.read_ts && key_without_ts == item.key {
+            if next_ts <= self.read_ts && crate::util::same_key(self.table_iter.key(), key) {
                 // This is a valid potential candidate.
                 continue;
             }
+
             // Ignore the next candidate. Return the current one.
             self.item = Some(item);
             return true;
@@ -420,20 +436,21 @@ impl<'a> Iterator<'a> {
             return true;
         }
 
-        // Opposite of `parse_item`, if iterating in forward direction, we should check until the
-        // key changes or we reach the end of the inner iterator; otherwise, we should use last_key
-        // to get the lastest version of a certian key.
-        let key_changed = if !crate::util::same_key(&self.last_key, key) {
-            self.last_key.clear();
-            self.last_key.extend_from_slice(key);
-            true
-        } else {
-            false
-        };
+        // If iterating in *reverse* direction, then just checking the last key against
+        // current key would be sufficient.
+        if self.opt.reverse {
+            self.table_iter.next();
 
-        if self.opt.reverse && !key_changed {
+            if self.table_iter.valid()
+                && crate::util::same_key(self.table_iter.key(), key)
+                && get_ts(self.table_iter.key()) <= self.read_ts
+            {
+                self.table_iter.prev();
+                self.table_iter.prev();
+                return false;
+            }
+
             self.table_iter.prev();
-            return false;
         }
 
         loop {
@@ -444,7 +461,12 @@ impl<'a> Iterator<'a> {
             }
 
             let mut item = Item::new(self.txn.core.clone());
-            Self::fill_item(&mut item, key, &self.table_iter.value(), &self.opt);
+            Self::fill_item(
+                &mut item,
+                self.table_iter.key(),
+                &self.table_iter.value(),
+                &self.opt,
+            );
 
             self.table_iter.prev();
             if self.opt.reverse || !self.table_iter.valid() {
@@ -454,11 +476,11 @@ impl<'a> Iterator<'a> {
 
             // Forward direction.
             let next_ts = get_ts(self.table_iter.key());
-            let key_without_ts = user_key(self.table_iter.key());
-            if next_ts <= self.read_ts && key_without_ts == item.key {
+            if next_ts <= self.read_ts && crate::util::same_key(self.table_iter.key(), key) {
                 // This is a valid potential candidate.
                 continue;
             }
+
             // Ignore the next candidate. Return the current one.
             self.item = Some(item);
             return true;
@@ -490,24 +512,27 @@ impl<'a> Iterator<'a> {
             self.txn.add_read_key(key);
         }
 
-        self.last_key.clear();
-
         // TODO: Prefix.
 
         if key.is_empty() {
             self.table_iter.rewind();
-            self.next();
-            return;
+        } else {
+            let key = if !self.opt.reverse {
+                key_with_ts(BytesMut::from(&key[..]), self.txn.read_ts)
+            } else {
+                key_with_ts(BytesMut::from(&key[..]), 0)
+            };
+
+            self.table_iter.seek(&key);
         }
 
-        let key = if !self.opt.reverse {
-            key_with_ts(BytesMut::from(&key[..]), self.txn.read_ts)
-        } else {
-            key_with_ts(BytesMut::from(&key[..]), 0)
-        };
+        while self.table_iter.valid() {
+            if self.parse_item() {
+                return;
+            }
+        }
 
-        self.table_iter.seek(&key);
-        self.next();
+        self.item = None;
     }
 
     /// Rewinds the iterator cursor all the way to zero-th position, which would be the

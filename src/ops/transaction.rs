@@ -296,7 +296,7 @@ impl Transaction {
         let mut keep_together = true;
         let set_version = |keep_together: &mut bool, e: &mut Entry| {
             if e.version == 0 {
-                e.version = commit_ts;
+                e.version = commit_ts * 10;
             } else {
                 *keep_together = false;
             }
@@ -337,8 +337,8 @@ impl Transaction {
             // commit_ts should not be zero if we're inserting transaction markers.
             assert!(commit_ts != 0);
             let mut e = Entry::new(
-                key_with_ts(BytesMut::from(TXN_KEY), commit_ts),
-                Bytes::from(commit_ts.to_string()),
+                key_with_ts(BytesMut::from(TXN_KEY), commit_ts * 10),
+                Bytes::from((commit_ts * 10).to_string()),
             );
             e.meta = crate::value::VALUE_FIN_TXN;
             entries.push(e);
@@ -522,7 +522,7 @@ impl crate::db::Core {
         // TODO: Allocate transaction conflict_keys and pending_writes on demand.
 
         if !is_managed {
-            txn.read_ts = self.orc.read_ts();
+            txn.read_ts = self.orc.read_ts() * 10 + 5;
         }
 
         txn
@@ -551,7 +551,7 @@ impl Agate {
         // TODO: Check closed.
 
         let mut txn = if self.core.opts.managed_txns {
-            self.new_transaction_at(std::u64::MAX, false)
+            self.new_transaction_at(std::u64::MAX / 10, false)
         } else {
             self.new_transaction(false)
         };

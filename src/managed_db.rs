@@ -31,7 +31,7 @@ impl crate::db::Core {
 
 impl Agate {
     pub fn new_transaction_at(&self, read_ts: u64, update: bool) -> Transaction {
-        self.core.new_transaction_at(read_ts, update)
+        self.core.new_transaction_at(read_ts * 10 + 5, update)
     }
 
     pub fn set_discard_ts(&self, ts: u64) {
