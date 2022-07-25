@@ -427,14 +427,6 @@ mod tests {
             .collect()
     }
 
-    fn check_sequence(iter: Box<Iterators>, n: usize) {
-        check_iterator_normal_operation(*iter, n, false);
-    }
-
-    fn check_reverse_sequence(iter: Box<Iterators>, n: usize) {
-        check_iterator_normal_operation(*iter, n, true);
-    }
-
     #[test]
     fn test_vec_iter_seek() {
         let data = gen_vec_data(0xfff, |_| true);
@@ -526,12 +518,13 @@ mod tests {
         let iter_b = Iterators::from(VecIterator::new(b, false));
         let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], false);
 
-        check_sequence(merge_iter, 0xfff);
+        check_iterator_normal_operation(*merge_iter, 0xfff, false);
 
         let iter_a = Iterators::from(VecIterator::new(rev_a, true));
         let iter_b = Iterators::from(VecIterator::new(rev_b, true));
         let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], true);
-        check_reverse_sequence(merge_iter, 0xfff);
+
+        check_iterator_normal_operation(*merge_iter, 0xfff, true);
     }
 
     #[test]
@@ -558,9 +551,42 @@ mod tests {
             .map(|vec| Iterators::from(VecIterator::new(vec, false)))
             .collect();
 
-        check_sequence(MergeIterator::from_iterators(iters, false), 0xfff);
+        check_iterator_normal_operation(*MergeIterator::from_iterators(iters, false), 0xfff, false);
 
-        check_reverse_sequence(MergeIterator::from_iterators(rev_iters, true), 0xfff);
+        check_iterator_normal_operation(
+            *MergeIterator::from_iterators(rev_iters, true),
+            0xfff,
+            true,
+        );
+    }
+
+    #[test]
+    fn test_merge_5iters_out_of_bound() {
+        // randomly determine sequence of 5 iterators
+        let vec_map = vec![2, 4, 1, 3, 0];
+        let vec_map_size = vec_map.len();
+        let vecs: Vec<Vec<Bytes>> = vec_map
+            .into_iter()
+            .map(|i| gen_vec_data(0xfff, |x| x % vec_map_size == i))
+            .collect();
+
+        let rev_iters: Vec<Iterators> = vecs
+            .iter()
+            .map(|x| {
+                let mut y = x.clone();
+                y.reverse();
+                Iterators::from(VecIterator::new(y, true))
+            })
+            .collect();
+
+        let iters: Vec<Iterators> = vecs
+            .into_iter()
+            .map(|vec| Iterators::from(VecIterator::new(vec, false)))
+            .collect();
+
+        check_iterator_out_of_bound(*MergeIterator::from_iterators(iters, false), 0xfff, false);
+
+        check_iterator_out_of_bound(*MergeIterator::from_iterators(rev_iters, true), 0xfff, true);
     }
 
     #[test]
@@ -576,12 +602,13 @@ mod tests {
         let iter_b = Iterators::from(VecIterator::new(b, false));
         let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], false);
 
-        check_sequence(merge_iter, 0xfff);
+        check_iterator_normal_operation(*merge_iter, 0xfff, false);
 
         let iter_a = Iterators::from(VecIterator::new(rev_a, true));
         let iter_b = Iterators::from(VecIterator::new(rev_b, true));
         let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], true);
-        check_reverse_sequence(merge_iter, 0xfff);
+
+        check_iterator_normal_operation(*merge_iter, 0xfff, true);
     }
 
     #[test]

@@ -289,6 +289,7 @@ impl<'a> Iterator<'a> {
         let key = BytesMut::from(&self.item().key.clone()[..]);
         let key_with_ts = key_with_ts(key, self.item().version);
 
+        // TODO: Consider add direction flag to avoid seek.
         self.table_iter.seek(&key_with_ts);
         self.table_iter.next();
 
@@ -305,6 +306,7 @@ impl<'a> Iterator<'a> {
         let key = BytesMut::from(&self.item().key.clone()[..]);
         let key_with_ts = key_with_ts(key, self.item().version);
 
+        // TODO: Consider add direction flag to avoid seek.
         self.table_iter.seek(&key_with_ts);
         self.table_iter.prev();
 
@@ -553,6 +555,8 @@ impl<'a> Iterator<'a> {
                 return;
             }
         }
+
+        self.item = None;
     }
 }
 
