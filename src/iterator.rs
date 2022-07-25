@@ -31,8 +31,6 @@ pub struct Item {
     pub(crate) key: Bytes,
     pub(crate) vptr: Bytes,
     value: RefCell<Bytes>,
-    /// Used to make every key in iterator unique.
-    key_version: u64,
     pub(crate) version: u64,
     pub(crate) expires_at: u64,
 
@@ -49,7 +47,6 @@ impl Item {
             key: Bytes::new(),
             vptr: Bytes::new(),
             value: RefCell::new(Bytes::new()),
-            key_version: 0,
             version: 0,
             expires_at: 0,
             status: PrefetchStatus::No,
@@ -260,7 +257,7 @@ impl Transaction {
         Iterator {
             table_iter: MergeIterator::from_iterators(iters, opt.reverse),
             txn: self,
-            read_ts: self.read_ts * 10 + 5,
+            read_ts: self.read_ts,
             opt: opt.clone(),
             item: None,
         }
@@ -290,7 +287,7 @@ impl<'a> Iterator<'a> {
     // Advances the iterator by one.
     pub fn next(&mut self) {
         let key = BytesMut::from(&self.item().key.clone()[..]);
-        let key_with_ts = key_with_ts(key, self.item().key_version);
+        let key_with_ts = key_with_ts(key, self.item().version);
 
         // TODO: Consider add direction flag to avoid seek.
         self.table_iter.seek(&key_with_ts);
@@ -307,7 +304,7 @@ impl<'a> Iterator<'a> {
 
     pub fn prev(&mut self) {
         let key = BytesMut::from(&self.item().key.clone()[..]);
-        let key_with_ts = key_with_ts(key, self.item().key_version);
+        let key_with_ts = key_with_ts(key, self.item().version);
 
         // TODO: Consider add direction flag to avoid seek.
         self.table_iter.seek(&key_with_ts);
@@ -497,8 +494,7 @@ impl<'a> Iterator<'a> {
         item.user_meta = vs.user_meta;
         item.expires_at = vs.expires_at;
 
-        item.key_version = get_ts(key);
-        item.version = item.key_version / 10;
+        item.version = get_ts(key);
         item.key = Bytes::copy_from_slice(user_key(key));
 
         item.vptr = vs.value.clone();

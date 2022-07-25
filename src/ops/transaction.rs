@@ -230,7 +230,7 @@ impl Transaction {
 
         let mut key_with_ts = BytesMut::new();
         key_with_ts.extend_from_slice(key);
-        append_ts(&mut key_with_ts, self.read_ts * 10 + 5);
+        append_ts(&mut key_with_ts, self.read_ts);
 
         let seek = key_with_ts.freeze();
 
@@ -245,7 +245,7 @@ impl Transaction {
         }
 
         item.key = key.clone();
-        item.version = vs.version / 10;
+        item.version = vs.version;
         item.meta = vs.meta;
         item.user_meta = vs.user_meta;
         item.vptr = vs.value;
@@ -319,8 +319,7 @@ impl Transaction {
         let process_entry = |entries: &mut Vec<Entry>, mut e: Entry| {
             let mut key = BytesMut::new();
             key.extend_from_slice(&e.key);
-            // Make sure every key in iterator is unique.
-            e.key = key_with_ts(key, e.version * 10);
+            e.key = key_with_ts(key, e.version);
             if keep_together {
                 e.meta |= crate::value::VALUE_TXN;
             }
@@ -339,8 +338,8 @@ impl Transaction {
             // commit_ts should not be zero if we're inserting transaction markers.
             assert!(commit_ts != 0);
             let mut e = Entry::new(
-                key_with_ts(BytesMut::from(TXN_KEY), commit_ts * 10),
-                Bytes::from((commit_ts * 10).to_string()),
+                key_with_ts(BytesMut::from(TXN_KEY), commit_ts),
+                Bytes::from(commit_ts.to_string()),
             );
             e.meta = crate::value::VALUE_FIN_TXN;
             entries.push(e);
@@ -437,7 +436,7 @@ impl PendingWritesIterator {
             let entry = &self.entries[self.next_idx];
             self.key.clear();
             self.key.extend_from_slice(&entry.key);
-            append_ts(&mut self.key, self.read_ts * 10 + 5);
+            append_ts(&mut self.key, self.read_ts);
         }
     }
 }
@@ -553,7 +552,7 @@ impl Agate {
         // TODO: Check closed.
 
         let mut txn = if self.core.opts.managed_txns {
-            self.new_transaction_at(std::u64::MAX / 10, false)
+            self.new_transaction_at(std::u64::MAX, false)
         } else {
             self.new_transaction(false)
         };

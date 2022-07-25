@@ -768,7 +768,7 @@ mod normal_db {
                     let mut item_key = BytesMut::new();
                     item_key.extend_from_slice(&item.key);
                     let entry = Entry {
-                        key: key_with_ts(item_key, (item.version + 1) * 10),
+                        key: key_with_ts(item_key, item.version + 1),
                         value: Bytes::new(),
                         meta: VALUE_DELETE,
                         user_meta: 0,
