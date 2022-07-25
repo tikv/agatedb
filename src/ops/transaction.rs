@@ -212,6 +212,7 @@ impl Transaction {
                     if is_deleted_or_expired(entry.meta, entry.expires_at) {
                         return Err(Error::KeyNotFound(()));
                     }
+
                     item.meta = entry.meta;
                     item.set_value(entry.value.clone());
                     item.user_meta = entry.user_meta;
@@ -229,7 +230,7 @@ impl Transaction {
 
         let mut key_with_ts = BytesMut::new();
         key_with_ts.extend_from_slice(key);
-        append_ts(&mut key_with_ts, self.read_ts);
+        append_ts(&mut key_with_ts, self.read_ts * 10 + 5);
 
         let seek = key_with_ts.freeze();
 
@@ -244,7 +245,7 @@ impl Transaction {
         }
 
         item.key = key.clone();
-        item.version = vs.version;
+        item.version = vs.version / 10;
         item.meta = vs.meta;
         item.user_meta = vs.user_meta;
         item.vptr = vs.value;
@@ -296,7 +297,7 @@ impl Transaction {
         let mut keep_together = true;
         let set_version = |keep_together: &mut bool, e: &mut Entry| {
             if e.version == 0 {
-                e.version = commit_ts * 10;
+                e.version = commit_ts;
             } else {
                 *keep_together = false;
             }
@@ -318,7 +319,8 @@ impl Transaction {
         let process_entry = |entries: &mut Vec<Entry>, mut e: Entry| {
             let mut key = BytesMut::new();
             key.extend_from_slice(&e.key);
-            e.key = key_with_ts(key, e.version);
+            // Make sure every key in iterator is unique.
+            e.key = key_with_ts(key, e.version * 10);
             if keep_together {
                 e.meta |= crate::value::VALUE_TXN;
             }
@@ -435,7 +437,7 @@ impl PendingWritesIterator {
             let entry = &self.entries[self.next_idx];
             self.key.clear();
             self.key.extend_from_slice(&entry.key);
-            append_ts(&mut self.key, self.read_ts);
+            append_ts(&mut self.key, self.read_ts * 10 + 5);
         }
     }
 }
@@ -522,7 +524,7 @@ impl crate::db::Core {
         // TODO: Allocate transaction conflict_keys and pending_writes on demand.
 
         if !is_managed {
-            txn.read_ts = self.orc.read_ts() * 10 + 5;
+            txn.read_ts = self.orc.read_ts();
         }
 
         txn

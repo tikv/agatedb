@@ -272,6 +272,7 @@ impl Core {
         false
     }
 
+    /// Get the value for the given key with specified version.
     pub(crate) fn get(&self, key: &Bytes) -> Result<Value> {
         if self.is_closed() {
             return Err(Error::DBClosed);

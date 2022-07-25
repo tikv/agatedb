@@ -192,13 +192,13 @@ impl Oracle {
                 txn.commit_ts
             };
 
-            assert!(ts * 10 >= commit_info.last_cleanup_ts);
+            assert!(ts >= commit_info.last_cleanup_ts);
 
             if self.detect_conflicts {
                 // We should ensure that txns are not added to committed_txns slice when
                 // conflict detection is disabled otherwise this slice would keep growing.
                 commit_info.committed_txns.push(CommittedTxn {
-                    ts: ts * 10,
+                    ts,
                     conflict_keys: txn.conflict_keys.clone(),
                 })
             }
