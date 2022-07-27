@@ -215,6 +215,8 @@ pub struct Iterator<'a> {
 
     pub(crate) opt: IteratorOptions,
     item: Option<Item>,
+    // If false, last operation is prev.
+    current_direction: bool,
 }
 
 impl Transaction {
@@ -260,6 +262,7 @@ impl Transaction {
             read_ts: self.read_ts,
             opt: opt.clone(),
             item: None,
+            current_direction: true,
         }
     }
 }
@@ -286,12 +289,11 @@ impl<'a> Iterator<'a> {
 
     // Advances the iterator by one.
     pub fn next(&mut self) {
-        let key = BytesMut::from(&self.item().key.clone()[..]);
-        let key_with_ts = key_with_ts(key, self.item().version);
-
-        // TODO: Consider add direction flag to avoid seek.
-        self.table_iter.seek(&key_with_ts);
-        self.table_iter.next();
+        if !self.current_direction {
+            self.table_iter.next();
+            self.table_iter.next();
+        }
+        self.current_direction = true;
 
         while self.table_iter.valid() {
             if self.parse_item() {
@@ -303,12 +305,11 @@ impl<'a> Iterator<'a> {
     }
 
     pub fn prev(&mut self) {
-        let key = BytesMut::from(&self.item().key.clone()[..]);
-        let key_with_ts = key_with_ts(key, self.item().version);
-
-        // TODO: Consider add direction flag to avoid seek.
-        self.table_iter.seek(&key_with_ts);
-        self.table_iter.prev();
+        if self.current_direction {
+            self.table_iter.prev();
+            self.table_iter.prev();
+        }
+        self.current_direction = false;
 
         while self.table_iter.valid() {
             if self.parse_item_for_prev() {
@@ -510,6 +511,8 @@ impl<'a> Iterator<'a> {
     /// smallest key greater than the provided key if iterating in the forward direction.
     /// Behavior would be reversed if iterating backwards.
     pub fn seek(&mut self, key: &Bytes) {
+        self.current_direction = true;
+
         if !key.is_empty() {
             self.txn.add_read_key(key);
         }
@@ -546,6 +549,8 @@ impl<'a> Iterator<'a> {
 
     #[allow(clippy::wrong_self_convention)]
     pub fn to_last(&mut self) {
+        self.current_direction = true;
+
         // TODO: Re-examine this.
 
         self.table_iter.to_last();

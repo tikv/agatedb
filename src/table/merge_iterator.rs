@@ -148,7 +148,7 @@ impl MergeIterator {
 
         match COMPARATOR.compare_key(&self.smaller().key, &self.bigger().key) {
             Equal => {
-                // self.right.next();
+                // Left most is guaranteed to be pending writes, we should make it the smaller one.
                 if !self.is_left_small {
                     self.swap_small();
                 }
@@ -324,7 +324,8 @@ impl AgateIterator for MergeIterator {
                 self.smaller_mut().rewind();
             } else {
                 // Note: Assume only one pair of keys are identical.
-                // Both smaller and bigger have prev element, fix and let the smaller step forward.
+                // Both smaller and bigger have prev element, fix and let the smaller step forward
+                // or let both smaller and bigger stay unmoved when they are identical.
                 self.fix();
 
                 if COMPARATOR.compare_key(&self.smaller().key, &self.bigger().key)
