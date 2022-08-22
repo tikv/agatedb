@@ -215,11 +215,9 @@ impl CompactStatus {
         }
 
         if !found {
-            let this = compact_def.this_range.clone();
-            let next = compact_def.next_range.clone();
             panic!(
                 "try looking for {:?} in this level and {:?} in next level, but key range not found",
-                this, next
+                compact_def.this_range, compact_def.next_range
             );
         }
 
@@ -275,6 +273,25 @@ impl CompactStatus {
         Ok(())
     }
 
+    /// return true when success to add range
+    pub fn add_range(&mut self, level: usize, kr: &KeyRange) -> bool {
+        if self.levels[level].overlaps_with(kr) {
+            false
+        } else {
+            self.levels[level].ranges.push(kr.clone());
+            true
+        }
+    }
+
+    pub fn delete_range(&mut self, level: usize, kr: &KeyRange) {
+        if !self.levels[level].remove(kr) {
+            panic!(
+                "try looking for {:?} in level {}, but key range not found",
+                kr, level
+            )
+        }
+    }
+
     pub fn overlaps_with(&self, level: usize, this: &KeyRange) -> bool {
         let this_level = &self.levels[level];
         this_level.overlaps_with(this)
@@ -323,8 +340,8 @@ pub fn get_key_range(tables: &[Table]) -> KeyRange {
             biggest = item.biggest();
         }
     }
-    let mut smallest_buf = BytesMut::with_capacity(smallest.len() + 8);
-    let mut biggest_buf = BytesMut::with_capacity(biggest.len() + 8);
+    let mut smallest_buf = BytesMut::with_capacity(smallest.len());
+    let mut biggest_buf = BytesMut::with_capacity(biggest.len());
     smallest_buf.extend_from_slice(user_key(smallest));
     biggest_buf.extend_from_slice(user_key(biggest));
     KeyRange::new(

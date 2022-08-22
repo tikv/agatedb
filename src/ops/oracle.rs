@@ -1,17 +1,23 @@
 use std::{
     collections::HashSet,
+    ops::{Deref, RangeInclusive},
     sync::{Arc, Mutex},
 };
 
+use bytes::Bytes;
 use yatp::{task::callback::TaskCell, Builder, ThreadPool};
 
 use super::transaction::Transaction;
-use crate::{closer::Closer, watermark::WaterMark, AgateOptions};
+use crate::{
+    closer::Closer, ingest::IngestExternalFileOptions, watermark::WaterMark, AgateOptions,
+};
 
 struct CommittedTxn {
     ts: u64,
     // Keeps track of the entries written at timestamp ts.
     conflict_keys: HashSet<u64>,
+    // Keeps track of ranges of ingested files at timestamp ts.
+    conflict_ranges: Vec<RangeInclusive<Bytes>>,
 }
 
 #[derive(Default)]
@@ -46,7 +52,7 @@ impl CommitInfo {
     fn has_conflict(&self, txn: &Transaction) -> bool {
         let reads = txn.reads.lock().unwrap();
 
-        if reads.is_empty() {
+        if reads.fingerprints.is_empty() {
             false
         } else {
             // If the committed_txn.ts is less than txn.read_ts that implies that the
@@ -57,11 +63,21 @@ impl CommitInfo {
             // a txn before it.
             self.committed_txns
                 .iter()
-                .filter(|committed_txn| committed_txn.ts > txn.read_ts)
+                .filter(|committed_txn| {
+                    committed_txn.ts > txn.read_ts
+                        && (!committed_txn.conflict_keys.is_empty()
+                            || !committed_txn.conflict_ranges.is_empty())
+                })
                 .any(|committed_txn| {
-                    reads
+                    let ck = reads
+                        .fingerprints
                         .iter()
-                        .any(|read| committed_txn.conflict_keys.contains(read))
+                        .any(|read| committed_txn.conflict_keys.contains(read));
+                    let cr = committed_txn.conflict_ranges.iter().any(|range| {
+                        range.contains(reads.smallest.deref())
+                            || range.contains(reads.biggest.deref())
+                    });
+                    ck || cr
                 })
         }
     }
@@ -200,11 +216,37 @@ impl Oracle {
                 commit_info.committed_txns.push(CommittedTxn {
                     ts,
                     conflict_keys: txn.conflict_keys.clone(),
+                    conflict_ranges: vec![],
                 })
             }
 
             (ts, false)
         }
+    }
+
+    pub(crate) fn new_ingest_commit_ts(
+        &self,
+        ingest_ranges: Vec<RangeInclusive<Bytes>>,
+        opts: &IngestExternalFileOptions,
+    ) -> u64 {
+        let mut commit_info = self.commit_info.lock().unwrap();
+        let commit_ts = if !self.is_managed {
+            // ingest task does not have a read_ts, no need to done and cleanup
+            let ts = commit_info.next_txn_ts;
+            commit_info.next_txn_ts += 1;
+            self.txn_mark.begin(ts);
+            ts
+        } else {
+            opts.commit_ts
+        };
+        if self.detect_conflicts {
+            commit_info.committed_txns.push(CommittedTxn {
+                ts: commit_ts,
+                conflict_keys: HashSet::default(),
+                conflict_ranges: ingest_ranges,
+            })
+        }
+        commit_ts
     }
 
     pub(crate) fn done_read(&self, txn: &mut Transaction) {
@@ -230,7 +272,7 @@ impl Drop for Oracle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::Core;
+    use crate::{db::Core, ops::transaction::ReadsTrace};
 
     #[test]
     fn test_basic() {
@@ -277,12 +319,18 @@ mod tests {
         assert_eq!(core.orc.new_commit_ts(&mut txn), (1, false));
 
         txn.read_ts = 0;
-        txn.reads = Mutex::new(vec![11, 23]);
+        txn.reads = Mutex::new(ReadsTrace {
+            fingerprints: vec![11, 23],
+            ..Default::default()
+        });
 
         // Has conflict.
         assert_eq!(core.orc.new_commit_ts(&mut txn), (0, true));
 
-        txn.reads = Mutex::new(vec![23]);
+        txn.reads = Mutex::new(ReadsTrace {
+            fingerprints: vec![23],
+            ..Default::default()
+        });
 
         // No conflict.
         assert_eq!(core.orc.new_commit_ts(&mut txn), (2, false));

@@ -14,7 +14,7 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
 };
 
-use bytes::{Buf, Bytes};
+use bytes::{Buf, Bytes, BytesMut};
 use iterator::TableRefIterator;
 pub use iterator::{ITERATOR_NOCACHE, ITERATOR_REVERSED};
 use memmap2::{Mmap, MmapOptions};
@@ -24,6 +24,7 @@ use proto::meta::{BlockOffset, Checksum, TableIndex};
 use crate::{
     bloom::Bloom,
     checksum,
+    format::{append_ts, user_key},
     iterator_trait::AgateIterator,
     opt::{ChecksumVerificationMode, Options},
     Error, Result,
@@ -97,6 +98,9 @@ pub struct TableInner {
     /// by default, when `TableInner` is dropped, the SST file will be
     /// deleted. By setting this to true, it won't be deleted.
     save_after_close: AtomicBool,
+    /// Global version for table. Currently only ingested files has a global version
+    /// for all keys in table
+    global_version: Option<u64>,
 }
 
 /// Table is simply an Arc to its internal TableInner structure.
@@ -155,6 +159,7 @@ impl TableInner {
             opts,
             has_bloom_filter: false,
             save_after_close: AtomicBool::new(false),
+            global_version: None,
         };
         inner.init_biggest_and_smallest()?;
 
@@ -184,6 +189,7 @@ impl TableInner {
             index_len: 0,
             has_bloom_filter: false,
             save_after_close: AtomicBool::new(false),
+            global_version: None,
         };
         inner.init_biggest_and_smallest()?;
 
@@ -263,6 +269,33 @@ impl TableInner {
         }
 
         result
+    }
+
+    fn global_version(&self) -> Option<u64> {
+        self.global_version
+    }
+
+    fn set_global_version(&mut self, version: u64) {
+        assert!(self.global_version.is_none());
+
+        self.global_version = Some(version);
+        // reset smallest and biggest. Capacity eq to previous is enough.
+        let mut buf = BytesMut::with_capacity(self.smallest.len());
+        buf.extend_from_slice(user_key(&self.smallest));
+        append_ts(&mut buf, version);
+        self.smallest = buf.freeze();
+        let mut buf = BytesMut::with_capacity(self.biggest.len());
+        buf.extend_from_slice(user_key(&self.biggest));
+        append_ts(&mut buf, version);
+        self.biggest = buf.freeze();
+        // TODO: Maybe we should rebuild keys in index when iter.
+        // But we don't have a index iterator like block, it's a little bit hard and
+        // dispersive to make this change.
+        // So I just change key's version in [`BlockOffset`] here.
+        self.index.offsets.iter_mut().for_each(|bo| {
+            bo.key.truncate(bo.key.len() - 8);
+            append_ts(&mut bo.key, version);
+        })
     }
 
     fn fetch_index(&self) -> &TableIndex {
@@ -405,17 +438,12 @@ impl TableInner {
         Ok(result)
     }
 
+    /// checksum mode should be check by caller, this func is pure
     fn verify_checksum(&self) -> Result<()> {
-        use ChecksumVerificationMode::*;
-
         let table_index = self.fetch_index();
         for i in 0..table_index.offsets.len() {
-            // When using OnBlockRead or OnTableAndBlockRead, we do not need to verify block
-            // checksum now. But we still need to check if there is an encoding error in block.
             let block = self.block(i, true)?;
-            if !matches!(self.opts.checksum_mode, OnBlockRead | OnTableAndBlockRead) {
-                block.verify_checksum()?;
-            }
+            block.verify_checksum()?;
         }
         Ok(())
     }
@@ -609,6 +637,28 @@ impl Table {
         self.inner
             .save_after_close
             .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// checksum mode should be check by caller, this func is pure
+    pub fn verify_checksum(&self) -> Result<()> {
+        self.inner.verify_checksum()
+    }
+
+    /// For ingested files to set global version.
+    /// This will change the smallest, biggest key and TableIndex in struct.
+    ///
+    /// ### Panics
+    ///
+    /// panic when table has more than one ref
+    pub(crate) fn set_global_version(&mut self, version: u64) {
+        match Arc::get_mut(&mut self.inner) {
+            Some(inner) => inner.set_global_version(version),
+            None => unreachable!(),
+        }
+    }
+
+    pub(crate) fn global_version(&self) -> Option<u64> {
+        self.inner.global_version()
     }
 }
 

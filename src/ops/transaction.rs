@@ -1,5 +1,7 @@
 use std::{
+    cmp,
     collections::{HashMap, HashSet},
+    ops::Deref,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
@@ -30,7 +32,7 @@ pub struct Transaction {
     pub(crate) count: usize,
 
     /// Contains fingerprints of keys read.
-    pub(crate) reads: Mutex<Vec<u64>>,
+    pub(crate) reads: Mutex<ReadsTrace>,
     /// Contains fingerprints of keys written. This is used for conflict detection.
     pub(crate) conflict_keys: HashSet<u64>,
 
@@ -48,6 +50,13 @@ pub struct Transaction {
     pub(crate) core: Arc<crate::db::Core>,
 }
 
+#[derive(Default)]
+pub(crate) struct ReadsTrace {
+    pub(crate) fingerprints: Vec<u64>,
+    pub(crate) smallest: BytesMut,
+    pub(crate) biggest: BytesMut,
+}
+
 pub struct PendingWritesIterator {
     entries: Vec<Entry>,
     next_idx: usize,
@@ -63,7 +72,7 @@ impl Transaction {
             commit_ts: 0,
             size: 0,
             count: 0,
-            reads: Mutex::new(vec![]),
+            reads: Mutex::new(ReadsTrace::default()),
             conflict_keys: HashSet::new(),
             pending_writes: HashMap::new(),
             duplicate_writes: vec![],
@@ -87,11 +96,7 @@ impl Transaction {
         let mut entries: Vec<_> = self.pending_writes.values().cloned().collect();
         entries.sort_by(|x, y| {
             let cmp = COMPARATOR.compare_key(&x.key, &y.key);
-            if reversed {
-                cmp.reverse()
-            } else {
-                cmp
-            }
+            if reversed { cmp.reverse() } else { cmp }
         });
 
         Some(PendingWritesIterator::new(self.read_ts, reversed, entries))
@@ -254,8 +259,17 @@ impl Transaction {
     }
 
     pub(crate) fn add_read_key(&self, key: &Bytes) {
+        // key here is user key
         if self.update {
-            self.reads.lock().unwrap().push(default_hash(key));
+            let mut reads = self.reads.lock().unwrap();
+            reads.fingerprints.push(default_hash(key));
+            if matches!(reads.smallest.deref().cmp(key), cmp::Ordering::Greater) {
+                reads.smallest.clear();
+                reads.smallest.extend_from_slice(key);
+            } else if matches!(reads.biggest.deref().cmp(key), cmp::Ordering::Less) {
+                reads.biggest.clear();
+                reads.biggest.extend_from_slice(key);
+            }
         }
     }
 

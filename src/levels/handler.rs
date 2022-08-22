@@ -85,7 +85,7 @@ impl LevelHandler {
         self.tables = new_tables;
     }
 
-    pub fn replace_tables(&mut self, to_del: &[Table], to_add: &[Table]) -> Result<()> {
+    pub fn replace_tables(&mut self, to_del: &[Table], to_add: &[Table]) {
         let mut to_del_map = HashSet::new();
 
         for table in to_del {
@@ -111,8 +111,6 @@ impl LevelHandler {
         new_tables.sort_by(|x, y| COMPARATOR.compare_key(x.smallest(), y.smallest()));
 
         self.tables = new_tables;
-
-        Ok(())
     }
 
     /// Returns true if ok and no stalling.

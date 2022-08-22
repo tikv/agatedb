@@ -10,7 +10,7 @@ use crate::{
     iterator_trait::AgateIterator,
     util::{self, KeyComparator, COMPARATOR},
     value::Value,
-    Error,
+    Error, format::append_ts,
 };
 
 /// Errors that may encounter during iterator operation
@@ -67,12 +67,14 @@ struct BlockIterator {
     /// to avoid unnecessary copy of base key when the overlap is
     /// same for multiple keys.
     perv_overlap: u16,
+    /// Version for every key in this block. Used for ingested files.
+    global_version: Option<u64>,
     /// iterator error in last operation
     err: Option<IteratorError>,
 }
 
 impl BlockIterator {
-    pub fn new(block: Arc<Block>) -> Self {
+    pub fn new(block: Arc<Block>, global_version: Option<u64>) -> Self {
         let data = block.data.slice(..block.entries_index_start);
         Self {
             block,
@@ -82,12 +84,13 @@ impl BlockIterator {
             val: Bytes::new(),
             data,
             perv_overlap: 0,
+            global_version,
             idx: 0,
         }
     }
 
     /// Replace block inside iterator and reset the iterator
-    pub fn set_block(&mut self, block: Arc<Block>) {
+    pub fn set_block(&mut self, block: Arc<Block>, global_version: Option<u64>) {
         self.err = None;
         self.idx = 0;
         self.base_key.clear();
@@ -96,6 +99,7 @@ impl BlockIterator {
         self.val.clear();
         self.data = block.data.slice(..block.entries_index_start);
         self.block = block;
+        self.global_version = global_version;
     }
 
     #[inline]
@@ -145,6 +149,10 @@ impl BlockIterator {
 
         let diff_key = &entry_data[..header.diff as usize];
         self.key.extend_from_slice(diff_key);
+        if let Some(version) = self.global_version {
+            self.key.truncate(self.key.len() - 8);
+            append_ts(&mut self.key, version);
+        }
         self.val = entry_data.slice(header.diff as usize..);
     }
 
@@ -260,12 +268,16 @@ impl<T: AsRef<TableInner>> TableRefIterator<T> {
         self.opt & ITERATOR_NOCACHE == 0
     }
 
-    fn get_block_iterator(&mut self, block: Arc<Block>) -> &mut BlockIterator {
+    fn get_block_iterator(
+        &mut self,
+        block: Arc<Block>,
+        global_version: Option<u64>,
+    ) -> &mut BlockIterator {
         if let Some(ref mut iter) = self.block_iterator {
-            iter.set_block(block);
+            iter.set_block(block, global_version);
             return iter;
         }
-        self.block_iterator = Some(BlockIterator::new(block));
+        self.block_iterator = Some(BlockIterator::new(block, global_version));
         self.block_iterator.as_mut().unwrap()
     }
 
@@ -278,7 +290,8 @@ impl<T: AsRef<TableInner>> TableRefIterator<T> {
         self.bpos = 0;
         match self.table.as_ref().block(self.bpos, self.use_cache()) {
             Ok(block) => {
-                let block_iterator = self.get_block_iterator(block);
+                let block_iterator =
+                    self.get_block_iterator(block, self.table.as_ref().global_version());
                 block_iterator.seek_to_first();
                 self.err = block_iterator.err.clone();
             }
@@ -295,7 +308,8 @@ impl<T: AsRef<TableInner>> TableRefIterator<T> {
         self.bpos = num_blocks - 1;
         match self.table.as_ref().block(self.bpos, self.use_cache()) {
             Ok(block) => {
-                let block_iterator = self.get_block_iterator(block);
+                let block_iterator =
+                    self.get_block_iterator(block, self.table.as_ref().global_version());
                 block_iterator.seek_to_last();
                 self.err = block_iterator.err.clone();
             }
@@ -307,7 +321,8 @@ impl<T: AsRef<TableInner>> TableRefIterator<T> {
         self.bpos = block_idx;
         match self.table.as_ref().block(self.bpos, self.use_cache()) {
             Ok(block) => {
-                let block_iterator = self.get_block_iterator(block);
+                let block_iterator =
+                    self.get_block_iterator(block, self.table.as_ref().global_version());
                 block_iterator.seek(key, SeekPos::Origin);
                 self.err = block_iterator.err.clone();
             }
@@ -372,7 +387,8 @@ impl<T: AsRef<TableInner>> TableRefIterator<T> {
         if BlockIterator::is_ready(&self.block_iterator) {
             match self.table.as_ref().block(self.bpos, self.use_cache()) {
                 Ok(block) => {
-                    let block_iterator = self.get_block_iterator(block);
+                    let block_iterator =
+                        self.get_block_iterator(block, self.table.as_ref().global_version());
                     block_iterator.seek_to_first();
                     self.err = block_iterator.err.clone();
                 }
@@ -403,7 +419,8 @@ impl<T: AsRef<TableInner>> TableRefIterator<T> {
         if BlockIterator::is_ready(&self.block_iterator) {
             match self.table.as_ref().block(self.bpos, self.use_cache()) {
                 Ok(block) => {
-                    let block_iterator = self.get_block_iterator(block);
+                    let block_iterator =
+                        self.get_block_iterator(block, self.table.as_ref().global_version());
                     block_iterator.seek_to_last();
                     self.err = block_iterator.err.clone();
                 }

@@ -18,18 +18,18 @@ pub use opt::AgateOptions;
 use skiplist::Skiplist;
 use yatp::task::callback::Handle;
 
-use crate::value::ValuePointer;
 use crate::{
     closer::Closer,
     entry::Entry,
     get_ts,
+    ingest::{IngestExternalFileOptions, IngestExternalFileTask},
     levels::LevelsController,
     manifest::ManifestFile,
     memtable::{MemTable, MemTables},
     ops::oracle::Oracle,
     opt::build_table_options,
     util::{has_any_prefixes, make_comparator},
-    value::{self, Request, Value},
+    value::{self, Request, Value, ValuePointer},
     value_log::ValueLog,
     wal::Wal,
     Error, Result, Table, TableBuilder, TableOptions,
@@ -142,6 +142,14 @@ impl Agate {
 
     pub fn write_requests(&self, request: Vec<Request>) -> Result<()> {
         self.core.write_requests(request)
+    }
+
+    pub fn ingest_external_files(
+        &self,
+        files: &[&str],
+        opts: &IngestExternalFileOptions,
+    ) -> Result<()> {
+        self.core.ingest_external_files(files, opts)
     }
 }
 
@@ -649,6 +657,15 @@ impl Core {
         }
 
         unreachable!()
+    }
+
+    pub fn ingest_external_files(
+        self: &Arc<Self>,
+        files: &[&str],
+        opts: &IngestExternalFileOptions,
+    ) -> Result<()> {
+        let mut task = IngestExternalFileTask::new(self.clone(), files, opts.clone());
+        task.run()
     }
 }
 

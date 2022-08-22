@@ -115,7 +115,12 @@ fn create_and_open(lvctl: &mut LevelsController, td: Vec<KeyValVersion>, level: 
     lvctl
         .inner
         .manifest
-        .add_changes(vec![new_create_change(table.id(), level, 0)])
+        .add_changes(vec![new_create_change(
+            table.id(),
+            level,
+            0,
+            table.global_version().unwrap_or(0),
+        )])
         .unwrap();
     let mut lv = lvctl.inner.levels[level].write().unwrap();
     lv.tables.push(table);
