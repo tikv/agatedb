@@ -15,7 +15,7 @@ pub enum PickLevelStrategy {
     BottomLevel,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct IngestExternalFileOptions {
     pub commit_ts: u64,
     pub move_files: bool,
@@ -52,6 +52,7 @@ pub(crate) struct IngestExternalFileTask {
     version: Option<u64>,
     // whether files to ingest overlap with each other
     overlap: bool,
+    success: bool,
 }
 
 impl IngestExternalFileTask {
@@ -71,6 +72,7 @@ impl IngestExternalFileTask {
                 .collect(),
             version: None,
             overlap: false,
+            success: false,
         }
     }
 
@@ -79,9 +81,8 @@ impl IngestExternalFileTask {
         if let Some(version) = self.version {
             self.core.orc.done_commit(version);
         }
-        if res.is_err() {
-            self.cleanup_files();
-        }
+        self.success = res.is_ok();
+        self.cleanup_files();
         res
     }
 
@@ -229,20 +230,32 @@ impl IngestExternalFileTask {
     }
 
     fn cleanup_files(&self) {
-        // file will be removed when table drop
-        self.files
-            .iter()
-            .filter(|file| file.moved_or_copied && file.table.is_none())
-            .for_each(|file| {
-                let out_path = table::new_filename(file.id, &self.core.opts.dir);
-                if let Err(err) = fs::remove_file(&out_path) {
+        if !self.success {
+            // file will be removed when table drop
+            self.files
+                .iter()
+                .filter(|file| file.moved_or_copied && file.table.is_none())
+                .for_each(|file| {
+                    let out_path = table::new_filename(file.id, &self.core.opts.dir);
+                    if let Err(err) = fs::remove_file(&out_path) {
+                        warn!(
+                            "[ingest tark]: failed to clean file {} when ingest task failed. {}",
+                            out_path.to_string_lossy(),
+                            err
+                        )
+                    }
+                })
+        } else if self.opts.move_files {
+            // success move and ingest, remove old files
+            self.files.iter().for_each(|file| {
+                if let Err(err) = fs::remove_file(&file.input_path) {
                     warn!(
-                        "[ingest tark]: failed to clean file {} when ingest task failed. {}",
-                        out_path.to_string_lossy(),
-                        err
-                    )
+                        "failed to remove input file {} after ingest. {}",
+                        file.input_path, err
+                    );
                 }
             })
+        }
     }
 
     pub(crate) fn overlap(&self) -> bool {
@@ -259,5 +272,186 @@ impl IngestExternalFileTask {
 
     pub(crate) fn opts(&self) -> &IngestExternalFileOptions {
         &self.opts
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, fs, path::Path};
+
+    use bytes::BytesMut;
+
+    use super::IngestExternalFileOptions;
+    use crate::{
+        db::tests::run_agate_test, error::Result, key_with_ts, opt::build_table_options, Agate,
+        AgateOptions, Table, TableBuilder, Value,
+    };
+
+    const BUILD_TABLE_VERSION: u64 = 10;
+
+    fn build_key(i: usize) -> BytesMut {
+        BytesMut::from(format!("key_{:012x}", i).as_bytes())
+    }
+
+    fn build_value(i: usize) -> BytesMut {
+        BytesMut::from(build_key(i).repeat(4).as_slice())
+    }
+
+    fn build_table<P: AsRef<Path>>(
+        path: P,
+        opts: &AgateOptions,
+        f: impl FnOnce(&mut TableBuilder),
+    ) -> Result<()> {
+        let mut builder = TableBuilder::new(build_table_options(opts));
+        f(&mut builder);
+        let table = Table::create(path.as_ref(), builder.finish(), build_table_options(opts))?;
+        table.mark_save();
+        Ok(())
+    }
+
+    fn create_external_files_dir<P: AsRef<Path>>(path: P) {
+        let _ = fs::remove_dir_all(&path);
+        assert!(fs::create_dir_all(&path).is_ok());
+    }
+
+    fn ingest(db: &Agate, files: &[&str], move_files: bool, commit_ts: u64) -> Result<()> {
+        let mut opts = IngestExternalFileOptions::default();
+        opts.move_files = move_files;
+        opts.commit_ts = commit_ts;
+        db.ingest_external_files(files, &opts)
+    }
+
+    #[test]
+    fn basic() {
+        run_agate_test(None, |db| {
+            let external_dir = db.core.opts.dir.join("external_files");
+            create_external_files_dir(&external_dir);
+
+            let file1 = external_dir.join("1.sst");
+
+            let res = build_table(&file1, &db.core.opts, |builder| {
+                for i in 0..100 {
+                    builder.add(
+                        &key_with_ts(build_key(i), BUILD_TABLE_VERSION),
+                        &Value::new(build_value(i).freeze()),
+                        0,
+                    );
+                }
+            });
+            assert!(res.is_ok());
+
+            let file2 = external_dir.join("2.sst");
+
+            let res = build_table(&file2, &db.core.opts, |builder| {
+                for i in 100..200 {
+                    builder.add(
+                        &key_with_ts(build_key(i), BUILD_TABLE_VERSION),
+                        &Value::new(build_value(i).freeze()),
+                        0,
+                    );
+                }
+            });
+            assert!(res.is_ok());
+
+            let res = ingest(&db, &[&file1.to_string_lossy()], false, 0);
+            assert!(res.is_ok());
+            let res = ingest(&db, &[&file2.to_string_lossy()], true, 0);
+            assert!(res.is_ok());
+
+            assert!(Path::exists(&file1));
+            assert!(!Path::exists(&file2));
+
+            db.view(|txn| {
+                for i in 0..200 {
+                    let item = txn.get(&build_key(i).freeze()).unwrap();
+                    assert_eq!(item.value(), build_value(i));
+                }
+                Ok(())
+            })
+            .unwrap();
+        })
+    }
+
+    #[test]
+    fn overlap() {
+        let mut db_opts = AgateOptions::default();
+        db_opts.managed_txns = true;
+
+        run_agate_test(Some(db_opts), |db| {
+            let external_dir = db.core.opts.dir.join("external_files");
+            create_external_files_dir(&external_dir);
+
+            let mut data = HashMap::new();
+
+            let file1 = external_dir.join("1.sst");
+
+            let res = build_table(&file1, &db.core.opts, |builder| {
+                for i in 0..1000 {
+                    let k = build_key(i);
+                    let v = build_value(i);
+                    builder.add(
+                        &key_with_ts(k.clone(), BUILD_TABLE_VERSION),
+                        &Value::new(v.clone().freeze()),
+                        0,
+                    );
+                    data.insert(k, v);
+                }
+            });
+            assert!(res.is_ok());
+            let res = ingest(&db, &[&file1.to_string_lossy()], true, 1);
+            assert!(res.is_ok());
+
+            {
+                let mut txn = db.new_transaction_at(1, true);
+                for i in 500..1500 {
+                    let k = build_key(i);
+                    let v = BytesMut::from(&b"in memtable"[..]);
+                    assert!(txn.set(k.clone().freeze(), v.clone().freeze()).is_ok());
+                    data.insert(k, v);
+                }
+                assert!(txn.commit_at(2).is_ok());
+            }
+
+            let file2 = external_dir.join("2.sst");
+
+            let res = build_table(&file2, &db.core.opts, |builder| {
+                for i in 1000..2000 {
+                    let k = build_key(i);
+                    let v = build_value(i);
+                    builder.add(
+                        &key_with_ts(k.clone(), BUILD_TABLE_VERSION),
+                        &Value::new(v.clone().freeze()),
+                        0,
+                    );
+                    data.insert(k, v);
+                }
+            });
+            assert!(res.is_ok());
+
+            let res = ingest(&db, &[&file2.to_string_lossy()], true, 3);
+            assert!(res.is_ok());
+
+            assert!(!Path::exists(&file1));
+            assert!(!Path::exists(&file2));
+
+            db.view(|txn| {
+                for (k, v) in data.iter() {
+                    let item = txn.get(&k.clone().freeze()).unwrap();
+                    assert_eq!(item.value(), v)
+                }
+                Ok(())
+            })
+            .unwrap();
+
+            {
+                let txn = db.new_transaction_at(2, false);
+                for i in 500..1500 {
+                    let k = build_key(i);
+                    let v = BytesMut::from(&b"in memtable"[..]);
+                    let item = txn.get(&k.freeze()).unwrap();
+                    assert_eq!(item.value(), &v);
+                }
+            }
+        })
     }
 }
