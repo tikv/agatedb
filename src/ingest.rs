@@ -284,7 +284,7 @@ mod tests {
     use super::IngestExternalFileOptions;
     use crate::{
         db::tests::run_agate_test, error::Result, key_with_ts, opt::build_table_options, Agate,
-        AgateOptions, Table, TableBuilder, Value,
+        AgateOptions, Table, TableBuilder, Value, IteratorOptions,
     };
 
     const BUILD_TABLE_VERSION: u64 = 10;
@@ -452,6 +452,107 @@ mod tests {
                     assert_eq!(item.value(), &v);
                 }
             }
+        })
+    }
+
+    #[test]
+    fn conflict_check() {
+        run_agate_test(None, |db| {
+            assert!(db.update(|txn| {
+                for i in 0..500 {
+                    txn.set(build_key(i).freeze(), build_value(i).freeze())?;
+                }
+                Ok(())
+            }).is_ok());
+
+            // use update mode to trigger conflict check
+            let mut txn1 = db.new_transaction(true);
+            let mut txn2 = db.new_transaction(true);
+            let mut txn3 = db.new_transaction(true);
+            let mut txn4 = db.new_transaction(true);
+            assert!(txn1.set(build_key(501).freeze(), build_value(501).freeze()).is_ok());
+            assert!(txn2.set(build_key(502).freeze(), build_value(502).freeze()).is_ok());
+            assert!(txn3.set(build_key(503).freeze(), build_value(503).freeze()).is_ok());
+            assert!(txn4.set(build_key(504).freeze(), build_value(504).freeze()).is_ok());
+
+
+
+            let external_dir = db.core.opts.dir.join("external_files");
+            create_external_files_dir(&external_dir);
+            let file1 = external_dir.join("1.sst");
+            let res = build_table(&file1, &db.core.opts, |builder| {
+                for i in 200..300 {
+                    builder.add(
+                        &key_with_ts(build_key(i), BUILD_TABLE_VERSION),
+                        &Value::new(build_value(i).freeze()),
+                        0,
+                    );
+                }
+            });
+            assert!(res.is_ok());
+            let res = ingest(&db, &[&file1.to_string_lossy()], true, 0);
+            assert!(res.is_ok());
+
+            {
+                // [0, 200], should conflict
+                let mut iter = txn1.new_iterator(&IteratorOptions::default());
+                iter.rewind();
+                loop {
+                    assert!(iter.valid());
+                    let item = iter.item();
+                    if &item.key == &build_key(200) {
+                        break;
+                    }
+                    iter.next();
+                }
+            }
+
+            {
+                // [300, 400], not conflict
+                let mut iter = txn2.new_iterator(&IteratorOptions::default());
+                iter.seek(&build_key(300).freeze());
+                loop {
+                    assert!(iter.valid());
+                    let item = iter.item();
+                    if &item.key == &build_key(400) {
+                        break;
+                    }
+                    iter.next();
+                }
+            }
+
+            {
+                // [250, 350], should conflict
+                let mut iter = txn3.new_iterator(&IteratorOptions::default());
+                iter.seek(&build_key(250).freeze());
+                loop {
+                    assert!(iter.valid());
+                    let item = iter.item();
+                    if &item.key == &build_key(350) {
+                        break;
+                    }
+                    iter.next();
+                }
+            }
+
+            {
+                // [50, 60], not conflict
+                let mut iter = txn4.new_iterator(&IteratorOptions::default());
+                iter.seek(&build_key(50).freeze());
+                loop {
+                    assert!(iter.valid());
+                    let item = iter.item();
+                    if &item.key == &build_key(60) {
+                        break;
+                    }
+                    iter.next();
+                }
+            }
+
+            assert!(txn1.commit().is_err());
+            assert!(txn2.commit().is_ok());
+            assert!(txn3.commit().is_err());
+            assert!(txn4.commit().is_ok());
         })
     }
 }
