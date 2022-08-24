@@ -277,14 +277,20 @@ impl IngestExternalFileTask {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, fs, path::Path};
+    use std::{
+        collections::HashMap,
+        fs,
+        ops::{Deref, DerefMut},
+        path::Path,
+    };
 
     use bytes::BytesMut;
+    use tempdir::TempDir;
 
     use super::IngestExternalFileOptions;
     use crate::{
-        db::tests::run_agate_test, error::Result, key_with_ts, opt::build_table_options, Agate,
-        AgateOptions, IteratorOptions, Table, TableBuilder, Value,
+        key_with_ts, opt::build_table_options, Agate, AgateOptions, IteratorOptions, Table,
+        TableBuilder, Value,
     };
 
     const BUILD_TABLE_VERSION: u64 = 10;
@@ -301,12 +307,12 @@ mod tests {
         path: P,
         opts: &AgateOptions,
         f: impl FnOnce(&mut TableBuilder),
-    ) -> Result<()> {
+    ) {
         let mut builder = TableBuilder::new(build_table_options(opts));
         f(&mut builder);
-        let table = Table::create(path.as_ref(), builder.finish(), build_table_options(opts))?;
+        let table =
+            Table::create(path.as_ref(), builder.finish(), build_table_options(opts)).unwrap();
         table.mark_save();
-        Ok(())
     }
 
     fn create_external_files_dir<P: AsRef<Path>>(path: P) {
@@ -314,240 +320,373 @@ mod tests {
         assert!(fs::create_dir_all(&path).is_ok());
     }
 
-    fn ingest(db: &Agate, files: &[&str], move_files: bool, commit_ts: u64) -> Result<()> {
+    fn ingest(db: &Agate, files: &[&str], move_files: bool, commit_ts: u64) {
         let mut opts = IngestExternalFileOptions::default();
         opts.move_files = move_files;
         opts.commit_ts = commit_ts;
-        db.ingest_external_files(files, &opts)
+        db.ingest_external_files(files, &opts).unwrap();
+    }
+
+    struct DBTestWrapper {
+        db: Agate,
+        opts: AgateOptions,
+        tmp_dir: TempDir,
+    }
+
+    impl DBTestWrapper {
+        fn new(opts: Option<AgateOptions>) -> Self {
+            let tmp_dir = TempDir::new("agatedb").unwrap();
+            let mut opts = opts.unwrap_or(AgateOptions::default());
+            if !opts.in_memory {
+                opts.dir = tmp_dir.path().to_path_buf();
+                opts.value_dir = tmp_dir.path().to_path_buf();
+            }
+            DBTestWrapper {
+                tmp_dir,
+                db: opts.open().unwrap(),
+                opts,
+            }
+        }
+
+        fn reopen(self) -> Self {
+            let Self {
+                db,
+                mut opts,
+                tmp_dir,
+            } = self;
+            drop(db);
+            Self {
+                db: opts.open().unwrap(),
+                opts,
+                tmp_dir,
+            }
+        }
+    }
+
+    impl Deref for DBTestWrapper {
+        type Target = Agate;
+
+        fn deref(&self) -> &Self::Target {
+            &self.db
+        }
+    }
+
+    impl DerefMut for DBTestWrapper {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.db
+        }
     }
 
     #[test]
     fn basic() {
-        run_agate_test(None, |db| {
-            let external_dir = db.core.opts.dir.join("external_files");
-            create_external_files_dir(&external_dir);
+        let db = DBTestWrapper::new(None);
+        let external_dir = db.core.opts.dir.join("external_files");
+        create_external_files_dir(&external_dir);
 
-            let file1 = external_dir.join("1.sst");
+        let file1 = external_dir.join("1.sst");
+        build_table(&file1, &db.core.opts, |builder| {
+            for i in 0..100 {
+                builder.add(
+                    &key_with_ts(build_key(i), BUILD_TABLE_VERSION),
+                    &Value::new(build_value(i).freeze()),
+                    0,
+                );
+            }
+        });
 
-            build_table(&file1, &db.core.opts, |builder| {
-                for i in 0..100 {
-                    builder.add(
-                        &key_with_ts(build_key(i), BUILD_TABLE_VERSION),
-                        &Value::new(build_value(i).freeze()),
-                        0,
-                    );
-                }
-            })
-            .unwrap();
+        let file2 = external_dir.join("2.sst");
+        build_table(&file2, &db.core.opts, |builder| {
+            for i in 100..200 {
+                builder.add(
+                    &key_with_ts(build_key(i), BUILD_TABLE_VERSION),
+                    &Value::new(build_value(i).freeze()),
+                    0,
+                );
+            }
+        });
 
-            let file2 = external_dir.join("2.sst");
+        ingest(&db, &[&file1.to_string_lossy()], false, 0);
+        ingest(&db, &[&file2.to_string_lossy()], true, 0);
 
-            build_table(&file2, &db.core.opts, |builder| {
-                for i in 100..200 {
-                    builder.add(
-                        &key_with_ts(build_key(i), BUILD_TABLE_VERSION),
-                        &Value::new(build_value(i).freeze()),
-                        0,
-                    );
-                }
-            })
-            .unwrap();
+        assert!(Path::exists(&file1));
+        assert!(!Path::exists(&file2));
 
-            ingest(&db, &[&file1.to_string_lossy()], false, 0).unwrap();
-            ingest(&db, &[&file2.to_string_lossy()], true, 0).unwrap();
-
-            assert!(Path::exists(&file1));
-            assert!(!Path::exists(&file2));
-
-            db.view(|txn| {
-                for i in 0..200 {
-                    let item = txn.get(&build_key(i).freeze()).unwrap();
-                    assert_eq!(item.value(), build_value(i));
-                }
-                Ok(())
-            })
-            .unwrap();
+        db.view(|txn| {
+            for i in 0..200 {
+                let item = txn.get(&build_key(i).freeze()).unwrap();
+                assert_eq!(item.value(), build_value(i));
+            }
+            Ok(())
         })
+        .unwrap();
     }
 
     #[test]
     fn overlap() {
         let mut db_opts = AgateOptions::default();
         db_opts.managed_txns = true;
+        let db = DBTestWrapper::new(Some(db_opts));
+        let external_dir = db.core.opts.dir.join("external_files");
+        create_external_files_dir(&external_dir);
 
-        run_agate_test(Some(db_opts), |db| {
-            let external_dir = db.core.opts.dir.join("external_files");
-            create_external_files_dir(&external_dir);
+        let mut data = HashMap::new();
 
-            let mut data = HashMap::new();
-
-            let file1 = external_dir.join("1.sst");
-            build_table(&file1, &db.core.opts, |builder| {
-                for i in 0..1000 {
-                    let k = build_key(i);
-                    let v = build_value(i);
-                    builder.add(
-                        &key_with_ts(k.clone(), BUILD_TABLE_VERSION),
-                        &Value::new(v.clone().freeze()),
-                        0,
-                    );
-                    data.insert(k, v);
-                }
-            })
-            .unwrap();
-            ingest(&db, &[&file1.to_string_lossy()], true, 1).unwrap();
-
-            {
-                let mut txn = db.new_transaction_at(1, true);
-                for i in 500..1500 {
-                    let k = build_key(i);
-                    let v = BytesMut::from(&b"in memtable"[..]);
-                    txn.set(k.clone().freeze(), v.clone().freeze()).unwrap();
-                    data.insert(k, v);
-                }
-                txn.commit_at(2).unwrap();
+        let file1 = external_dir.join("1.sst");
+        build_table(&file1, &db.core.opts, |builder| {
+            for i in 0..1000 {
+                let k = build_key(i);
+                let v = build_value(i);
+                builder.add(
+                    &key_with_ts(k.clone(), BUILD_TABLE_VERSION),
+                    &Value::new(v.clone().freeze()),
+                    0,
+                );
+                data.insert(k, v);
             }
+        });
+        ingest(&db, &[&file1.to_string_lossy()], true, 1);
 
-            let file2 = external_dir.join("2.sst");
-            build_table(&file2, &db.core.opts, |builder| {
-                for i in 1000..2000 {
-                    let k = build_key(i);
-                    let v = build_value(i);
-                    builder.add(
-                        &key_with_ts(k.clone(), BUILD_TABLE_VERSION),
-                        &Value::new(v.clone().freeze()),
-                        0,
-                    );
-                    data.insert(k, v);
-                }
-            })
-            .unwrap();
-            ingest(&db, &[&file2.to_string_lossy()], true, 3).unwrap();
-
-            assert!(!Path::exists(&file1));
-            assert!(!Path::exists(&file2));
-
-            db.view(|txn| {
-                for (k, v) in data.iter() {
-                    let item = txn.get(&k.clone().freeze()).unwrap();
-                    assert_eq!(item.value(), v)
-                }
-                Ok(())
-            })
-            .unwrap();
-
-            {
-                let txn = db.new_transaction_at(2, false);
-                for i in 500..1500 {
-                    let k = build_key(i);
-                    let v = BytesMut::from(&b"in memtable"[..]);
-                    let item = txn.get(&k.freeze()).unwrap();
-                    assert_eq!(item.value(), &v);
-                }
+        {
+            let mut txn = db.new_transaction_at(1, true);
+            for i in 500..1500 {
+                let k = build_key(i);
+                let v = BytesMut::from(&b"in memtable"[..]);
+                txn.set(k.clone().freeze(), v.clone().freeze()).unwrap();
+                data.insert(k, v);
             }
+            txn.commit_at(2).unwrap();
+        }
+
+        let file2 = external_dir.join("2.sst");
+        build_table(&file2, &db.core.opts, |builder| {
+            for i in 1000..2000 {
+                let k = build_key(i);
+                let v = build_value(i);
+                builder.add(
+                    &key_with_ts(k.clone(), BUILD_TABLE_VERSION),
+                    &Value::new(v.clone().freeze()),
+                    0,
+                );
+                data.insert(k, v);
+            }
+        });
+        ingest(&db, &[&file2.to_string_lossy()], true, 3);
+
+        assert!(!Path::exists(&file1));
+        assert!(!Path::exists(&file2));
+
+        db.view(|txn| {
+            for (k, v) in data.iter() {
+                let item = txn.get(&k.clone().freeze()).unwrap();
+                assert_eq!(item.value(), v)
+            }
+            Ok(())
         })
+        .unwrap();
+
+        {
+            let txn = db.new_transaction_at(2, false);
+            for i in 500..1500 {
+                let k = build_key(i);
+                let v = BytesMut::from(&b"in memtable"[..]);
+                let item = txn.get(&k.freeze()).unwrap();
+                assert_eq!(item.value(), &v);
+            }
+        }
     }
 
     #[test]
     fn conflict_check() {
-        run_agate_test(None, |db| {
-            db.update(|txn| {
-                for i in 0..500 {
-                    txn.set(build_key(i).freeze(), build_value(i).freeze())?;
-                }
-                Ok(())
-            })
-            .unwrap();
-
-            // use update mode to trigger conflict check
-            let mut txn1 = db.new_transaction(true);
-            let mut txn2 = db.new_transaction(true);
-            let mut txn3 = db.new_transaction(true);
-            let mut txn4 = db.new_transaction(true);
-            txn1.set(build_key(501).freeze(), build_value(501).freeze())
-                .unwrap();
-            txn2.set(build_key(502).freeze(), build_value(502).freeze())
-                .unwrap();
-            txn3.set(build_key(503).freeze(), build_value(503).freeze())
-                .unwrap();
-            txn4.set(build_key(504).freeze(), build_value(504).freeze())
-                .unwrap();
-
-            let external_dir = db.core.opts.dir.join("external_files");
-            create_external_files_dir(&external_dir);
-            let file1 = external_dir.join("1.sst");
-            build_table(&file1, &db.core.opts, |builder| {
-                for i in 200..300 {
-                    builder.add(
-                        &key_with_ts(build_key(i), BUILD_TABLE_VERSION),
-                        &Value::new(build_value(i).freeze()),
-                        0,
-                    );
-                }
-            })
-            .unwrap();
-            ingest(&db, &[&file1.to_string_lossy()], true, 0).unwrap();
-
-            {
-                // [0, 200], should conflict
-                let mut iter = txn1.new_iterator(&IteratorOptions::default());
-                iter.rewind();
-                loop {
-                    assert!(iter.valid());
-                    let item = iter.item();
-                    if &item.key == &build_key(200) {
-                        break;
-                    }
-                    iter.next();
-                }
+        let db = DBTestWrapper::new(None);
+        db.update(|txn| {
+            for i in 0..500 {
+                txn.set(build_key(i).freeze(), build_value(i).freeze())?;
             }
-
-            {
-                // [300, 400], not conflict
-                let mut iter = txn2.new_iterator(&IteratorOptions::default());
-                iter.seek(&build_key(300).freeze());
-                loop {
-                    assert!(iter.valid());
-                    let item = iter.item();
-                    if &item.key == &build_key(400) {
-                        break;
-                    }
-                    iter.next();
-                }
-            }
-
-            {
-                // [250, 350], should conflict
-                let mut iter = txn3.new_iterator(&IteratorOptions::default());
-                iter.seek(&build_key(250).freeze());
-                loop {
-                    assert!(iter.valid());
-                    let item = iter.item();
-                    if &item.key == &build_key(350) {
-                        break;
-                    }
-                    iter.next();
-                }
-            }
-
-            {
-                // [50, 60], not conflict
-                let mut iter = txn4.new_iterator(&IteratorOptions::default());
-                iter.seek(&build_key(50).freeze());
-                loop {
-                    assert!(iter.valid());
-                    let item = iter.item();
-                    if &item.key == &build_key(60) {
-                        break;
-                    }
-                    iter.next();
-                }
-            }
-
-            txn1.commit().unwrap_err();
-            txn2.commit().unwrap();
-            txn3.commit().unwrap_err();
-            txn4.commit().unwrap();
+            Ok(())
         })
+        .unwrap();
+
+        // use update mode to trigger conflict check
+        let mut txn1 = db.new_transaction(true);
+        let mut txn2 = db.new_transaction(true);
+        let mut txn3 = db.new_transaction(true);
+        let mut txn4 = db.new_transaction(true);
+        txn1.set(build_key(501).freeze(), build_value(501).freeze())
+            .unwrap();
+        txn2.set(build_key(502).freeze(), build_value(502).freeze())
+            .unwrap();
+        txn3.set(build_key(503).freeze(), build_value(503).freeze())
+            .unwrap();
+        txn4.set(build_key(504).freeze(), build_value(504).freeze())
+            .unwrap();
+
+        let external_dir = db.core.opts.dir.join("external_files");
+        create_external_files_dir(&external_dir);
+        let file1 = external_dir.join("1.sst");
+        build_table(&file1, &db.core.opts, |builder| {
+            for i in 200..300 {
+                builder.add(
+                    &key_with_ts(build_key(i), BUILD_TABLE_VERSION),
+                    &Value::new(build_value(i).freeze()),
+                    0,
+                );
+            }
+        });
+        ingest(&db, &[&file1.to_string_lossy()], true, 0);
+
+        {
+            // [0, 200], should conflict
+            let mut iter = txn1.new_iterator(&IteratorOptions::default());
+            iter.rewind();
+            loop {
+                assert!(iter.valid());
+                let item = iter.item();
+                if &item.key == &build_key(200) {
+                    break;
+                }
+                iter.next();
+            }
+        }
+
+        {
+            // [300, 400], not conflict
+            let mut iter = txn2.new_iterator(&IteratorOptions::default());
+            iter.seek(&build_key(300).freeze());
+            loop {
+                assert!(iter.valid());
+                let item = iter.item();
+                if &item.key == &build_key(400) {
+                    break;
+                }
+                iter.next();
+            }
+        }
+
+        {
+            // [250, 350], should conflict
+            let mut iter = txn3.new_iterator(&IteratorOptions::default());
+            iter.seek(&build_key(250).freeze());
+            loop {
+                assert!(iter.valid());
+                let item = iter.item();
+                if &item.key == &build_key(350) {
+                    break;
+                }
+                iter.next();
+            }
+        }
+
+        {
+            // [50, 60], not conflict
+            let mut iter = txn4.new_iterator(&IteratorOptions::default());
+            iter.seek(&build_key(50).freeze());
+            loop {
+                assert!(iter.valid());
+                let item = iter.item();
+                if &item.key == &build_key(60) {
+                    break;
+                }
+                iter.next();
+            }
+        }
+
+        txn1.commit().unwrap_err();
+        txn2.commit().unwrap();
+        txn3.commit().unwrap_err();
+        txn4.commit().unwrap();
+    }
+
+    #[test]
+    fn files_overlap() {
+        // if ingested files overlap with each other, all should be put in level 0
+        let db = DBTestWrapper::new(None);
+        let external_dir = db.core.opts.dir.join("external_files");
+        create_external_files_dir(&external_dir);
+        let file1 = external_dir.join("1.sst");
+        build_table(&file1, &db.core.opts, |builder| {
+            // 0, 2, ... , 998
+            for i in (0..1000).step_by(2) {
+                builder.add(
+                    &key_with_ts(build_key(i), BUILD_TABLE_VERSION),
+                    &Value::new(build_value(i).freeze()),
+                    0,
+                );
+            }
+        });
+        let file2 = external_dir.join("2.sst");
+        build_table(&file2, &db.core.opts, |builder| {
+            // 501, 503, ..., 1499
+            for i in (501..1500).step_by(2) {
+                builder.add(
+                    &key_with_ts(build_key(i), BUILD_TABLE_VERSION),
+                    &Value::new(build_value(i).freeze()),
+                    0,
+                );
+            }
+        });
+        ingest(
+            &db,
+            &[&file1.to_string_lossy(), &file2.to_string_lossy()],
+            true,
+            0,
+        );
+        assert_eq!(
+            2,
+            db.core.lvctl.inner.levels[0].read().unwrap().num_tables()
+        );
+    }
+
+    #[ignore = "wait for `next_txn_ts` update feature"]
+    #[test]
+    fn reopen() {
+        let db = DBTestWrapper::new(None);
+        let external_dir = db.core.opts.dir.join("external_files");
+        create_external_files_dir(&external_dir);
+        let file1 = external_dir.join("1.sst");
+        build_table(&file1, &db.core.opts, |builder| {
+            for i in 0..500 {
+                builder.add(
+                    &key_with_ts(build_key(i), BUILD_TABLE_VERSION),
+                    &Value::new(build_value(i).freeze()),
+                    0,
+                );
+            }
+        });
+        let file2 = external_dir.join("2.sst");
+        build_table(&file2, &db.core.opts, |builder| {
+            for i in 500..1000 {
+                builder.add(
+                    &key_with_ts(build_key(i), BUILD_TABLE_VERSION),
+                    &Value::new(build_value(i).freeze()),
+                    0,
+                );
+            }
+        });
+        ingest(
+            &db,
+            &[&file1.to_string_lossy(), &file2.to_string_lossy()],
+            true,
+            0,
+        );
+
+        db.view(|txn| {
+            for i in 0..1000 {
+                let item = txn.get(&build_key(i).freeze()).unwrap();
+                assert_eq!(item.value(), build_value(i));
+            }
+            Ok(())
+        })
+        .unwrap();
+
+        let db = db.reopen();
+
+        db.view(|txn| {
+            for i in 0..1000 {
+                let item = txn.get(&build_key(i).freeze()).unwrap();
+                assert_eq!(item.value(), build_value(i));
+            }
+            Ok(())
+        })
+        .unwrap();
     }
 }
