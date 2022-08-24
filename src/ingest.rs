@@ -284,7 +284,7 @@ mod tests {
     use super::IngestExternalFileOptions;
     use crate::{
         db::tests::run_agate_test, error::Result, key_with_ts, opt::build_table_options, Agate,
-        AgateOptions, Table, TableBuilder, Value, IteratorOptions,
+        AgateOptions, IteratorOptions, Table, TableBuilder, Value,
     };
 
     const BUILD_TABLE_VERSION: u64 = 10;
@@ -329,7 +329,7 @@ mod tests {
 
             let file1 = external_dir.join("1.sst");
 
-            let res = build_table(&file1, &db.core.opts, |builder| {
+            build_table(&file1, &db.core.opts, |builder| {
                 for i in 0..100 {
                     builder.add(
                         &key_with_ts(build_key(i), BUILD_TABLE_VERSION),
@@ -337,12 +337,12 @@ mod tests {
                         0,
                     );
                 }
-            });
-            assert!(res.is_ok());
+            })
+            .unwrap();
 
             let file2 = external_dir.join("2.sst");
 
-            let res = build_table(&file2, &db.core.opts, |builder| {
+            build_table(&file2, &db.core.opts, |builder| {
                 for i in 100..200 {
                     builder.add(
                         &key_with_ts(build_key(i), BUILD_TABLE_VERSION),
@@ -350,13 +350,11 @@ mod tests {
                         0,
                     );
                 }
-            });
-            assert!(res.is_ok());
+            })
+            .unwrap();
 
-            let res = ingest(&db, &[&file1.to_string_lossy()], false, 0);
-            assert!(res.is_ok());
-            let res = ingest(&db, &[&file2.to_string_lossy()], true, 0);
-            assert!(res.is_ok());
+            ingest(&db, &[&file1.to_string_lossy()], false, 0).unwrap();
+            ingest(&db, &[&file2.to_string_lossy()], true, 0).unwrap();
 
             assert!(Path::exists(&file1));
             assert!(!Path::exists(&file2));
@@ -384,8 +382,7 @@ mod tests {
             let mut data = HashMap::new();
 
             let file1 = external_dir.join("1.sst");
-
-            let res = build_table(&file1, &db.core.opts, |builder| {
+            build_table(&file1, &db.core.opts, |builder| {
                 for i in 0..1000 {
                     let k = build_key(i);
                     let v = build_value(i);
@@ -396,25 +393,23 @@ mod tests {
                     );
                     data.insert(k, v);
                 }
-            });
-            assert!(res.is_ok());
-            let res = ingest(&db, &[&file1.to_string_lossy()], true, 1);
-            assert!(res.is_ok());
+            })
+            .unwrap();
+            ingest(&db, &[&file1.to_string_lossy()], true, 1).unwrap();
 
             {
                 let mut txn = db.new_transaction_at(1, true);
                 for i in 500..1500 {
                     let k = build_key(i);
                     let v = BytesMut::from(&b"in memtable"[..]);
-                    assert!(txn.set(k.clone().freeze(), v.clone().freeze()).is_ok());
+                    txn.set(k.clone().freeze(), v.clone().freeze()).unwrap();
                     data.insert(k, v);
                 }
-                assert!(txn.commit_at(2).is_ok());
+                txn.commit_at(2).unwrap();
             }
 
             let file2 = external_dir.join("2.sst");
-
-            let res = build_table(&file2, &db.core.opts, |builder| {
+            build_table(&file2, &db.core.opts, |builder| {
                 for i in 1000..2000 {
                     let k = build_key(i);
                     let v = build_value(i);
@@ -425,11 +420,9 @@ mod tests {
                     );
                     data.insert(k, v);
                 }
-            });
-            assert!(res.is_ok());
-
-            let res = ingest(&db, &[&file2.to_string_lossy()], true, 3);
-            assert!(res.is_ok());
+            })
+            .unwrap();
+            ingest(&db, &[&file2.to_string_lossy()], true, 3).unwrap();
 
             assert!(!Path::exists(&file1));
             assert!(!Path::exists(&file2));
@@ -458,29 +451,32 @@ mod tests {
     #[test]
     fn conflict_check() {
         run_agate_test(None, |db| {
-            assert!(db.update(|txn| {
+            db.update(|txn| {
                 for i in 0..500 {
                     txn.set(build_key(i).freeze(), build_value(i).freeze())?;
                 }
                 Ok(())
-            }).is_ok());
+            })
+            .unwrap();
 
             // use update mode to trigger conflict check
             let mut txn1 = db.new_transaction(true);
             let mut txn2 = db.new_transaction(true);
             let mut txn3 = db.new_transaction(true);
             let mut txn4 = db.new_transaction(true);
-            assert!(txn1.set(build_key(501).freeze(), build_value(501).freeze()).is_ok());
-            assert!(txn2.set(build_key(502).freeze(), build_value(502).freeze()).is_ok());
-            assert!(txn3.set(build_key(503).freeze(), build_value(503).freeze()).is_ok());
-            assert!(txn4.set(build_key(504).freeze(), build_value(504).freeze()).is_ok());
-
-
+            txn1.set(build_key(501).freeze(), build_value(501).freeze())
+                .unwrap();
+            txn2.set(build_key(502).freeze(), build_value(502).freeze())
+                .unwrap();
+            txn3.set(build_key(503).freeze(), build_value(503).freeze())
+                .unwrap();
+            txn4.set(build_key(504).freeze(), build_value(504).freeze())
+                .unwrap();
 
             let external_dir = db.core.opts.dir.join("external_files");
             create_external_files_dir(&external_dir);
             let file1 = external_dir.join("1.sst");
-            let res = build_table(&file1, &db.core.opts, |builder| {
+            build_table(&file1, &db.core.opts, |builder| {
                 for i in 200..300 {
                     builder.add(
                         &key_with_ts(build_key(i), BUILD_TABLE_VERSION),
@@ -488,10 +484,9 @@ mod tests {
                         0,
                     );
                 }
-            });
-            assert!(res.is_ok());
-            let res = ingest(&db, &[&file1.to_string_lossy()], true, 0);
-            assert!(res.is_ok());
+            })
+            .unwrap();
+            ingest(&db, &[&file1.to_string_lossy()], true, 0).unwrap();
 
             {
                 // [0, 200], should conflict
@@ -549,10 +544,10 @@ mod tests {
                 }
             }
 
-            assert!(txn1.commit().is_err());
-            assert!(txn2.commit().is_ok());
-            assert!(txn3.commit().is_err());
-            assert!(txn4.commit().is_ok());
+            txn1.commit().unwrap_err();
+            txn2.commit().unwrap();
+            txn3.commit().unwrap_err();
+            txn4.commit().unwrap();
         })
     }
 }
