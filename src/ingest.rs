@@ -2,10 +2,10 @@ use std::{cmp::Ordering, fs, io, ops::RangeInclusive, path::Path, sync::Arc};
 
 use bytes::Bytes;
 use log::warn;
-use skiplist::KeyComparator;
+use skiplist::{FixedLengthSuffixComparator, KeyComparator};
 
 use crate::{
-    db::Core, error::Result, format::user_key, opt::build_table_options, table, util::COMPARATOR,
+    db::Core, error::Result, format::user_key, opt::build_table_options, table,
     ChecksumVerificationMode, Table,
 };
 
@@ -49,7 +49,7 @@ pub(crate) struct IngestExternalFileTask {
     opts: IngestExternalFileOptions,
     core: Arc<Core>,
     files: Vec<FileContext>,
-    version: Option<u64>,
+    versions: Vec<u64>,
     // whether files to ingest overlap with each other
     overlap: bool,
     success: bool,
@@ -70,7 +70,7 @@ impl IngestExternalFileTask {
                     picked_level: 0,
                 })
                 .collect(),
-            version: None,
+            versions: vec![],
             overlap: false,
             success: false,
         }
@@ -78,9 +78,9 @@ impl IngestExternalFileTask {
 
     pub(crate) fn run(&mut self) -> Result<()> {
         let res = self.run_inner();
-        if let Some(version) = self.version {
-            self.core.orc.done_commit(version);
-        }
+        self.versions.iter().for_each(|version| {
+            self.core.orc.done_commit(*version);
+        });
         self.success = res.is_ok();
         self.cleanup_files();
         res
@@ -182,37 +182,21 @@ impl IngestExternalFileTask {
     }
 
     fn assign_version(&mut self) {
-        // collect user key range for oracle to check conflict
-        let ranges = self
-            .files
-            .iter()
-            .map(|file| {
-                RangeInclusive::new(
-                    Bytes::copy_from_slice(user_key(file.table.as_ref().unwrap().smallest())),
-                    Bytes::copy_from_slice(user_key(file.table.as_ref().unwrap().biggest())),
-                )
-            })
-            .collect::<Vec<_>>();
-        let version = self.core.orc.new_ingest_commit_ts(ranges, &self.opts);
-        self.version = Some(version);
-        self.files.iter_mut().for_each(|file| {
-            file.table.as_mut().unwrap().set_global_version(version);
-        });
-
-        // all tables assigned version and open, sort by range
+        let user_key_cmp = FixedLengthSuffixComparator::new(0);
+        // all tables opened, sort by range
         self.files.sort_unstable_by(|x, y| {
-            COMPARATOR.compare_key(
-                x.table.as_ref().unwrap().smallest(),
-                y.table.as_ref().unwrap().smallest(),
+            user_key_cmp.compare_key(
+                user_key(x.table.as_ref().unwrap().smallest()),
+                user_key(y.table.as_ref().unwrap().smallest()),
             )
         });
         // check overlap
         if self.files.len() > 1 {
             for i in 0..(self.files.len() - 1) {
                 if matches!(
-                    COMPARATOR.compare_key(
-                        self.files[i].table.as_ref().unwrap().biggest(),
-                        self.files[i + 1].table.as_ref().unwrap().smallest()
+                    user_key_cmp.compare_key(
+                        user_key(self.files[i].table.as_ref().unwrap().biggest()),
+                        user_key(self.files[i + 1].table.as_ref().unwrap().smallest()),
                     ),
                     Ordering::Equal | Ordering::Greater
                 ) {
@@ -220,6 +204,35 @@ impl IngestExternalFileTask {
                     break;
                 }
             }
+        }
+        if self.overlap {
+            // files overlap with each other, assign commit_ts for each file
+            for file in self.files.iter_mut() {
+                let range = RangeInclusive::new(
+                    Bytes::copy_from_slice(user_key(file.table.as_ref().unwrap().smallest())),
+                    Bytes::copy_from_slice(user_key(file.table.as_ref().unwrap().biggest())),
+                );
+                let version = self.core.orc.new_ingest_commit_ts(vec![range], &self.opts);
+                self.versions.push(version);
+                file.table.as_mut().unwrap().set_global_version(version);
+            }
+        } else {
+            // collect user key range for oracle to check conflict
+            let ranges = self
+                .files
+                .iter()
+                .map(|file| {
+                    RangeInclusive::new(
+                        Bytes::copy_from_slice(user_key(file.table.as_ref().unwrap().smallest())),
+                        Bytes::copy_from_slice(user_key(file.table.as_ref().unwrap().biggest())),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let version = self.core.orc.new_ingest_commit_ts(ranges, &self.opts);
+            self.versions.push(version);
+            self.files.iter_mut().for_each(|file| {
+                file.table.as_mut().unwrap().set_global_version(version);
+            });
         }
     }
 
@@ -634,6 +647,14 @@ mod tests {
             2,
             db.core.lvctl.inner.levels[0].read().unwrap().num_tables()
         );
+        let versions = db.core.lvctl.inner.levels[0]
+            .read()
+            .unwrap()
+            .tables
+            .iter()
+            .map(|t| t.global_version().unwrap())
+            .collect::<Vec<_>>();
+        assert_ne!(versions[0], versions[1]);
     }
 
     #[ignore = "wait for `next_txn_ts` update feature"]
