@@ -33,3 +33,7 @@ We are using Rust because it can bring memory safety out of box, which is import
 during rapid development. TiKV is also written in Rust, so it will be easier
 to integrate with each other like supporting async/await, sharing global
 thread pools, etc.
+
+## Continuous micro benchmark with RocksDB
+
+We can refer to [this page](https://tikv.github.io/agatedb/dev/bench/) for the benchmark result with RocksDB.
