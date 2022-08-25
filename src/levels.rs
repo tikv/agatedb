@@ -1048,6 +1048,23 @@ impl LevelsController {
             level.read().unwrap().append_iterators(iters, opts);
         }
     }
+
+    pub fn max_version(&self) -> u64 {
+        let mut max = 0;
+        for level in &self.inner.levels {
+            max = max.max(
+                level
+                    .read()
+                    .unwrap()
+                    .tables
+                    .iter()
+                    .map(|tbl| tbl.max_version())
+                    .max()
+                    .unwrap_or(0),
+            );
+        }
+        max
+    }
 }
 
 fn build_change_set(compact_def: &CompactDef, new_tables: &[Table]) -> ManifestChangeSet {

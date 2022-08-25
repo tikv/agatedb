@@ -140,6 +140,10 @@ impl MemTable {
     pub fn id(&self) -> usize {
         self.id
     }
+
+    pub fn max_version(&self) -> u64 {
+        self.inner.read().unwrap().max_version
+    }
 }
 
 impl Drop for MemTable {
@@ -203,6 +207,18 @@ impl MemTables {
 
     pub fn pop_imm(&mut self) {
         self.immutable.pop_front().unwrap();
+    }
+
+    pub fn max_version(&self) -> u64 {
+        let mut v = self.mutable.max_version();
+        v = v.max(
+            self.immutable
+                .iter()
+                .map(|imm| imm.max_version())
+                .max()
+                .unwrap_or(0),
+        );
+        v
     }
 }
 

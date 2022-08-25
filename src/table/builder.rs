@@ -2,7 +2,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use prost::Message;
 use proto::meta::{checksum::Algorithm as ChecksumAlg, BlockOffset, Checksum, TableIndex};
 
-use crate::{bloom::Bloom, checksum, format::user_key, opt::Options, util, value::Value};
+use crate::{bloom::Bloom, checksum, format::user_key, get_ts, opt::Options, util, value::Value};
 
 /// Entry header stores the difference between current key and block base key.
 /// `overlap` is the common prefix of key and base key, and diff is the length
@@ -37,7 +37,6 @@ pub struct Builder {
     table_index: TableIndex,
     key_hashes: Vec<u32>,
     options: Options,
-    max_version: u64,
 }
 
 impl Builder {
@@ -52,7 +51,6 @@ impl Builder {
             base_offset: 0,
             entry_offsets: vec![],
             options,
-            max_version: 0,
         }
     }
 
@@ -91,6 +89,7 @@ impl Builder {
 
         let sst_size = v.encoded_size() + diff_key.len() + 4;
         self.table_index.estimated_size += sst_size as u32 + vlog_len;
+        self.table_index.max_version = self.table_index.max_version.max(get_ts(key));
     }
 
     fn finish_block(&mut self) {
@@ -254,8 +253,7 @@ mod tests {
             assert_eq!(block_first_key, &idx.offsets[i].key);
         }
 
-        // TODO: support max_version
-        // assert_eq!(TEST_KEYS_COUNT, table.max_version());
+        assert_eq!(TEST_KEYS_COUNT as u64, table.max_version());
     }
 
     fn test_with_bloom_filter(with_blooms: bool) {

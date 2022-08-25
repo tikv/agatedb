@@ -152,6 +152,14 @@ impl Oracle {
         commit_info.next_txn_ts
     }
 
+    /// for init Oracle only
+    pub(crate) fn init_next_ts(&self, max_ts: u64) {
+        self.commit_info.lock().unwrap().next_txn_ts = max_ts;
+        self.txn_mark.done(max_ts);
+        self.read_mark.done(max_ts);
+        self.increment_next_ts();
+    }
+
     pub(crate) fn increment_next_ts(&self) {
         let mut commit_info = self.commit_info.lock().unwrap();
         commit_info.next_txn_ts += 1
