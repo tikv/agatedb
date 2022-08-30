@@ -236,10 +236,8 @@ impl Drop for MemTables {
 
 #[cfg(test)]
 mod tests {
-    use bytes::BytesMut;
-
     use super::*;
-    use crate::{format::append_ts, util::make_comparator};
+    use crate::{key_with_ts, util::make_comparator};
 
     fn get_memtable(data: Vec<(Bytes, Value)>) -> Arc<MemTable> {
         let skl = Skiplist::with_capacity(make_comparator(), 4 * 1024 * 1024, true);
@@ -256,9 +254,7 @@ mod tests {
     fn test_memtable_put() {
         let mut data = vec![];
         for i in 0..1000 {
-            let mut v = BytesMut::from(i.to_string().as_bytes());
-            append_ts(&mut v, i);
-            let v = v.freeze();
+            let v = key_with_ts(i.to_string().as_str(), i);
             data.push((v.clone(), Value::new(v)));
         }
         let (d1, dx) = data.split_at(250);
@@ -283,9 +279,7 @@ mod tests {
         let view = mem_tables.view();
         for k in 0..4 {
             for i in k * 250..(k + 1) * 250 {
-                let mut v = BytesMut::from(i.to_string().as_str());
-                append_ts(&mut v, i);
-                let v = v.freeze();
+                let v = key_with_ts(i.to_string().as_str(), i);
 
                 // get value from skiplist
                 let value = view.tables()[k as usize].get(&v).unwrap();
@@ -300,32 +294,24 @@ mod tests {
         let skl = Skiplist::with_capacity(make_comparator(), 4 * 1024 * 1024, true);
         let mem = MemTable::new(0, skl, None, AgateOptions::default());
         for i in 200..300 {
-            let mut v = BytesMut::from(i.to_string().as_bytes());
-            append_ts(&mut v, i);
-            let v = v.freeze();
+            let v = key_with_ts(i.to_string().as_str(), i);
             mem.put(v.clone(), Value::new(v)).unwrap();
         }
         assert_eq!(mem.max_version(), 299);
         for i in 300..310 {
-            let mut v = BytesMut::from(i.to_string().as_bytes());
-            append_ts(&mut v, i);
-            let v = v.freeze();
+            let v = key_with_ts(i.to_string().as_str(), i);
             mem.put(v.clone(), Value::new(v)).unwrap();
         }
         assert_eq!(mem.max_version(), 309);
         for i in 295..305 {
-            let mut v = BytesMut::from((i * 100).to_string().as_bytes());
-            append_ts(&mut v, i);
-            let v = v.freeze();
+            let v = key_with_ts((i * 100).to_string().as_str(), i);
             mem.put(v.clone(), Value::new(v)).unwrap();
         }
         assert_eq!(mem.max_version(), 309);
 
         let mut data = vec![];
         for i in 100..200 {
-            let mut v = BytesMut::from(i.to_string().as_bytes());
-            append_ts(&mut v, i);
-            let v = v.freeze();
+            let v = key_with_ts(i.to_string().as_str(), i);
             data.push((v.clone(), Value::new(v)));
         }
         let (d1, d2) = data.split_at(50);
