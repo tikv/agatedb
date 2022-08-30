@@ -275,6 +275,11 @@ mod tests {
                     .collect::<Vec<Arc<MemTable>>>(),
             ),
         };
+        assert_eq!(mem_tables.mutable.max_version(), 249);
+        assert_eq!(mem_tables.immutable[0].max_version(), 499);
+        assert_eq!(mem_tables.immutable[1].max_version(), 749);
+        assert_eq!(mem_tables.immutable[2].max_version(), 999);
+        assert_eq!(mem_tables.max_version(), 999);
         let view = mem_tables.view();
         for k in 0..4 {
             for i in k * 250..(k + 1) * 250 {
@@ -288,5 +293,55 @@ mod tests {
                 assert_eq!(value, &expect);
             }
         }
+    }
+
+    #[test]
+    fn max_version() {
+        let skl = Skiplist::with_capacity(make_comparator(), 4 * 1024 * 1024, true);
+        let mem = MemTable::new(0, skl, None, AgateOptions::default());
+        for i in 200..300 {
+            let mut v = BytesMut::from(i.to_string().as_bytes());
+            append_ts(&mut v, i);
+            let v = v.freeze();
+            mem.put(v.clone(), Value::new(v)).unwrap();
+        }
+        assert_eq!(mem.max_version(), 299);
+        for i in 300..310 {
+            let mut v = BytesMut::from(i.to_string().as_bytes());
+            append_ts(&mut v, i);
+            let v = v.freeze();
+            mem.put(v.clone(), Value::new(v)).unwrap();
+        }
+        assert_eq!(mem.max_version(), 309);
+        for i in 295..305 {
+            let mut v = BytesMut::from((i * 100).to_string().as_bytes());
+            append_ts(&mut v, i);
+            let v = v.freeze();
+            mem.put(v.clone(), Value::new(v)).unwrap();
+        }
+        assert_eq!(mem.max_version(), 309);
+
+        let mut data = vec![];
+        for i in 100..200 {
+            let mut v = BytesMut::from(i.to_string().as_bytes());
+            append_ts(&mut v, i);
+            let v = v.freeze();
+            data.push((v.clone(), Value::new(v)));
+        }
+        let (d1, d2) = data.split_at(50);
+
+        let mem_tables = MemTables {
+            mutable: Arc::new(mem),
+            immutable: VecDeque::from(
+                [d1, d2]
+                    .iter()
+                    .map(|x| get_memtable(x.to_vec()))
+                    .collect::<Vec<Arc<MemTable>>>(),
+            ),
+        };
+        assert_eq!(mem_tables.mutable.max_version(), 309);
+        assert_eq!(mem_tables.immutable[0].max_version(), 149);
+        assert_eq!(mem_tables.immutable[1].max_version(), 199);
+        assert_eq!(mem_tables.max_version(), 309);
     }
 }
