@@ -293,6 +293,7 @@ mod tests {
     use std::{
         collections::HashMap,
         fs,
+        io::Write,
         ops::{Deref, DerefMut},
         path::Path,
     };
@@ -302,8 +303,8 @@ mod tests {
 
     use super::IngestExternalFileOptions;
     use crate::{
-        key_with_ts, opt::build_table_options, Agate, AgateOptions, IteratorOptions, Table,
-        TableBuilder, Value,
+        error::Result, key_with_ts, opt::build_table_options, value::VALUE_DELETE, Agate,
+        AgateOptions, Error, IteratorOptions, Table, TableBuilder, Value,
     };
 
     const BUILD_TABLE_VERSION: u64 = 10;
@@ -333,11 +334,11 @@ mod tests {
         assert!(fs::create_dir_all(&path).is_ok());
     }
 
-    fn ingest(db: &Agate, files: &[&str], move_files: bool, commit_ts: u64) {
+    fn ingest(db: &Agate, files: &[&str], move_files: bool, commit_ts: u64) -> Result<()> {
         let mut opts = IngestExternalFileOptions::default();
         opts.move_files = move_files;
         opts.commit_ts = commit_ts;
-        db.ingest_external_files(files, &opts).unwrap();
+        db.ingest_external_files(files, &opts)
     }
 
     struct DBTestWrapper {
@@ -418,8 +419,8 @@ mod tests {
             }
         });
 
-        ingest(&db, &[&file1.to_string_lossy()], false, 0);
-        ingest(&db, &[&file2.to_string_lossy()], true, 0);
+        ingest(&db, &[&file1.to_string_lossy()], false, 0).unwrap();
+        ingest(&db, &[&file2.to_string_lossy()], true, 0).unwrap();
 
         assert!(Path::exists(&file1));
         assert!(!Path::exists(&file2));
@@ -457,7 +458,7 @@ mod tests {
                 data.insert(k, v);
             }
         });
-        ingest(&db, &[&file1.to_string_lossy()], true, 1);
+        ingest(&db, &[&file1.to_string_lossy()], true, 1).unwrap();
 
         {
             let mut txn = db.new_transaction_at(1, true);
@@ -483,7 +484,7 @@ mod tests {
                 data.insert(k, v);
             }
         });
-        ingest(&db, &[&file2.to_string_lossy()], true, 3);
+        ingest(&db, &[&file2.to_string_lossy()], true, 3).unwrap();
 
         assert!(!Path::exists(&file1));
         assert!(!Path::exists(&file2));
@@ -545,7 +546,7 @@ mod tests {
                 );
             }
         });
-        ingest(&db, &[&file1.to_string_lossy()], true, 0);
+        ingest(&db, &[&file1.to_string_lossy()], true, 0).unwrap();
 
         {
             // [0, 200], should conflict
@@ -642,7 +643,8 @@ mod tests {
             &[&file1.to_string_lossy(), &file2.to_string_lossy()],
             true,
             0,
-        );
+        )
+        .unwrap();
         assert_eq!(
             2,
             db.core.lvctl.inner.levels[0].read().unwrap().num_tables()
@@ -688,7 +690,8 @@ mod tests {
             &[&file1.to_string_lossy(), &file2.to_string_lossy()],
             true,
             0,
-        );
+        )
+        .unwrap();
 
         db.view(|txn| {
             for i in 0..1000 {
@@ -705,6 +708,97 @@ mod tests {
             for i in 0..1000 {
                 let item = txn.get(&build_key(i).freeze()).unwrap();
                 assert_eq!(item.value(), build_value(i));
+            }
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn files_not_exist() {
+        let db = DBTestWrapper::new(None);
+        let external_dir = db.core.opts.dir.join("external_files");
+        create_external_files_dir(&external_dir);
+        let file1 = external_dir.join("1.sst");
+        build_table(&file1, &db.core.opts, |builder| {
+            for i in 0..500 {
+                builder.add(
+                    &key_with_ts(build_key(i), BUILD_TABLE_VERSION),
+                    &Value::new(build_value(i).freeze()),
+                    0,
+                );
+            }
+        });
+        let file2 = external_dir.join("2.sst");
+        ingest(
+            &db,
+            &[&file1.to_string_lossy(), &file2.to_string_lossy()],
+            true,
+            0,
+        )
+        .unwrap_err();
+    }
+
+    #[test]
+    fn bad_checksum() {
+        let db = DBTestWrapper::new(None);
+        let external_dir = db.core.opts.dir.join("external_files");
+        create_external_files_dir(&external_dir);
+        let file1 = external_dir.join("1.sst");
+        build_table(&file1, &db.core.opts, |builder| {
+            for i in 0..500 {
+                builder.add(
+                    &key_with_ts(build_key(i), BUILD_TABLE_VERSION),
+                    &Value::new(build_value(i).freeze()),
+                    0,
+                );
+            }
+        });
+        {
+            let mut f = fs::File::options().write(true).open(&file1).unwrap();
+            write!(&mut f, "junk data").unwrap();
+            f.sync_all().unwrap();
+        }
+        ingest(&db, &[&file1.to_string_lossy()], true, 0).unwrap_err();
+    }
+
+    #[test]
+    fn put_then_delete() {
+        let db = DBTestWrapper::new(None);
+        let external_dir = db.core.opts.dir.join("external_files");
+        create_external_files_dir(&external_dir);
+        let file1 = external_dir.join("1.sst");
+        build_table(&file1, &db.core.opts, |builder| {
+            for i in 0..500 {
+                builder.add(
+                    &key_with_ts(build_key(i), BUILD_TABLE_VERSION),
+                    &Value::new(build_value(i).freeze()),
+                    0,
+                );
+            }
+        });
+        ingest(&db, &[&file1.to_string_lossy()], true, 0).unwrap();
+        let file2 = external_dir.join("2.sst");
+        build_table(&file2, &db.core.opts, |builder| {
+            for i in 400..500 {
+                builder.add(
+                    &key_with_ts(build_key(i), BUILD_TABLE_VERSION),
+                    &Value::new_with_meta(build_value(i).freeze(), VALUE_DELETE, 0),
+                    0,
+                );
+            }
+        });
+        ingest(&db, &[&file2.to_string_lossy()], true, 0).unwrap();
+        db.view(|txn| {
+            for i in 0..400 {
+                let item = txn.get(&build_key(i).freeze()).unwrap();
+                assert_eq!(item.value(), build_value(i));
+            }
+            for i in 400..500 {
+                assert!(matches!(
+                    txn.get(&build_key(i).freeze()).err().unwrap(),
+                    Error::KeyNotFound(_)
+                ));
             }
             Ok(())
         })
