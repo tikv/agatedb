@@ -96,7 +96,10 @@ impl MemTable {
         self.skl.put(key, value);
 
         // update max version
-        inner.max_version = ts;
+        // Although we guarantee that the order of all updates pushed to write_ch is
+        // the same as getting commit_ts(version), user may set it non-monotonically
+        // in managed mode. So we should compare and update.
+        inner.max_version = inner.max_version.max(ts);
 
         Ok(())
     }
