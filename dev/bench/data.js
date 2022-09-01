@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1661405421325,
+  "lastUpdate": 1662015303856,
   "repoUrl": "https://github.com/tikv/agatedb",
   "entries": {
     "Benchmark with RocksDB": [
@@ -359,6 +359,126 @@ window.BENCHMARK_DATA = {
             "name": "rocks iterate large value",
             "value": 759436400,
             "range": "± 4235841",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "43722125+wangnengjie@users.noreply.github.com",
+            "name": "Panda",
+            "username": "wangnengjie"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "070ff801ea782c503561b0f59276c62571dc2f74",
+          "message": "max_version support (#190)\n\n* fix: max_version support\r\n\r\nSigned-off-by: wangnengjie <751614701@qq.com>",
+          "timestamp": "2022-09-01T13:36:01+08:00",
+          "tree_id": "3810a94484c704269888ecec822f6320357a5992",
+          "url": "https://github.com/tikv/agatedb/commit/070ff801ea782c503561b0f59276c62571dc2f74"
+        },
+        "date": 1662015303387,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "agate sequentially populate small value",
+            "value": 928069066,
+            "range": "± 28516280",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "agate randomly populate small value",
+            "value": 1246153615,
+            "range": "± 30596314",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "agate randread small value",
+            "value": 241692670,
+            "range": "± 5159963",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "agate iterate small value",
+            "value": 68984624,
+            "range": "± 2348586",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "agate sequentially populate large value",
+            "value": 4696322892,
+            "range": "± 76745179",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "agate randomly populate large value",
+            "value": 4995223601,
+            "range": "± 51473343",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "agate randread large value",
+            "value": 345745841,
+            "range": "± 7899335",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "agate iterate large value",
+            "value": 167279440,
+            "range": "± 1641375",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "rocks sequentially populate small value",
+            "value": 208505099,
+            "range": "± 3850728",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "rocks randomly populate small value",
+            "value": 258250415,
+            "range": "± 12656740",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "rocks randread small value",
+            "value": 161163473,
+            "range": "± 1890300",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "rocks iterate small value",
+            "value": 9299616,
+            "range": "± 220167",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "rocks sequentially populate large value",
+            "value": 8203969721,
+            "range": "± 124131609",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "rocks randomly populate large value",
+            "value": 7869662849,
+            "range": "± 8816183936",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "rocks randread large value",
+            "value": 3185053862,
+            "range": "± 30726194",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "rocks iterate large value",
+            "value": 714119522,
+            "range": "± 5083401",
             "unit": "ns/iter"
           }
         ]
