@@ -18,7 +18,6 @@ pub use opt::AgateOptions;
 use skiplist::Skiplist;
 use yatp::task::callback::Handle;
 
-use crate::value::ValuePointer;
 use crate::{
     closer::Closer,
     entry::Entry,
@@ -29,7 +28,7 @@ use crate::{
     ops::oracle::Oracle,
     opt::build_table_options,
     util::{has_any_prefixes, make_comparator},
-    value::{self, Request, Value},
+    value::{self, Request, Value, ValuePointer},
     value_log::ValueLog,
     wal::Wal,
     Error, Result, Table, TableBuilder, TableOptions,
@@ -190,9 +189,15 @@ impl Core {
             orc,
         };
 
+        core.orc.init_next_ts(core.max_version());
+
         // TODO: Initialize other structures.
-        core.orc.increment_next_ts();
         Ok(core)
+    }
+
+    pub fn max_version(&self) -> u64 {
+        let v = self.mts.read().unwrap().max_version();
+        v.max(self.lvctl.max_version())
     }
 
     fn memtable_file_path(opts: &AgateOptions, file_id: usize) -> PathBuf {

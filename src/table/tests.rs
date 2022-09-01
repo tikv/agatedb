@@ -391,8 +391,7 @@ fn test_table_big_values() {
 
     assert!(!it.valid());
     assert_eq!(n, count);
-    // TODO: support max_version in table
-    // assert_eq!(n, table.max_version());
+    assert_eq!(n as u64, table.max_version());
 }
 
 #[test]
