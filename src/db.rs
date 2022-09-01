@@ -198,9 +198,15 @@ impl Core {
             orc,
         };
 
+        core.orc.init_next_ts(core.max_version());
+
         // TODO: Initialize other structures.
-        core.orc.increment_next_ts();
         Ok(core)
+    }
+
+    pub fn max_version(&self) -> u64 {
+        let v = self.mts.read().unwrap().max_version();
+        v.max(self.lvctl.max_version())
     }
 
     fn memtable_file_path(opts: &AgateOptions, file_id: usize) -> PathBuf {
