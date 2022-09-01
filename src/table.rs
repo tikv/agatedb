@@ -487,7 +487,8 @@ impl TableInner {
     }
 
     fn max_version(&self) -> u64 {
-        self.fetch_index().max_version
+        self.global_version()
+            .unwrap_or(self.fetch_index().max_version)
     }
 
     fn drop_no_fail(&mut self) -> Result<()> {

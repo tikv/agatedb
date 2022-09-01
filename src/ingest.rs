@@ -659,7 +659,6 @@ mod tests {
         assert_ne!(versions[0], versions[1]);
     }
 
-    #[ignore = "wait for `next_txn_ts` update feature"]
     #[test]
     fn reopen() {
         let db = DBTestWrapper::new(None);
