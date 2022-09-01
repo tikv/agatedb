@@ -263,11 +263,15 @@ impl Transaction {
         if self.update {
             let mut reads = self.reads.lock().unwrap();
             reads.fingerprints.push(default_hash(key));
-            if reads.smallest.is_empty() || matches!(reads.smallest.deref().cmp(key), cmp::Ordering::Greater) {
+            if reads.smallest.is_empty()
+                || matches!(reads.smallest.deref().cmp(key), cmp::Ordering::Greater)
+            {
                 reads.smallest.clear();
                 reads.smallest.extend_from_slice(key);
             }
-            if reads.biggest.is_empty() || matches!(reads.biggest.deref().cmp(key), cmp::Ordering::Less) {
+            if reads.biggest.is_empty()
+                || matches!(reads.biggest.deref().cmp(key), cmp::Ordering::Less)
+            {
                 reads.biggest.clear();
                 reads.biggest.extend_from_slice(key);
             }

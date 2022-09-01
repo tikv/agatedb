@@ -7,10 +7,11 @@ use super::{
     Block, TableInner,
 };
 use crate::{
+    format::append_ts,
     iterator_trait::AgateIterator,
     util::{self, KeyComparator, COMPARATOR},
     value::Value,
-    Error, format::append_ts,
+    Error,
 };
 
 /// Errors that may encounter during iterator operation

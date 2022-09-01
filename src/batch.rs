@@ -1,9 +1,8 @@
-use crate::Agate;
-use crate::{entry::Entry, ops::transaction::Transaction};
-use crate::{Error, Result};
+use std::sync::Arc;
 
 use bytes::Bytes;
-use std::sync::Arc;
+
+use crate::{entry::Entry, ops::transaction::Transaction, Agate, Error, Result};
 
 /// WriteBatch helps write multiple entries to database
 pub struct WriteBatch {
@@ -127,11 +126,12 @@ impl WriteBatch {
 
 #[cfg(test)]
 mod tests {
+    use bytes::Bytes;
+
     use crate::{
         db::tests::{generate_test_agate_options, run_agate_test},
         AgateOptions,
     };
-    use bytes::Bytes;
 
     fn test_with_options(opts: AgateOptions) {
         let key = |i| Bytes::from(format!("{:10}", i));
