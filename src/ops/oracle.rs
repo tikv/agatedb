@@ -232,6 +232,9 @@ impl Oracle {
         }
     }
 
+    /// Oracle's conflict check is only for read keys of update transaction.
+    /// Since IngestTask doesn't have read keys, we don't need to check conflict.
+    /// Just mark commit info.
     pub(crate) fn new_ingest_commit_ts(
         &self,
         ingest_ranges: Vec<RangeInclusive<Bytes>>,

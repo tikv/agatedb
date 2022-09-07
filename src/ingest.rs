@@ -11,16 +11,37 @@ use crate::{
 
 #[derive(Debug, Clone, Copy)]
 pub enum PickLevelStrategy {
+    /// Pick from base level to level 0. Base is calculated by [`LevelsControllerInner.target_level()`].
     BaseLevel,
+    /// Pick from bottom level to level 0
     BottomLevel,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct IngestExternalFileOptions {
+    /// When create or open db in managed mode, this field is used as version of
+    /// all ingested files. If files are overlap with each other, it's better to
+    /// split into several tasks. Otherwise the result is undefined since there might
+    /// be same key with same version.
     pub commit_ts: u64,
+    /// Can be set to true to move the files instead of copying them.
+    ///
+    /// Default: false
     pub move_files: bool,
+    /// If set to true, ingestion falls back to copy when move fails.
+    ///
+    /// Default: true
     pub failed_move_fall_back_to_copy: bool,
+    /// If set to true, verify checksum of ingested files before ingest to LSM.
+    /// Note that if [`ChecksumVerificationMode`] is set to [`OnTableRead`][ChecksumVerificationMode::OnTableRead]
+    /// or [`OnTableAndBlockRead`][ChecksumVerificationMode::OnTableAndBlockRead],
+    /// checksum will be checked even if verify_checksum is set to false.
+    ///
+    /// Default: true
     pub verify_checksum: bool,
+    /// Strategy to pick which level to ingest to.
+    ///
+    /// Default: [`BaseLevel`](PickLevelStrategy::BaseLevel)
     pub pick_level_strategy: PickLevelStrategy,
 }
 
