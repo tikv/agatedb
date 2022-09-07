@@ -670,7 +670,7 @@ impl Core {
         files: &[&str],
         opts: &IngestExternalFileOptions,
     ) -> Result<()> {
-        let mut task = IngestExternalFileTask::new(self.clone(), files, opts.clone());
+        let mut task = IngestExternalFileTask::new(self.clone(), files, *opts);
         task.run()
     }
 }

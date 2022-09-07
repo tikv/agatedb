@@ -356,9 +356,11 @@ mod tests {
     }
 
     fn ingest(db: &Agate, files: &[&str], move_files: bool, commit_ts: u64) -> Result<()> {
-        let mut opts = IngestExternalFileOptions::default();
-        opts.move_files = move_files;
-        opts.commit_ts = commit_ts;
+        let opts = IngestExternalFileOptions {
+            move_files,
+            commit_ts,
+            ..Default::default()
+        };
         db.ingest_external_files(files, &opts)
     }
 
@@ -371,7 +373,7 @@ mod tests {
     impl DBTestWrapper {
         fn new(opts: Option<AgateOptions>) -> Self {
             let tmp_dir = TempDir::new("agatedb").unwrap();
-            let mut opts = opts.unwrap_or(AgateOptions::default());
+            let mut opts = opts.unwrap_or_default();
             if !opts.in_memory {
                 opts.dir = tmp_dir.path().to_path_buf();
                 opts.value_dir = tmp_dir.path().to_path_buf();
@@ -458,8 +460,10 @@ mod tests {
 
     #[test]
     fn overlap() {
-        let mut db_opts = AgateOptions::default();
-        db_opts.managed_txns = true;
+        let db_opts = AgateOptions {
+            managed_txns: true,
+            ..Default::default()
+        };
         let db = DBTestWrapper::new(Some(db_opts));
         let external_dir = db.core.opts.dir.join("external_files");
         create_external_files_dir(&external_dir);
@@ -576,7 +580,7 @@ mod tests {
             loop {
                 assert!(iter.valid());
                 let item = iter.item();
-                if &item.key == &build_key(200) {
+                if item.key == build_key(200) {
                     break;
                 }
                 iter.next();
@@ -590,7 +594,7 @@ mod tests {
             loop {
                 assert!(iter.valid());
                 let item = iter.item();
-                if &item.key == &build_key(400) {
+                if item.key == build_key(400) {
                     break;
                 }
                 iter.next();
@@ -604,7 +608,7 @@ mod tests {
             loop {
                 assert!(iter.valid());
                 let item = iter.item();
-                if &item.key == &build_key(350) {
+                if item.key == build_key(350) {
                     break;
                 }
                 iter.next();
@@ -618,7 +622,7 @@ mod tests {
             loop {
                 assert!(iter.valid());
                 let item = iter.item();
-                if &item.key == &build_key(60) {
+                if item.key == build_key(60) {
                     break;
                 }
                 iter.next();
