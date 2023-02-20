@@ -1003,8 +1003,8 @@ impl LevelsController {
                 |prios: Vec<CompactionPriority>| match prios.iter().position(|x| x.level == 0) {
                     Some(pos) => {
                         let mut result = vec![prios[pos].clone()];
-                        result.extend_from_slice(&prios[..idx]);
-                        result.extend_from_slice(&prios[idx + 1..]);
+                        result.extend_from_slice(&prios[..pos]);
+                        result.extend_from_slice(&prios[pos + 1..]);
                         result
                     }
                     _ => prios,
