@@ -28,7 +28,7 @@ rocksdb = { version = "0.15", optional = true }
 skiplist = { path = "skiplist" }
 tempdir = "0.3"
 thiserror = "1.0"
-yatp = { git = "https://github.com/tikv/yatp.git" }
+yatp = { git = "https://github.com/tikv/yatp.git", rev = "b793461ea4abd202798cda6e20e97a054103f2ad" }
 
 [dev-dependencies]
 criterion = "0.3"
