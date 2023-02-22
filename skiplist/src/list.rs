@@ -32,7 +32,7 @@ impl Node {
     fn alloc(arena: &Arena, key: Bytes, value: Bytes, height: usize) -> usize {
         let size = mem::size_of::<Node>();
         // Not all values in Node::tower will be utilized.
-        let not_used = (MAX_HEIGHT as usize - height as usize - 1) * mem::size_of::<AtomicUsize>();
+        let not_used = (MAX_HEIGHT - height - 1) * mem::size_of::<AtomicUsize>();
         let node_offset = arena.alloc(size - not_used);
         unsafe {
             let node_ptr: *mut Node = arena.get_mut(node_offset);
@@ -107,7 +107,7 @@ impl<C: KeyComparator> Skiplist<C> {
         let mut cursor: *const Node = self.inner.head.as_ptr();
         let mut level = self.height();
         loop {
-            let next_offset = (&*cursor).next_offset(level);
+            let next_offset = (*cursor).next_offset(level);
             if next_offset == 0 {
                 if level > 0 {
                     level -= 1;
@@ -172,7 +172,7 @@ impl<C: KeyComparator> Skiplist<C> {
         level: usize,
     ) -> (*mut Node, *mut Node) {
         loop {
-            let next_offset = (&*before).next_offset(level);
+            let next_offset = (*before).next_offset(level);
             if next_offset == 0 {
                 return (before, ptr::null_mut());
             }
@@ -306,7 +306,7 @@ impl<C: KeyComparator> Skiplist<C> {
 
     pub fn is_empty(&self) -> bool {
         let node = self.inner.head.as_ptr();
-        let next_offset = unsafe { (&*node).next_offset(0) };
+        let next_offset = unsafe { (*node).next_offset(0) };
         next_offset == 0
     }
 
@@ -314,7 +314,7 @@ impl<C: KeyComparator> Skiplist<C> {
         let mut node = self.inner.head.as_ptr();
         let mut count = 0;
         loop {
-            let next = unsafe { (&*node).next_offset(0) };
+            let next = unsafe { (*node).next_offset(0) };
             if next != 0 {
                 count += 1;
                 node = unsafe { self.inner.arena.get_mut(next) };
@@ -328,7 +328,7 @@ impl<C: KeyComparator> Skiplist<C> {
         let mut node = self.inner.head.as_ptr();
         let mut level = self.height();
         loop {
-            let next = unsafe { (&*node).next_offset(level) };
+            let next = unsafe { (*node).next_offset(level) };
             if next != 0 {
                 node = unsafe { self.inner.arena.get_mut(next) };
                 continue;
@@ -393,7 +393,7 @@ impl Drop for SkiplistInner {
     fn drop(&mut self) {
         let mut node = self.head.as_ptr();
         loop {
-            let next = unsafe { (&*node).next_offset(0) };
+            let next = unsafe { (*node).next_offset(0) };
             if next != 0 {
                 let next_ptr = unsafe { self.arena.get_mut(next) };
                 unsafe {
@@ -438,7 +438,7 @@ impl<T: AsRef<Skiplist<C>>, C: KeyComparator> IterRef<T, C> {
     pub fn next(&mut self) {
         assert!(self.valid());
         unsafe {
-            let cursor_offset = (&*self.cursor).next_offset(0);
+            let cursor_offset = (*self.cursor).next_offset(0);
             self.cursor = self.list.as_ref().inner.arena.get_mut(cursor_offset);
         }
     }
@@ -476,7 +476,7 @@ impl<T: AsRef<Skiplist<C>>, C: KeyComparator> IterRef<T, C> {
 
     pub fn seek_to_first(&mut self) {
         unsafe {
-            let cursor_offset = (&*self.list.as_ref().inner.head.as_ptr()).next_offset(0);
+            let cursor_offset = (*self.list.as_ref().inner.head.as_ptr()).next_offset(0);
             self.cursor = self.list.as_ref().inner.arena.get_mut(cursor_offset);
         }
     }

@@ -475,7 +475,7 @@ impl TableInner {
                 .load(std::sync::atomic::Ordering::SeqCst)
             {
                 drop(file);
-                fs::remove_file(&name)?;
+                fs::remove_file(name)?;
             }
         }
         Ok(())
