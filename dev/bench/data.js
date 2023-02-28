@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1662015303856,
+  "lastUpdate": 1677557905206,
   "repoUrl": "https://github.com/tikv/agatedb",
   "entries": {
     "Benchmark with RocksDB": [
@@ -479,6 +479,126 @@ window.BENCHMARK_DATA = {
             "name": "rocks iterate large value",
             "value": 714119522,
             "range": "± 5083401",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "110658525+Tianion@users.noreply.github.com",
+            "name": "Tianion",
+            "username": "Tianion"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bb041a778190a7fe9af60fc35ae78320f1c01f1e",
+          "message": "level: fix index in move_l0_to_front (#192)\n\n* level: fix index in move_l0_to_front\r\n\r\nSigned-off-by: Tianion <lvpiche@foxmail.com>\r\n\r\n* dependency: fix yatp compile error\r\n\r\nSigned-off-by: Tianion <lvpiche@foxmail.com>\r\n\r\n* fix ci error/clippy warning\r\n\r\nSigned-off-by: Tianion <lvpiche@foxmail.com>\r\n\r\n* agate_bench: fix yatp compile error\r\n\r\nSigned-off-by: Tianion <lvpiche@foxmail.com>\r\n\r\n* skiplist: yatp rev=b793461e\r\n\r\nSigned-off-by: Tianion <lvpiche@foxmail.com>\r\n\r\n---------\r\n\r\nSigned-off-by: Tianion <lvpiche@foxmail.com>",
+          "timestamp": "2023-02-27T22:05:49-05:00",
+          "tree_id": "e9865ac7de7d7bc40815422bd88c0df74faa137a",
+          "url": "https://github.com/tikv/agatedb/commit/bb041a778190a7fe9af60fc35ae78320f1c01f1e"
+        },
+        "date": 1677557904477,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "agate sequentially populate small value",
+            "value": 903160670,
+            "range": "± 131367707",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "agate randomly populate small value",
+            "value": 1167230701,
+            "range": "± 64866804",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "agate randread small value",
+            "value": 195071444,
+            "range": "± 8345486",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "agate iterate small value",
+            "value": 59308950,
+            "range": "± 2897664",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "agate sequentially populate large value",
+            "value": 4273508702,
+            "range": "± 64737718",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "agate randomly populate large value",
+            "value": 4629493836,
+            "range": "± 64211107",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "agate randread large value",
+            "value": 268224317,
+            "range": "± 9399203",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "agate iterate large value",
+            "value": 119920482,
+            "range": "± 1632225",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "rocks sequentially populate small value",
+            "value": 204660055,
+            "range": "± 8655296",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "rocks randomly populate small value",
+            "value": 254864349,
+            "range": "± 7114960",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "rocks randread small value",
+            "value": 163101033,
+            "range": "± 3435816",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "rocks iterate small value",
+            "value": 9305723,
+            "range": "± 252399",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "rocks sequentially populate large value",
+            "value": 8158412768,
+            "range": "± 202223925",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "rocks randomly populate large value",
+            "value": 7823238785,
+            "range": "± 8208402395",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "rocks randread large value",
+            "value": 940627005,
+            "range": "± 637598363",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "rocks iterate large value",
+            "value": 604965996,
+            "range": "± 5146965",
             "unit": "ns/iter"
           }
         ]
