@@ -10,7 +10,7 @@ rand = "0.7"
 
 [dev-dependencies]
 criterion = "0.3"
-yatp = { git = "https://github.com/tikv/yatp.git" }
+yatp = { git = "https://github.com/tikv/yatp.git", rev = "b793461ea4abd202798cda6e20e97a054103f2ad" }
 
 [target.'cfg(not(target_env = "msvc"))'.dev-dependencies]
 tikv-jemallocator = "0.4.0"

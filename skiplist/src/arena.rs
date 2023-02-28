@@ -58,7 +58,7 @@ impl Arena {
             if grow_by < size {
                 grow_by = size;
             }
-            let mut new_buf: Vec<u64> = Vec::with_capacity((self.cap.get() + grow_by) as usize / 8);
+            let mut new_buf: Vec<u64> = Vec::with_capacity((self.cap.get() + grow_by) / 8);
             let new_ptr = new_buf.as_mut_ptr() as *mut u8;
             unsafe {
                 ptr::copy_nonoverlapping(new_ptr, self.ptr.get(), self.cap.get());

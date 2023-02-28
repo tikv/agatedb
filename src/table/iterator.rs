@@ -111,7 +111,7 @@ impl BlockIterator {
         }
 
         self.err = None;
-        let start_offset = self.entry_offsets()[i] as u32;
+        let start_offset = self.entry_offsets()[i];
 
         if self.base_key.is_empty() {
             let mut base_header = Header::default();
@@ -128,7 +128,7 @@ impl BlockIterator {
             self.entry_offsets()[self.idx + 1] as usize
         };
 
-        let mut entry_data = self.data.slice(start_offset as usize..end_offset as usize);
+        let mut entry_data = self.data.slice(start_offset as usize..end_offset);
         let mut header = Header::default();
         header.decode(&mut entry_data);
 

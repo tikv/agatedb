@@ -87,7 +87,7 @@ impl Manifest {
         let file_len = file.metadata()?.len();
 
         let mut file = BufReader::new(file);
-        file.seek(SeekFrom::Start(0))?;
+        file.rewind()?;
         let mut magic_buf = vec![0; 8];
         file.read_exact(&mut magic_buf)?;
         if &magic_buf[..4] != MAGIC_TEXT {
@@ -422,7 +422,7 @@ mod tests {
                 .read(true)
                 .write(true)
                 .create(true)
-                .open(&path)
+                .open(path)
                 .unwrap();
             file.write_at(&[b'G'], offset).unwrap();
         }

@@ -370,7 +370,7 @@ mod tests {
         let val1 = b"sampleval012345678901234567890123";
         let val2 = b"samplevalb012345678901234567890123";
 
-        assert!(val1.len() > opts.value_threshold as usize);
+        assert!(val1.len() > opts.value_threshold);
 
         let mut e1 = Entry::new(
             Bytes::from_static(b"samplekey"),

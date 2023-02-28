@@ -17,7 +17,7 @@ rand = "0.7"
 rocksdb = { version = "0.15", optional = true }
 tempdir = "0.3"
 threadpool = "1.8"
-yatp = { git = "https://github.com/tikv/yatp.git" }
+yatp = { git = "https://github.com/tikv/yatp.git", rev = "b793461ea4abd202798cda6e20e97a054103f2ad" }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.4.0"

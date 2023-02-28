@@ -99,7 +99,7 @@ impl Transaction {
 
     fn check_size(&mut self, entry: &Entry) -> Result<()> {
         let count = self.count + 1;
-        let size = self.size + entry.estimate_size(self.core.opts.value_threshold) as usize + 10;
+        let size = self.size + entry.estimate_size(self.core.opts.value_threshold) + 10;
 
         if count >= self.core.opts.max_batch_count as usize
             || size >= self.core.opts.max_batch_size as usize
@@ -458,7 +458,7 @@ impl AgateIterator for PendingWritesIterator {
         let key = user_key(key);
         self.next_idx = crate::util::search(self.entries.len(), |idx| {
             // Should not use COMPARATOR when compare without ts.
-            let cmp = (&self.entries[idx].key[..]).cmp(key);
+            let cmp = (self.entries[idx].key[..]).cmp(key);
             if !self.reversed {
                 cmp != Less
             } else {
