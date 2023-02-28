@@ -422,7 +422,7 @@ mod tests {
                 .read(true)
                 .write(true)
                 .create(true)
-                .open(&path)
+                .open(path)
                 .unwrap();
             file.write_at(&[b'G'], offset).unwrap();
         }
