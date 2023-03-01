@@ -8,6 +8,7 @@ mod db;
 mod entry;
 mod error;
 mod format;
+mod ingest;
 mod iterator;
 mod iterator_trait;
 mod levels;

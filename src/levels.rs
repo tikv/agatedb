@@ -25,6 +25,7 @@ use yatp::task::callback::Handle;
 use crate::{
     closer::Closer,
     format::{get_ts, key_with_ts, user_key},
+    ingest::{FileContext, IngestExternalFileTask, PickLevelStrategy},
     iterator::{is_deleted_or_expired, IteratorOptions},
     manifest::{new_create_change, new_delete_change, ManifestFile},
     ops::oracle::Oracle,
@@ -96,7 +97,10 @@ impl LevelsControllerInner {
             // TODO: Set compression, data_key, cache.
 
             let filename = crate::table::new_filename(id, &opts.dir);
-            let table = Table::open(&filename, table_opts)?;
+            let mut table = Table::open(&filename, table_opts)?;
+            if table_manifest.global_version > 0 {
+                table.set_global_version(table_manifest.global_version);
+            }
             // TODO: Allow checksum mismatch tables.
 
             tables[table_manifest.level as usize].push(table);
@@ -580,7 +584,7 @@ impl LevelsControllerInner {
             if i % N == N - 1 {
                 let biggest = table.biggest();
                 // TODO: Check this.
-                let mut buf = BytesMut::with_capacity(biggest.len() + 8);
+                let mut buf = BytesMut::with_capacity(biggest.len());
                 buf.put(user_key(biggest));
                 let right = key_with_ts(buf, std::u64::MAX);
                 add_range(&mut compact_def.splits, right);
@@ -690,6 +694,8 @@ impl LevelsControllerInner {
             compact_def.next_range = compact_def.this_range.clone();
         } else {
             compact_def.next_range = get_key_range(&compact_def.bot);
+            // make next_range cover the compaction output
+            compact_def.next_range.extend(&compact_def.this_range);
         }
 
         self.cpt_status
@@ -759,6 +765,8 @@ impl LevelsControllerInner {
             }
 
             compact_def.next_range = get_key_range(&compact_def.bot);
+            // make next_range cover the compaction output
+            compact_def.next_range.extend(&compact_def.this_range);
 
             if cpt_status.overlaps_with(compact_def.next_level_id, &compact_def.next_range) {
                 continue;
@@ -814,11 +822,11 @@ impl LevelsControllerInner {
             let mut this_level = this_level.write().unwrap();
             let mut next_level = next_level.write().unwrap();
             this_level.delete_tables(&compact_def.top);
-            next_level.replace_tables(&compact_def.bot, &new_tables)?;
+            next_level.replace_tables(&compact_def.bot, &new_tables);
         } else {
             let mut this_level = this_level.write().unwrap();
             this_level.delete_tables(&compact_def.top);
-            this_level.replace_tables(&compact_def.bot, &new_tables)?;
+            this_level.replace_tables(&compact_def.bot, &new_tables);
         }
 
         // TODO: Add log.
@@ -893,8 +901,12 @@ impl LevelsControllerInner {
     fn add_l0_table(&self, table: Table) -> Result<()> {
         if !self.opts.in_memory {
             // Update the manifest _before_ the table becomes part of a level_handler.
-            self.manifest
-                .add_changes(vec![new_create_change(table.id(), 0, 0)])?;
+            self.manifest.add_changes(vec![new_create_change(
+                table.id(),
+                0,
+                0,
+                table.global_version().unwrap_or(0),
+            )])?;
         }
 
         while !self.levels[0].write()?.try_add_l0_table(table.clone()) {
@@ -916,6 +928,93 @@ impl LevelsControllerInner {
         }
 
         Ok(())
+    }
+
+    fn ingest_tables(&self, task: &mut IngestExternalFileTask) -> Result<()> {
+        let mut changes = vec![];
+        let files_overlap = task.overlap();
+        let pick_level_strategy = task.opts().pick_level_strategy;
+        let mut krs = vec![];
+        let mut lv_tbls = vec![vec![]; self.levels.len()];
+
+        for file in task.files_mut().iter_mut() {
+            if files_overlap {
+                file.picked_level = 0;
+            } else {
+                self.assign_ingest_file_level(file, pick_level_strategy);
+            }
+            let table = file.table.as_ref().unwrap();
+            if file.picked_level > 0 {
+                let kr = get_key_range_single(table);
+                krs.push((file.picked_level, kr));
+            }
+            lv_tbls[file.picked_level].push(table.clone());
+            changes.push(new_create_change(
+                file.id,
+                file.picked_level,
+                0,
+                table.global_version().unwrap_or(0),
+            ));
+        }
+
+        // All files picked levels, write changes to manifest before ingest to lsm.
+        // No lock was hold here.
+        // If failed, need to remove ranges.
+        if let Err(err) = self.manifest.add_changes(changes) {
+            error!(
+                "[ingest task]: failed to write changes to manifest. {}",
+                err
+            );
+            let mut cpt_status = self.cpt_status.write().unwrap();
+            krs.iter()
+                .for_each(|(lv, kr)| cpt_status.delete_range(*lv, kr));
+            return Err(err);
+        }
+        // ingest to lsm
+        for (lv, tbs) in lv_tbls.iter().enumerate() {
+            self.levels[lv].write().unwrap().replace_tables(&[], tbs);
+        }
+        // remove hold key ranges
+        let mut cpt_status = self.cpt_status.write().unwrap();
+        krs.iter()
+            .for_each(|(lv, kr)| cpt_status.delete_range(*lv, kr));
+        Ok(())
+    }
+
+    fn assign_ingest_file_level(
+        &self,
+        file: &mut FileContext,
+        pick_level_strategy: PickLevelStrategy,
+    ) {
+        let table = file.table.as_ref().unwrap();
+        file.picked_level = 0;
+        let kr = get_key_range_single(table);
+        match pick_level_strategy {
+            PickLevelStrategy::BaseLevel | PickLevelStrategy::BottomLevel => {
+                let base = if matches!(pick_level_strategy, PickLevelStrategy::BaseLevel) {
+                    let target = self.level_targets();
+                    if target.base_level == 0 {
+                        1
+                    } else {
+                        target.base_level
+                    }
+                } else {
+                    self.levels.len() - 1
+                };
+                // iter from level base to level 1, if all failed, auto pick level 0
+                for target in (1..=base).rev() {
+                    let handle = self.levels[target].read().unwrap();
+                    let (l, r) = handle.overlapping_tables(&kr);
+                    if r - l > 0 {
+                        continue;
+                    }
+                    if self.cpt_status.write().unwrap().add_range(target, &kr) {
+                        file.picked_level = target;
+                        break;
+                    }
+                }
+            }
+        };
     }
 
     /// Searches for a given key in all the levels of the LSM tree.
@@ -969,6 +1068,10 @@ impl LevelsController {
 
     pub fn add_l0_table(&self, table: Table) -> Result<()> {
         self.inner.add_l0_table(table)
+    }
+
+    pub(crate) fn ingest_tables(&self, task: &mut IngestExternalFileTask) -> Result<()> {
+        self.inner.ingest_tables(task)
     }
 
     pub fn get(&self, key: &Bytes, max_value: Value, start_level: usize) -> Result<Value> {
@@ -1072,7 +1175,12 @@ fn build_change_set(compact_def: &CompactDef, new_tables: &[Table]) -> ManifestC
 
     for table in new_tables {
         // TODO: Data key id.
-        changes.push(new_create_change(table.id(), compact_def.next_level_id, 0));
+        changes.push(new_create_change(
+            table.id(),
+            compact_def.next_level_id,
+            0,
+            table.global_version().unwrap_or(0),
+        ));
     }
     for table in &compact_def.top {
         if !table.is_in_memory() {

@@ -34,6 +34,7 @@ pub struct LevelManifest {
 pub struct TableManifest {
     pub level: u8,
     pub key_id: u64,
+    pub global_version: u64,
     // TODO: compression
 }
 
@@ -76,7 +77,12 @@ impl Manifest {
     fn as_changes(&self) -> Vec<ManifestChange> {
         let mut changes = Vec::with_capacity(self.tables.len());
         for (id, tm) in &self.tables {
-            changes.push(new_create_change(*id, tm.level as usize, tm.key_id));
+            changes.push(new_create_change(
+                *id,
+                tm.level as usize,
+                tm.key_id,
+                tm.global_version,
+            ));
         }
         changes
     }
@@ -330,6 +336,7 @@ fn apply_manifest_change(build: &mut Manifest, tc: &ManifestChange) -> Result<()
                 TableManifest {
                     level: tc.level as u8,
                     key_id: tc.key_id,
+                    global_version: tc.global_version,
                 },
             );
             while build.levels.len() <= tc.level as usize {
@@ -354,12 +361,18 @@ fn apply_manifest_change(build: &mut Manifest, tc: &ManifestChange) -> Result<()
     Ok(())
 }
 
-pub fn new_create_change(id: u64, level: usize, key_id: u64) -> ManifestChange {
+pub fn new_create_change(
+    id: u64,
+    level: usize,
+    key_id: u64,
+    global_version: u64,
+) -> ManifestChange {
     ManifestChange {
         id,
         op: ManifestChangeOp::Create as i32,
         level: level as u32,
         key_id,
+        global_version,
         // unused fields
         encryption_algo: 0,
         compression: 0,
@@ -375,6 +388,7 @@ pub fn new_delete_change(id: u64) -> ManifestChange {
         key_id: 0,
         encryption_algo: 0,
         compression: 0,
+        global_version: 0,
     }
 }
 
@@ -394,8 +408,8 @@ mod tests {
 
         let manifestfile = ManifestFile::open_or_create_manifest_file(&opts).unwrap();
 
-        let changes_param1 = vec![new_create_change(1, 1, 1)];
-        let changes_param2 = vec![new_create_change(2, 2, 2)];
+        let changes_param1 = vec![new_create_change(1, 1, 1, 0)];
+        let changes_param2 = vec![new_create_change(2, 2, 2, 0)];
 
         manifestfile.add_changes(changes_param1.clone()).unwrap();
         manifestfile.add_changes(changes_param2.clone()).unwrap();

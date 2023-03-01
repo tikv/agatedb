@@ -44,6 +44,7 @@ message ManifestChange {
   uint64 key_id  = 4;
   EncryptionAlgo encryption_algo = 5;
   uint32 compression = 6;   // Only used for CREATE Op.
+  uint64 global_version = 7; // Only used for file ingest, 0 means no global_version
 }
 
 message BlockOffset {
