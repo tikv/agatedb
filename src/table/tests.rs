@@ -31,6 +31,7 @@ pub(crate) fn get_test_table_options() -> Options {
         bloom_false_positive: 0.01,
         table_capacity: 0,
         checksum_mode: ChecksumVerificationMode::OnTableRead,
+        block_cache: None,
     }
 }
 
@@ -362,6 +363,7 @@ fn test_table_big_values() {
         table_size: (n as u64) * (1 << 20),
         table_capacity: 0,
         checksum_mode: ChecksumVerificationMode::OnTableRead,
+        block_cache: None,
     };
     let mut builder = Builder::new(opts.clone());
 

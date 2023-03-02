@@ -2,6 +2,7 @@
 
 mod batch;
 mod bloom;
+mod cache;
 mod checksum;
 mod closer;
 mod db;

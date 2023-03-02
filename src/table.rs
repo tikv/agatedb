@@ -67,6 +67,12 @@ impl MmapFile {
     }
 }
 
+#[derive(PartialEq, Eq, Hash)]
+pub struct BlockCacheKey {
+    pub file_id: u64,
+    pub block_offset: u32, // u32 is defined in proto
+}
+
 /// TableInner stores data of an SST.
 /// It is immutable once created and initialized.
 pub struct TableInner {
@@ -278,7 +284,7 @@ impl TableInner {
         self.fetch_index().offsets.get(idx)
     }
 
-    fn block(&self, idx: usize, _use_cache: bool) -> Result<Arc<Block>> {
+    fn block(&self, idx: usize, use_cache: bool) -> Result<Arc<Block>> {
         use ChecksumVerificationMode::*;
 
         // TODO: support cache
@@ -288,6 +294,23 @@ impl TableInner {
         let block_offset = self
             .offsets(idx)
             .ok_or_else(|| Error::TableRead(format!("failed to get offset block {}", idx)))?;
+
+        if use_cache {
+            let blk = self
+                .opts
+                .block_cache
+                .as_ref()
+                .and_then(|bc| {
+                    bc.lookup(&BlockCacheKey {
+                        file_id: self.id(),
+                        block_offset: block_offset.offset,
+                    })
+                })
+                .map(|handle| handle.value().clone());
+            if let Some(blk) = blk {
+                return Ok(blk);
+            }
+        }
 
         let offset = block_offset.offset as usize;
         let data = self.read(offset, block_offset.len as usize)?;
@@ -331,6 +354,19 @@ impl TableInner {
 
         if matches!(self.opts.checksum_mode, OnTableAndBlockRead | OnBlockRead) {
             blk.verify_checksum()?;
+        }
+
+        if use_cache {
+            if let Some(block_cache) = self.opts.block_cache.as_ref() {
+                block_cache.insert(
+                    BlockCacheKey {
+                        file_id: self.id(),
+                        block_offset: blk.offset as u32,
+                    },
+                    blk.clone(),
+                    blk.size() as usize,
+                );
+            }
         }
 
         Ok(blk)

@@ -17,6 +17,7 @@ crossbeam-channel = "0.5"
 enum_dispatch = "0.3"
 farmhash = "1.1"
 getset = "0.1.2"
+hashbrown = { version = "0.12", features = ["raw"] }
 lazy_static = "1.4.0"
 log = "0.4.17"
 memmap2 = "0.3"
@@ -38,11 +39,7 @@ tempfile = "3"
 tikv-jemallocator = "0.4.0"
 
 [workspace]
-members = [
-    "agate_bench",
-    "proto",
-    "skiplist"
-]
+members = ["agate_bench", "proto", "skiplist"]
 
 [[bench]]
 name = "bench_common"
