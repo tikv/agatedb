@@ -190,6 +190,22 @@ impl<C: KeyComparator> AgateIterator for SkiplistIterator<C> {
     fn valid(&self) -> bool {
         self.skl_iter.valid()
     }
+
+    fn prev(&mut self) {
+        if !self.reversed {
+            self.skl_iter.prev();
+        } else {
+            self.skl_iter.next();
+        }
+    }
+
+    fn to_last(&mut self) {
+        if !self.reversed {
+            self.skl_iter.seek_to_last();
+        } else {
+            self.skl_iter.seek_to_first();
+        }
+    }
 }
 
 pub struct Iterator<'a> {
@@ -199,9 +215,8 @@ pub struct Iterator<'a> {
 
     pub(crate) opt: IteratorOptions,
     item: Option<Item>,
-
-    /// Used to skip over multiple versions of the same key.
-    last_key: BytesMut,
+    // If false, last operation is prev.
+    current_direction: bool,
 }
 
 impl Transaction {
@@ -247,7 +262,7 @@ impl Transaction {
             read_ts: self.read_ts,
             opt: opt.clone(),
             item: None,
-            last_key: BytesMut::new(),
+            current_direction: true,
         }
     }
 }
@@ -274,8 +289,30 @@ impl<'a> Iterator<'a> {
 
     // Advances the iterator by one.
     pub fn next(&mut self) {
+        if !self.current_direction {
+            self.table_iter.next();
+            self.table_iter.next();
+        }
+        self.current_direction = true;
+
         while self.table_iter.valid() {
             if self.parse_item() {
+                return;
+            }
+        }
+
+        self.item = None;
+    }
+
+    pub fn prev(&mut self) {
+        if self.current_direction {
+            self.table_iter.prev();
+            self.table_iter.prev();
+        }
+        self.current_direction = false;
+
+        while self.table_iter.valid() {
+            if self.parse_item_for_prev() {
                 return;
             }
         }
@@ -319,17 +356,23 @@ impl<'a> Iterator<'a> {
         // If iterating in forward direction, then just checking the last key against
         // current key would be sufficient.
         if !self.opt.reverse {
-            if crate::util::same_key(&self.last_key, key) {
-                self.table_iter.next();
-                return false;
-            }
+            self.table_iter.prev();
+
             // Only track in forward direction.
             // We should update last_key as soon as we find a different key in our snapshot.
             // Consider keys: a 5, b 7 (del), b 5. When iterating, last_key = a.
             // Then we see b 7, which is deleted. If we don't store last_key = b, we'll then
             // return b 5, which is wrong. Therefore, update last_key here.
-            self.last_key.clear();
-            self.last_key.extend_from_slice(key);
+            if self.table_iter.valid()
+                && crate::util::same_key(self.table_iter.key(), key)
+                && get_ts(self.table_iter.key()) <= self.read_ts
+            {
+                self.table_iter.next();
+                self.table_iter.next();
+                return false;
+            }
+
+            self.table_iter.next();
         }
 
         loop {
@@ -340,7 +383,12 @@ impl<'a> Iterator<'a> {
             }
 
             let mut item = Item::new(self.txn.core.clone());
-            Self::fill_item(&mut item, key, &self.table_iter.value(), &self.opt);
+            Self::fill_item(
+                &mut item,
+                self.table_iter.key(),
+                &self.table_iter.value(),
+                &self.opt,
+            );
 
             self.table_iter.next();
             if !self.opt.reverse || !self.table_iter.valid() {
@@ -350,11 +398,92 @@ impl<'a> Iterator<'a> {
 
             // Reverse direction.
             let next_ts = get_ts(self.table_iter.key());
-            let key_without_ts = user_key(self.table_iter.key());
-            if next_ts <= self.read_ts && key_without_ts == item.key {
+            if next_ts <= self.read_ts && crate::util::same_key(self.table_iter.key(), key) {
                 // This is a valid potential candidate.
                 continue;
             }
+
+            // Ignore the next candidate. Return the current one.
+            self.item = Some(item);
+            return true;
+        }
+    }
+
+    /// Just like `parse_item`, but used for `prev`.
+    ///
+    /// This function advances the iterator.
+    fn parse_item_for_prev(&mut self) -> bool {
+        #[allow(clippy::unnecessary_to_owned)]
+        let key: &[u8] = &self.table_iter.key().to_owned();
+
+        // Skip Agate keys.
+        if !self.opt.internal_access && key.starts_with(AGATE_PREFIX) {
+            self.table_iter.prev();
+            return false;
+        }
+
+        // Skip any versions which are beyond the read_ts.
+        let version = get_ts(key);
+        if version > self.read_ts {
+            self.table_iter.prev();
+            return false;
+        }
+
+        if self.opt.all_versions {
+            // Return deleted or expired values also, otherwise user can't figure out
+            // whether the key was deleted.
+            let mut item = Item::new(self.txn.core.clone());
+            Self::fill_item(&mut item, key, &self.table_iter.value(), &self.opt);
+            self.item = Some(item);
+            self.table_iter.prev();
+            return true;
+        }
+
+        // If iterating in *reverse* direction, then just checking the last key against
+        // current key would be sufficient.
+        if self.opt.reverse {
+            self.table_iter.next();
+
+            if self.table_iter.valid()
+                && crate::util::same_key(self.table_iter.key(), key)
+                && get_ts(self.table_iter.key()) <= self.read_ts
+            {
+                self.table_iter.prev();
+                self.table_iter.prev();
+                return false;
+            }
+
+            self.table_iter.prev();
+        }
+
+        loop {
+            let vs = self.table_iter.value();
+            if is_deleted_or_expired(vs.meta, vs.expires_at) {
+                self.table_iter.prev();
+                return false;
+            }
+
+            let mut item = Item::new(self.txn.core.clone());
+            Self::fill_item(
+                &mut item,
+                self.table_iter.key(),
+                &self.table_iter.value(),
+                &self.opt,
+            );
+
+            self.table_iter.prev();
+            if self.opt.reverse || !self.table_iter.valid() {
+                self.item = Some(item);
+                return true;
+            }
+
+            // Forward direction.
+            let next_ts = get_ts(self.table_iter.key());
+            if next_ts <= self.read_ts && crate::util::same_key(self.table_iter.key(), key) {
+                // This is a valid potential candidate.
+                continue;
+            }
+
             // Ignore the next candidate. Return the current one.
             self.item = Some(item);
             return true;
@@ -382,28 +511,33 @@ impl<'a> Iterator<'a> {
     /// smallest key greater than the provided key if iterating in the forward direction.
     /// Behavior would be reversed if iterating backwards.
     pub fn seek(&mut self, key: &Bytes) {
+        self.current_direction = true;
+
         if !key.is_empty() {
             self.txn.add_read_key(key);
         }
-
-        self.last_key.clear();
 
         // TODO: Prefix.
 
         if key.is_empty() {
             self.table_iter.rewind();
-            self.next();
-            return;
+        } else {
+            let key = if !self.opt.reverse {
+                key_with_ts(BytesMut::from(&key[..]), self.read_ts)
+            } else {
+                key_with_ts(BytesMut::from(&key[..]), 0)
+            };
+
+            self.table_iter.seek(&key);
         }
 
-        let key = if !self.opt.reverse {
-            key_with_ts(BytesMut::from(&key[..]), self.txn.read_ts)
-        } else {
-            key_with_ts(BytesMut::from(&key[..]), 0)
-        };
+        while self.table_iter.valid() {
+            if self.parse_item() {
+                return;
+            }
+        }
 
-        self.table_iter.seek(&key);
-        self.next();
+        self.item = None;
     }
 
     /// Rewinds the iterator cursor all the way to zero-th position, which would be the
@@ -412,10 +546,132 @@ impl<'a> Iterator<'a> {
     pub fn rewind(&mut self) {
         self.seek(&Bytes::new());
     }
+
+    #[allow(clippy::wrong_self_convention)]
+    pub fn to_last(&mut self) {
+        self.current_direction = true;
+
+        // TODO: Re-examine this.
+
+        self.table_iter.to_last();
+
+        while self.table_iter.valid() {
+            if self.parse_item_for_prev() {
+                return;
+            }
+        }
+
+        self.item = None;
+    }
 }
 
 impl<'a> Drop for Iterator<'a> {
     fn drop(&mut self) {
         self.txn.num_iterators.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        db::tests::*,
+        entry::Entry,
+        util::{make_comparator, test::check_iterator_out_of_bound},
+    };
+
+    #[test]
+    fn test_skl_iterator_out_of_bound() {
+        let n = 100;
+        let skl = Skiplist::with_capacity(make_comparator(), 4 * 1024 * 1024, true);
+
+        for i in 0..n {
+            let key = key_with_ts(format!("{:012x}", i).as_str(), 0);
+            skl.put(key, Bytes::new());
+        }
+
+        let iter = TableIterators::from(SkiplistIterator::new(skl.iter(), false));
+        check_iterator_out_of_bound(iter, n, false);
+
+        let iter = TableIterators::from(SkiplistIterator::new(skl.iter(), true));
+        check_iterator_out_of_bound(iter, n, true);
+    }
+
+    #[test]
+    fn test_iterator() {
+        run_agate_test(None, |agate| {
+            let n = 100;
+
+            let key = |i| BytesMut::from(format!("key-{:012x}", i).as_bytes());
+            let value = |i| Bytes::from(format!("value-{:012x}", i));
+
+            let mut txn = agate.new_transaction(true);
+
+            for i in 0..n {
+                txn.set_entry(Entry::new(key(i).freeze(), value(i)))
+                    .unwrap();
+            }
+
+            let check = |txn: &Transaction, reversed: bool| {
+                let mut iter = txn.new_iterator(&IteratorOptions {
+                    reverse: reversed,
+                    ..Default::default()
+                });
+
+                iter.rewind();
+
+                // test iterate
+                for i in 0..n {
+                    assert!(iter.valid());
+                    if !reversed {
+                        assert_eq!(iter.item().key, key(i));
+                    } else {
+                        assert_eq!(iter.item().key, key(n - i - 1));
+                    }
+                    iter.next();
+                }
+                assert!(!iter.valid());
+
+                // test seek
+                for i in 10..n - 10 {
+                    iter.seek(&key(i).freeze());
+
+                    for j in 0..10 {
+                        if !reversed {
+                            assert_eq!(iter.item().key, key(i + j));
+                        } else {
+                            assert_eq!(iter.item().key, key(i - j));
+                        }
+                        iter.next();
+                    }
+                }
+
+                // test prev
+                for i in 10..n - 10 {
+                    iter.seek(&key(i).freeze());
+
+                    for j in 0..10 {
+                        if !reversed {
+                            assert_eq!(iter.item().key, key(i - j));
+                        } else {
+                            assert_eq!(iter.item().key, key(i + j));
+                        }
+                        iter.prev();
+                    }
+                }
+
+                // test to_last
+                iter.to_last();
+                if !reversed {
+                    assert_eq!(iter.item().key, key(n - 1));
+                } else {
+                    assert_eq!(iter.item().key, key(0));
+                }
+            };
+
+            check(&txn, false);
+
+            check(&txn, true);
+        });
     }
 }

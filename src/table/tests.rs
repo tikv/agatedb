@@ -455,14 +455,45 @@ fn test_iterator_out_of_bound() {
     let opts = get_test_table_options();
     let table = build_test_table(b"key", 1000, opts);
     let mut it = table.new_iterator(0);
+    // next first and then prev
     it.seek_to_last();
     assert!(it.error().is_none());
+
     it.next();
     assert_eq!(it.error(), Some(&IteratorError::Eof));
     it.next();
     assert_eq!(it.error(), Some(&IteratorError::Eof));
+    it.prev();
+    assert!(it.error().is_none());
+
     it.next();
     assert_eq!(it.error(), Some(&IteratorError::Eof));
+    it.next();
+    assert_eq!(it.error(), Some(&IteratorError::Eof));
+    it.prev();
+    assert!(it.error().is_none());
+
+    it.rewind();
+    assert!(it.error().is_none());
+
+    // prev first and then next
+    it.seek_to_first();
+    assert!(it.error().is_none());
+
+    it.prev();
+    assert_eq!(it.error(), Some(&IteratorError::Eof));
+    it.prev();
+    assert_eq!(it.error(), Some(&IteratorError::Eof));
+    it.next();
+    assert!(it.error().is_none());
+
+    it.prev();
+    assert_eq!(it.error(), Some(&IteratorError::Eof));
+    it.prev();
+    assert_eq!(it.error(), Some(&IteratorError::Eof));
+    it.next();
+    assert!(it.error().is_none());
+
     it.rewind();
     assert!(it.error().is_none());
     assert_eq!(user_key(it.key()), key(b"key", 0));
@@ -473,14 +504,45 @@ fn test_iterator_out_of_bound_reverse() {
     let opts = get_test_table_options();
     let table = build_test_table(b"key", 1000, opts);
     let mut it = table.new_iterator(ITERATOR_REVERSED);
+    // next first and then prev
     it.seek_to_first();
     assert!(it.error().is_none());
+
     it.next();
     assert_eq!(it.error(), Some(&IteratorError::Eof));
     it.next();
     assert_eq!(it.error(), Some(&IteratorError::Eof));
+    it.prev();
+    assert!(it.error().is_none());
+
     it.next();
     assert_eq!(it.error(), Some(&IteratorError::Eof));
+    it.next();
+    assert_eq!(it.error(), Some(&IteratorError::Eof));
+    it.prev();
+    assert!(it.error().is_none());
+
+    it.rewind();
+    assert!(it.error().is_none());
+
+    // prev first and then next
+    it.seek_to_last();
+    assert!(it.error().is_none());
+
+    it.prev();
+    assert_eq!(it.error(), Some(&IteratorError::Eof));
+    it.prev();
+    assert_eq!(it.error(), Some(&IteratorError::Eof));
+    it.next();
+    assert!(it.error().is_none());
+
+    it.prev();
+    assert_eq!(it.error(), Some(&IteratorError::Eof));
+    it.prev();
+    assert_eq!(it.error(), Some(&IteratorError::Eof));
+    it.next();
+    assert!(it.error().is_none());
+
     it.rewind();
     assert!(it.error().is_none());
     assert_eq!(user_key(it.key()), key(b"key", 999));

@@ -13,4 +13,6 @@ pub trait AgateIterator {
     fn key(&self) -> &[u8];
     fn value(&self) -> Value;
     fn valid(&self) -> bool;
+    fn prev(&mut self);
+    fn to_last(&mut self);
 }

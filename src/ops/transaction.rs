@@ -7,15 +7,13 @@ use std::{
 };
 
 use bytes::{Bytes, BytesMut};
-use skiplist::KeyComparator;
 
+use crate::util::default_hash;
 use crate::{
     entry::Entry,
     format::{append_ts, user_key},
     iterator::{is_deleted_or_expired, Item},
-    key_with_ts,
-    util::{default_hash, COMPARATOR},
-    Agate, AgateIterator, Error, Result, Value,
+    key_with_ts, Agate, AgateIterator, Error, Result, Value,
 };
 
 const MAX_KEY_LENGTH: usize = 65000;
@@ -86,7 +84,8 @@ impl Transaction {
         // As each entry saves key / value as Bytes, there will only be overhead of pointer clone.
         let mut entries: Vec<_> = self.pending_writes.values().cloned().collect();
         entries.sort_by(|x, y| {
-            let cmp = COMPARATOR.compare_key(&x.key, &y.key);
+            // Note, we should not use COMPARATOR when compare without ts.
+            let cmp = (&x.key).cmp(&y.key);
             if reversed {
                 cmp.reverse()
             } else {
@@ -213,6 +212,7 @@ impl Transaction {
                     if is_deleted_or_expired(entry.meta, entry.expires_at) {
                         return Err(Error::KeyNotFound(()));
                     }
+
                     item.meta = entry.meta;
                     item.set_value(entry.value.clone());
                     item.user_meta = entry.user_meta;
@@ -443,8 +443,12 @@ impl PendingWritesIterator {
 
 impl AgateIterator for PendingWritesIterator {
     fn next(&mut self) {
-        self.next_idx += 1;
-        self.update_key();
+        if self.next_idx == std::usize::MAX {
+            self.rewind();
+        } else if self.next_idx < self.entries.len() {
+            self.next_idx += 1;
+            self.update_key();
+        }
     }
 
     fn rewind(&mut self) {
@@ -487,7 +491,24 @@ impl AgateIterator for PendingWritesIterator {
     }
 
     fn valid(&self) -> bool {
-        self.next_idx < self.entries.len()
+        self.next_idx != std::usize::MAX && self.next_idx < self.entries.len()
+    }
+
+    fn prev(&mut self) {
+        if self.next_idx == std::usize::MAX {
+        } else if self.next_idx > 0 {
+            self.next_idx -= 1;
+            self.update_key();
+        } else {
+            self.next_idx = std::usize::MAX;
+        }
+    }
+
+    fn to_last(&mut self) {
+        if !self.entries.is_empty() {
+            self.next_idx = self.entries.len() - 1;
+            self.update_key();
+        }
     }
 }
 
@@ -556,5 +577,58 @@ impl Agate {
         txn.commit()?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::util::test::{check_iterator_normal_operation, check_iterator_out_of_bound};
+
+    use super::*;
+
+    #[test]
+    fn test_pending_writes_iterator() {
+        let n = 100;
+
+        let mut entries = Vec::new();
+
+        let key = |i| BytesMut::from(format!("{:012x}", i).as_bytes());
+        let value = |i| Bytes::from(format!("{:012x}", i));
+
+        for i in 0..n {
+            let entry = Entry::new(key(i).freeze(), value(i));
+            entries.push(entry);
+        }
+
+        let iter = PendingWritesIterator::new(0, false, entries.clone());
+        check_iterator_normal_operation(iter, n, false);
+
+        entries.reverse();
+
+        let iter = PendingWritesIterator::new(0, true, entries);
+        check_iterator_normal_operation(iter, n, true);
+    }
+
+    #[test]
+    fn test_pending_writes_iterator_out_of_bound() {
+        let n = 100;
+
+        let mut entries = Vec::new();
+
+        let key = |i| BytesMut::from(format!("{:012x}", i).as_bytes());
+        let value = |i| Bytes::from(format!("{:012x}", i));
+
+        for i in 0..n {
+            let entry = Entry::new(key(i).freeze(), value(i));
+            entries.push(entry);
+        }
+
+        let iter = PendingWritesIterator::new(0, false, entries.clone());
+        check_iterator_out_of_bound(iter, n, false);
+
+        entries.reverse();
+
+        let iter = PendingWritesIterator::new(0, true, entries);
+        check_iterator_out_of_bound(iter, n, true);
     }
 }

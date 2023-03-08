@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use bytes::{Bytes, BytesMut};
 use enum_dispatch::enum_dispatch;
 
@@ -34,6 +36,9 @@ pub struct MergeIterator {
     is_left_small: bool,
     reverse: bool,
     current_key: BytesMut,
+
+    before_first: bool,
+    after_last: bool,
 }
 
 /// `IteratorNode` buffers the iterator key in its own struct, to
@@ -73,6 +78,17 @@ impl IteratorNode {
 
     fn seek(&mut self, key: &Bytes) {
         self.iter.seek(key);
+        self.set_key();
+    }
+
+    fn prev(&mut self) {
+        self.iter.prev();
+        self.set_key();
+    }
+
+    #[allow(clippy::wrong_self_convention)]
+    fn to_last(&mut self) {
+        self.iter.to_last();
         self.set_key();
     }
 }
@@ -132,7 +148,7 @@ impl MergeIterator {
 
         match COMPARATOR.compare_key(&self.smaller().key, &self.bigger().key) {
             Equal => {
-                self.right.next();
+                // Left most is guaranteed to be pending writes, we should make it the smaller one.
                 if !self.is_left_small {
                     self.swap_small();
                 }
@@ -151,6 +167,10 @@ impl MergeIterator {
     }
 
     fn set_current(&mut self) {
+        if !self.valid() {
+            return;
+        }
+
         self.current_key.clear();
         if self.is_left_small {
             self.current_key.extend_from_slice(&self.left.key);
@@ -175,6 +195,8 @@ impl MergeIterator {
                     right: IteratorNode::new(Box::new(right)),
                     is_left_small: true,
                     current_key: BytesMut::new(),
+                    before_first: false,
+                    after_last: false,
                 }))
             }
             _ => {
@@ -187,6 +209,8 @@ impl MergeIterator {
                     right: IteratorNode::new(Self::from_iterators(right, reverse)),
                     is_left_small: true,
                     current_key: BytesMut::new(),
+                    before_first: false,
+                    after_last: false,
                 }))
             }
         }
@@ -195,17 +219,42 @@ impl MergeIterator {
 
 impl AgateIterator for MergeIterator {
     fn next(&mut self) {
+        if self.before_first {
+            self.before_first = false;
+            self.rewind();
+            return;
+        }
+
+        self.before_first = false;
+
         while self.valid() {
             if self.smaller().key != self.current_key {
                 break;
             }
+
+            if self.bigger().valid
+                && COMPARATOR.compare_key(&self.smaller().key, &self.bigger().key)
+                    == Ordering::Equal
+            {
+                self.bigger_mut().next();
+            }
+
             self.smaller_mut().next();
+
             self.fix();
         }
+
         self.set_current();
+
+        if !self.valid() {
+            self.after_last = true;
+        }
     }
 
     fn rewind(&mut self) {
+        self.before_first = false;
+        self.after_last = false;
+
         self.left.rewind();
         self.right.rewind();
         self.fix();
@@ -213,10 +262,17 @@ impl AgateIterator for MergeIterator {
     }
 
     fn seek(&mut self, key: &Bytes) {
+        self.before_first = false;
+        self.after_last = false;
+
         self.left.seek(key);
         self.right.seek(key);
         self.fix();
         self.set_current();
+
+        if !self.valid() {
+            self.after_last = true;
+        }
     }
 
     fn key(&self) -> &[u8] {
@@ -230,6 +286,79 @@ impl AgateIterator for MergeIterator {
     fn valid(&self) -> bool {
         self.smaller().valid
     }
+
+    fn prev(&mut self) {
+        // TODO: Re-examine this.
+
+        if self.after_last {
+            self.after_last = false;
+            self.to_last();
+            return;
+        }
+
+        self.after_last = false;
+
+        if self.before_first {
+            return;
+        }
+
+        // We can call prev even when iterator is not valid.
+        self.bigger_mut().prev();
+
+        if !self.bigger().valid {
+            // Prev element is in the smaller.
+            self.smaller_mut().prev();
+            if self.smaller().valid {
+                // Only when smaller has prev element, should we rewind the bigger.
+                // Otherwise, current element is the first element, we should make
+                // both smaller and bigger invalid.
+                self.bigger_mut().rewind();
+            } else {
+                self.before_first = true;
+            }
+        } else {
+            // We should check where does the prev element come from.
+            self.smaller_mut().prev();
+            if !self.smaller().valid {
+                // Prev element is in the bigger, simply rewind the smaller.
+                self.smaller_mut().rewind();
+            } else {
+                // Note: Assume only one pair of keys are identical.
+                // Both smaller and bigger have prev element, fix and let the smaller step forward
+                // or let both smaller and bigger stay unmoved when they are identical.
+                self.fix();
+
+                if COMPARATOR.compare_key(&self.smaller().key, &self.bigger().key)
+                    != Ordering::Equal
+                {
+                    self.smaller_mut().next();
+                }
+            }
+        }
+
+        self.fix();
+        self.set_current();
+
+        if !self.valid() {
+            self.before_first = true;
+        }
+    }
+
+    fn to_last(&mut self) {
+        self.before_first = false;
+        self.after_last = false;
+
+        self.left.to_last();
+        self.right.to_last();
+        self.fix();
+        self.set_current();
+
+        if self.bigger_mut().valid
+            && COMPARATOR.compare_key(&self.smaller().key, &self.bigger().key) != Ordering::Equal
+        {
+            self.next();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -238,6 +367,7 @@ mod tests {
     use crate::{
         assert_bytes_eq,
         format::{key_with_ts, user_key},
+        util::test::{check_iterator_normal_operation, check_iterator_out_of_bound},
     };
 
     pub struct VecIterator {
@@ -258,7 +388,11 @@ mod tests {
 
     impl AgateIterator for VecIterator {
         fn next(&mut self) {
-            self.pos += 1;
+            if self.pos == std::usize::MAX {
+                self.rewind();
+            } else if self.pos < self.vec.len() {
+                self.pos += 1;
+            }
         }
 
         fn rewind(&mut self) {
@@ -286,59 +420,30 @@ mod tests {
         }
 
         fn valid(&self) -> bool {
-            self.pos < self.vec.len()
+            self.pos != std::usize::MAX && self.pos < self.vec.len()
         }
-    }
 
-    fn gen_vec_data(n: usize, predicate: impl Fn(usize) -> bool) -> Vec<Bytes> {
-        (0..n)
-            .filter(|x| predicate(*x))
-            .map(|i| key_with_ts(format!("{:012x}", i).as_str(), 0))
-            .collect()
-    }
-
-    fn check_sequence_both(mut iter: Box<Iterators>, n: usize, reversed: bool) {
-        // test sequentially iterate
-        let mut cnt = 0;
-        iter.rewind();
-        while iter.valid() {
-            let check_cnt = if reversed { n - 1 - cnt } else { cnt };
-            assert_bytes_eq!(
-                user_key(iter.key()),
-                format!("{:012x}", check_cnt).as_bytes()
-            );
-            cnt += 1;
-            iter.next();
+        fn prev(&mut self) {
+            if self.pos == std::usize::MAX {
+            } else if self.pos > 0 {
+                self.pos -= 1;
+            } else {
+                self.pos = std::usize::MAX;
+            }
         }
-        assert_eq!(cnt, n);
 
-        iter.rewind();
-
-        // test seek
-        for i in 10..n - 10 {
-            iter.seek(&key_with_ts(
-                BytesMut::from(format!("{:012x}", i).as_bytes()),
-                0,
-            ));
-            for j in 0..10 {
-                assert!(iter.valid());
-                let expected_key = if reversed {
-                    format!("{:012x}", i - j).to_string()
-                } else {
-                    format!("{:012x}", i + j).to_string()
-                };
-                assert_bytes_eq!(user_key(iter.key()), expected_key.as_bytes());
-                iter.next();
+        fn to_last(&mut self) {
+            if !self.vec.is_empty() {
+                self.pos = self.vec.len() - 1;
             }
         }
     }
 
-    fn check_sequence(iter: Box<Iterators>, n: usize) {
-        check_sequence_both(iter, n, false);
-    }
-
-    fn check_reverse_sequence(iter: Box<Iterators>, n: usize) {
-        check_sequence_both(iter, n, true);
+    pub fn gen_vec_data(n: usize, predicate: impl Fn(usize) -> bool) -> Vec<Bytes> {
+        (0..n)
+            .filter(|x| predicate(*x))
+            .map(|i| key_with_ts(format!("{:012x}", i).as_str(), 0))
+            .collect()
     }
 
     #[test]
@@ -352,6 +457,7 @@ mod tests {
             ));
             assert_bytes_eq!(user_key(iter.key()), format!("{:012x}", i).as_bytes());
         }
+
         let mut data = gen_vec_data(0xfff, |_| true);
         data.reverse();
         let mut iter = VecIterator::new(data, true);
@@ -362,6 +468,60 @@ mod tests {
             ));
             assert_bytes_eq!(user_key(iter.key()), format!("{:012x}", i).as_bytes());
         }
+    }
+
+    #[test]
+    fn test_vec_iter_prev() {
+        let data = gen_vec_data(0xfff, |_| true);
+        let mut iter = VecIterator::new(data, false);
+        for i in 1..0xfff {
+            iter.seek(&key_with_ts(
+                BytesMut::from(format!("{:012x}", i).as_bytes()),
+                0,
+            ));
+            iter.prev();
+            assert_bytes_eq!(user_key(iter.key()), format!("{:012x}", i - 1).as_bytes());
+        }
+
+        let mut data = gen_vec_data(0xfff, |_| true);
+        data.reverse();
+        let mut iter = VecIterator::new(data, true);
+        for i in 0..0xfff - 1 {
+            iter.seek(&key_with_ts(
+                BytesMut::from(format!("{:012x}", i).as_bytes()),
+                0,
+            ));
+            iter.prev();
+            assert_bytes_eq!(user_key(iter.key()), format!("{:012x}", i + 1).as_bytes());
+        }
+    }
+
+    #[test]
+    fn test_vec_to_last() {
+        let data = gen_vec_data(10, |_| true);
+        let mut iter = VecIterator::new(data, false);
+        iter.to_last();
+        assert_bytes_eq!(user_key(iter.key()), format!("{:012x}", 9).as_bytes());
+
+        let mut data = gen_vec_data(0xfff, |_| true);
+        data.reverse();
+        let mut iter = VecIterator::new(data, true);
+        iter.to_last();
+        assert_bytes_eq!(user_key(iter.key()), format!("{:012x}", 0).as_bytes());
+    }
+
+    #[test]
+    fn test_vec_out_of_bound() {
+        let n = 100;
+        let mut data = gen_vec_data(n, |_| true);
+
+        let iter = VecIterator::new(data.clone(), false);
+        check_iterator_out_of_bound(iter, n, false);
+
+        data.reverse();
+
+        let iter = VecIterator::new(data, false);
+        check_iterator_out_of_bound(iter, n, true);
     }
 
     #[test]
@@ -377,12 +537,13 @@ mod tests {
         let iter_b = Iterators::from(VecIterator::new(b, false));
         let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], false);
 
-        check_sequence(merge_iter, 0xfff);
+        check_iterator_normal_operation(*merge_iter, 0xfff, false);
 
         let iter_a = Iterators::from(VecIterator::new(rev_a, true));
         let iter_b = Iterators::from(VecIterator::new(rev_b, true));
         let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], true);
-        check_reverse_sequence(merge_iter, 0xfff);
+
+        check_iterator_normal_operation(*merge_iter, 0xfff, true);
     }
 
     #[test]
@@ -409,8 +570,129 @@ mod tests {
             .map(|vec| Iterators::from(VecIterator::new(vec, false)))
             .collect();
 
-        check_sequence(MergeIterator::from_iterators(iters, false), 0xfff);
+        check_iterator_normal_operation(*MergeIterator::from_iterators(iters, false), 0xfff, false);
 
-        check_reverse_sequence(MergeIterator::from_iterators(rev_iters, true), 0xfff);
+        check_iterator_normal_operation(
+            *MergeIterator::from_iterators(rev_iters, true),
+            0xfff,
+            true,
+        );
+    }
+
+    #[test]
+    fn test_merge_5iters_out_of_bound() {
+        // randomly determine sequence of 5 iterators
+        let vec_map = vec![2, 4, 1, 3, 0];
+        let vec_map_size = vec_map.len();
+        let vecs: Vec<Vec<Bytes>> = vec_map
+            .into_iter()
+            .map(|i| gen_vec_data(0xfff, |x| x % vec_map_size == i))
+            .collect();
+
+        let rev_iters: Vec<Iterators> = vecs
+            .iter()
+            .map(|x| {
+                let mut y = x.clone();
+                y.reverse();
+                Iterators::from(VecIterator::new(y, true))
+            })
+            .collect();
+
+        let iters: Vec<Iterators> = vecs
+            .into_iter()
+            .map(|vec| Iterators::from(VecIterator::new(vec, false)))
+            .collect();
+
+        check_iterator_out_of_bound(*MergeIterator::from_iterators(iters, false), 0xfff, false);
+
+        check_iterator_out_of_bound(*MergeIterator::from_iterators(rev_iters, true), 0xfff, true);
+    }
+
+    #[test]
+    fn test_merge_full_empty() {
+        let a = gen_vec_data(0xfff, |_| true);
+        let b = gen_vec_data(0xfff, |_| false);
+        let mut rev_a = a.clone();
+        rev_a.reverse();
+        let mut rev_b = b.clone();
+        rev_b.reverse();
+
+        let iter_a = Iterators::from(VecIterator::new(a, false));
+        let iter_b = Iterators::from(VecIterator::new(b, false));
+        let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], false);
+
+        check_iterator_normal_operation(*merge_iter, 0xfff, false);
+
+        let iter_a = Iterators::from(VecIterator::new(rev_a, true));
+        let iter_b = Iterators::from(VecIterator::new(rev_b, true));
+        let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], true);
+
+        check_iterator_normal_operation(*merge_iter, 0xfff, true);
+    }
+
+    #[test]
+    fn test_merge_full_empty_out_of_bound() {
+        let a = gen_vec_data(0xfff, |_| true);
+        let b = gen_vec_data(0xfff, |_| false);
+        let mut rev_a = a.clone();
+        rev_a.reverse();
+        let mut rev_b = b.clone();
+        rev_b.reverse();
+
+        let iter_a = Iterators::from(VecIterator::new(a, false));
+        let iter_b = Iterators::from(VecIterator::new(b, false));
+        let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], false);
+
+        check_iterator_out_of_bound(*merge_iter, 0xfff, false);
+
+        let iter_a = Iterators::from(VecIterator::new(rev_a, true));
+        let iter_b = Iterators::from(VecIterator::new(rev_b, true));
+        let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], true);
+
+        check_iterator_out_of_bound(*merge_iter, 0xfff, true);
+    }
+
+    #[test]
+    fn test_merge_same() {
+        let a = gen_vec_data(0xfff, |_| true);
+        let b = a.clone();
+        let mut rev_a = a.clone();
+        rev_a.reverse();
+        let mut rev_b = b.clone();
+        rev_b.reverse();
+
+        let iter_a = Iterators::from(VecIterator::new(a, false));
+        let iter_b = Iterators::from(VecIterator::new(b, false));
+        let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], false);
+
+        check_iterator_normal_operation(*merge_iter, 0xfff, false);
+
+        let iter_a = Iterators::from(VecIterator::new(rev_a, true));
+        let iter_b = Iterators::from(VecIterator::new(rev_b, true));
+        let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], true);
+
+        check_iterator_normal_operation(*merge_iter, 0xfff, true);
+    }
+
+    #[test]
+    fn test_merge_same_out_of_bound() {
+        let a = gen_vec_data(0xfff, |_| true);
+        let b = a.clone();
+        let mut rev_a = a.clone();
+        rev_a.reverse();
+        let mut rev_b = b.clone();
+        rev_b.reverse();
+
+        let iter_a = Iterators::from(VecIterator::new(a, false));
+        let iter_b = Iterators::from(VecIterator::new(b, false));
+        let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], false);
+
+        check_iterator_out_of_bound(*merge_iter, 0xfff, false);
+
+        let iter_a = Iterators::from(VecIterator::new(rev_a, true));
+        let iter_b = Iterators::from(VecIterator::new(rev_b, true));
+        let merge_iter = MergeIterator::from_iterators(vec![iter_a, iter_b], true);
+
+        check_iterator_out_of_bound(*merge_iter, 0xfff, true);
     }
 }

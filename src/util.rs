@@ -124,10 +124,131 @@ macro_rules! assert_bytes_eq {
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
+    use bytes::BytesMut;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use crate::{key_with_ts, AgateIterator};
+
     use super::*;
+
+    pub fn check_iterator_out_of_bound(mut iter: impl AgateIterator, count: usize, reversed: bool) {
+        iter.rewind();
+        iter.prev();
+        assert!(!iter.valid());
+        iter.prev();
+        assert!(!iter.valid());
+        iter.next();
+        assert!(iter.valid());
+
+        iter.prev();
+        assert!(!iter.valid());
+        iter.prev();
+        assert!(!iter.valid());
+        iter.next();
+        assert!(iter.valid());
+
+        if !reversed {
+            assert_eq!(user_key(iter.key()), format!("{:012x}", 0).as_bytes());
+        } else {
+            assert_eq!(
+                user_key(iter.key()),
+                format!("{:012x}", count - 1).as_bytes()
+            );
+        }
+
+        iter.to_last();
+        iter.next();
+        assert!(!iter.valid());
+        iter.next();
+        assert!(!iter.valid());
+        iter.prev();
+        assert!(iter.valid());
+
+        iter.next();
+        assert!(!iter.valid());
+        iter.next();
+        assert!(!iter.valid());
+        iter.prev();
+        assert!(iter.valid());
+
+        if !reversed {
+            assert_eq!(
+                user_key(iter.key()),
+                format!("{:012x}", count - 1).as_bytes()
+            );
+        } else {
+            assert_eq!(user_key(iter.key()), format!("{:012x}", 0).as_bytes());
+        }
+    }
+
+    pub fn check_iterator_normal_operation(
+        mut iter: impl AgateIterator,
+        count: usize,
+        reversed: bool,
+    ) {
+        iter.rewind();
+
+        // test iterate
+        for i in 0..count {
+            assert!(iter.valid());
+            if !reversed {
+                assert_eq!(user_key(iter.key()), format!("{:012x}", i).as_bytes());
+            } else {
+                assert_eq!(
+                    user_key(iter.key()),
+                    format!("{:012x}", count - i - 1).as_bytes()
+                );
+            }
+            iter.next();
+        }
+        assert!(!iter.valid());
+
+        // test seek
+        for i in 10..count - 10 {
+            iter.seek(&key_with_ts(
+                BytesMut::from(format!("{:012x}", i).as_bytes()),
+                0,
+            ));
+
+            for j in 0..10 {
+                if !reversed {
+                    assert_eq!(user_key(iter.key()), format!("{:012x}", i + j).as_bytes());
+                } else {
+                    assert_eq!(user_key(iter.key()), format!("{:012x}", i - j).as_bytes());
+                }
+                iter.next();
+            }
+        }
+
+        // test prev
+        for i in 10..count - 10 {
+            iter.seek(&key_with_ts(
+                BytesMut::from(format!("{:012x}", i).as_bytes()),
+                0,
+            ));
+
+            for j in 0..10 {
+                if !reversed {
+                    assert_eq!(user_key(iter.key()), format!("{:012x}", i - j).as_bytes());
+                } else {
+                    assert_eq!(user_key(iter.key()), format!("{:012x}", i + j).as_bytes());
+                }
+                iter.prev();
+            }
+        }
+
+        // test to_last
+        iter.to_last();
+        if !reversed {
+            assert_eq!(
+                user_key(iter.key()),
+                format!("{:012x}", count - 1).as_bytes()
+            );
+        } else {
+            assert_eq!(user_key(iter.key()), format!("{:012x}", 0).as_bytes());
+        }
+    }
 
     #[test]
     fn test_unix_time() {
