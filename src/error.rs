@@ -66,6 +66,10 @@ pub enum Error {
     DiscardedTxn,
     #[error("No room for write")]
     WriteNoRoom(()),
+    #[error("Cannot run value log GC when DB is opened in InMemory mode")]
+    ErrGCInMemoryMode,
+    #[error("Invalid request")]
+    ErrInvalidRequest,
 }
 
 impl From<io::Error> for Error {

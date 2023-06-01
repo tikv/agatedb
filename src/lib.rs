@@ -5,6 +5,7 @@ mod bloom;
 mod checksum;
 mod closer;
 mod db;
+mod discard;
 mod entry;
 mod error;
 mod format;
