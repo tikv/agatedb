@@ -79,15 +79,15 @@ impl ValueLog {
             None
         } else {
             let inner = Self {
+                discard_stats: DiscardStats::init_discard_stats(opts.clone())?,
                 inner: Arc::new(RwLock::new(ValueLogInner::new())),
                 dir_path: opts.value_dir.clone(),
                 opts,
                 writeable_log_offset: AtomicU32::new(0),
-                discard_stats: DiscardStats::init_discard_stats(opts)?,
             };
 
             // TODO: garbage collection
-            innter.inner.open()?;
+            inner.open()?;
             Some(inner)
         };
 
