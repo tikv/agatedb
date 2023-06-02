@@ -8,6 +8,7 @@ use std::{
 use bytes::{Bytes, BytesMut};
 
 use crate::{
+    discard::DiscardStats,
     error,
     value::{self, Request, ValuePointer},
     wal::{Header, Wal},
@@ -66,6 +67,8 @@ pub struct ValueLog {
     /// offset of next write
     writeable_log_offset: AtomicU32,
     opts: AgateOptions,
+
+    discard_stats: DiscardStats,
 }
 
 impl ValueLog {
@@ -80,10 +83,11 @@ impl ValueLog {
                 dir_path: opts.value_dir.clone(),
                 opts,
                 writeable_log_offset: AtomicU32::new(0),
+                discard_stats: DiscardStats::init_discard_stats(opts)?,
             };
+
             // TODO: garbage collection
-            // TODO: discard stats
-            inner.open()?;
+            innter.inner.open()?;
             Some(inner)
         };
 
