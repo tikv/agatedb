@@ -1,9 +1,17 @@
-use crate::{db::AgateOptions, util, Result};
+use crate::{
+    db::AgateOptions,
+    util::{self, sync_dir},
+    Result,
+};
 use bytes::BufMut;
 use indexsort::IndexSort;
 use log::info;
 use memmap2::{MmapMut, MmapOptions};
-use std::{fs::OpenOptions, mem::ManuallyDrop, sync::RwLock};
+use std::{
+    fs::{File, OpenOptions},
+    mem::ManuallyDrop,
+    sync::RwLock,
+};
 
 const DISCARD_FNAME: &str = "DISCARD";
 
@@ -23,10 +31,14 @@ impl DiscardStats {
             .read(true)
             .write(true)
             .open(&fname)?;
-        // 1GB file can store 67M discard entries. Each entry is 16 bytes.
+        file.set_len(1 << 20)?;
+        file.sync_all()?;
+        sync_dir(&fname.parent().unwrap())?;
         let mmap_file = ManuallyDrop::new(unsafe { MmapOptions::new().map_mut(&file)? });
+
         let discard_stats = DiscardStats {
             inner: RwLock::new(DiscardStatsInner {
+                file: ManuallyDrop::new(file),
                 mmap_file,
                 next_empty_slot: 0,
             }),
@@ -118,6 +130,8 @@ impl DiscardStats {
 }
 
 pub struct DiscardStatsInner {
+    file: ManuallyDrop<File>,
+    // 1GB file can store 67M discard entries. Each entry is 16 bytes.
     mmap_file: ManuallyDrop<MmapMut>,
     next_empty_slot: usize,
 }
@@ -136,7 +150,7 @@ impl DiscardStatsInner {
     }
 
     fn max_slot(&self) -> usize {
-        self.mmap_file.len() as usize / 16
+        self.mmap_file.len() / 16
     }
 
     fn zero_out(&mut self) {
@@ -145,9 +159,18 @@ impl DiscardStatsInner {
     }
 }
 
+impl Drop for DiscardStatsInner {
+    fn drop(&mut self) {
+        unsafe {
+            ManuallyDrop::drop(&mut self.mmap_file);
+        }
+        let _ = unsafe { ManuallyDrop::take(&mut self.file) };
+    }
+}
+
 impl IndexSort for DiscardStatsInner {
     fn len(&self) -> usize {
-        self.max_slot()
+        self.next_empty_slot
     }
 
     fn less(&self, i: usize, j: usize) -> bool {
@@ -155,6 +178,9 @@ impl IndexSort for DiscardStatsInner {
     }
 
     fn swap(&mut self, i: usize, j: usize) {
+        if i == j {
+            return;
+        }
         let (i, j) = {
             if i <= j {
                 (i, j)
@@ -167,8 +193,62 @@ impl IndexSort for DiscardStatsInner {
         let left = &mut mmap_left[i * 16..i * 16 + 16];
         let right = &mut mmap_right[..16];
         let mut tmp = [0; 16];
-        tmp.clone_from_slice(&left);
-        left.clone_from_slice(&right);
+        tmp.clone_from_slice(left);
+        left.clone_from_slice(right);
         right.clone_from_slice(&tmp);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_discard_stats() {
+        let dir = tempdir::TempDir::new("discard-stats-test").unwrap();
+        let opts = AgateOptions::default_for_test(dir.path());
+
+        let ds = DiscardStats::init_discard_stats(opts).unwrap();
+        assert_eq!(ds.inner.read().unwrap().next_empty_slot, 0);
+        let (fid, _) = ds.max_discard();
+        assert_eq!(fid, 0);
+
+        for i in 0..20 {
+            assert_eq!(i * 100, ds.update(i, (i * 100) as isize));
+        }
+        ds.iterate(|id, val| {
+            assert_eq!(id * 100, val);
+        });
+
+        for i in 0..10 {
+            assert_eq!(ds.update(i, -1), 0);
+        }
+        ds.iterate(|id, val| {
+            if id < 10 {
+                assert_eq!(0, val);
+                return;
+            }
+            assert_eq!(id * 100, val);
+        });
+    }
+
+    #[test]
+    fn test_reload_discard_stats() {
+        let dir = tempdir::TempDir::new("discard-stats-test").unwrap();
+        let mut opts = AgateOptions::default_for_test(dir.path());
+
+        let db = opts.open().unwrap();
+        let ds = db.core.vlog.as_ref().as_ref().unwrap().discard_stats();
+
+        ds.update(1, 1);
+        ds.update(2, 1);
+        ds.update(1, -1);
+        drop(db);
+
+        let db = opts.open().unwrap();
+        let ds = db.core.vlog.as_ref().as_ref().unwrap().discard_stats();
+
+        assert_eq!(ds.update(1, 0), 0);
+        assert_eq!(ds.update(2, 0), 1);
     }
 }

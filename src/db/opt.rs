@@ -237,6 +237,15 @@ impl AgateOptions {
         let extra_size = cmp::min((self.mem_table_size as f64 * 0.1) as u64, 1024 * 1024);
         self.mem_table_size + extra_size
     }
+
+    #[cfg(test)]
+    pub fn default_for_test(dir: &std::path::Path) -> Self {
+        AgateOptions {
+            dir: PathBuf::from(dir),
+            value_dir: PathBuf::from(dir),
+            ..Default::default()
+        }
+    }
 }
 
 #[cfg(test)]

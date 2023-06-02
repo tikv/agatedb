@@ -359,6 +359,10 @@ impl ValueLog {
     fn pick_log(&self, _discard_ratio: f64) -> Arc<RwLock<Wal>> {
         unimplemented!()
     }
+
+    pub(crate) fn discard_stats(&self) -> &DiscardStats {
+        &self.discard_stats
+    }
 }
 
 #[cfg(test)]
