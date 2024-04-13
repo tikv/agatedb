@@ -15,7 +15,7 @@ use bytes::{Bytes, BytesMut};
 use rand::{distributions::Alphanumeric, Rng};
 #[cfg(feature = "enable-rocksdb")]
 use rocksdb::DB;
-use tempdir::TempDir;
+use tempfile::TempDir;
 
 pub fn rand_value() -> String {
     rand::thread_rng()
@@ -48,7 +48,10 @@ impl DerefMut for TableGuard {
 }
 
 pub fn get_table_for_benchmark(count: usize) -> TableGuard {
-    let tmp_dir = TempDir::new("agatedb").unwrap();
+    let tmp_dir = tempfile::Builder::new()
+        .prefix("agatedb")
+        .tempdir()
+        .unwrap();
 
     let agate_opts = AgateOptions {
         block_size: 4 * 1024,

@@ -1,7 +1,4 @@
-use std::fs;
-
 use lazy_static::lazy_static;
-use tempdir::TempDir;
 use yatp::{task::callback::TaskCell, ThreadPool};
 
 use super::*;
@@ -38,14 +35,14 @@ where
     let (tx, rx) = std::sync::mpsc::channel();
 
     let handle = std::thread::spawn(move || {
-        let tmp_dir = TempDir::new("agatedb").unwrap().as_ref().to_path_buf();
-        // TODO: why not exist?
-        if !tmp_dir.exists() {
-            fs::create_dir_all(tmp_dir.as_path()).unwrap();
-        };
-        helper_dump_dir(tmp_dir.as_path());
-        opts.dir = tmp_dir.clone();
-        opts.value_dir = tmp_dir.clone();
+        let tmp_dir = tempfile::Builder::new()
+            .prefix("agatedb")
+            .tempdir()
+            .unwrap();
+        let tmp_dir_path = tmp_dir.as_ref().to_path_buf();
+        helper_dump_dir(tmp_dir_path.as_path());
+        opts.dir = tmp_dir_path.clone();
+        opts.value_dir = tmp_dir_path.clone();
 
         let manifest = Arc::new(ManifestFile::open_or_create_manifest_file(&opts).unwrap());
         let orc = Arc::new(Oracle::new(&opts));
@@ -55,11 +52,11 @@ where
         f(&mut lvctl);
 
         println!("--- Agate directory ---");
-        helper_dump_dir(tmp_dir.as_path());
+        helper_dump_dir(tmp_dir_path.as_path());
         dump_levels(&lvctl);
         drop(lvctl);
         println!("--- after close ---");
-        helper_dump_dir(tmp_dir.as_path());
+        helper_dump_dir(tmp_dir_path.as_path());
         tx.send(()).expect("failed to complete test");
     });
 

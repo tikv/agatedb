@@ -24,15 +24,14 @@ parking_lot = "0.11"
 prost = "0.8"
 proto = { path = "proto" }
 rand = "0.7"
-rocksdb = { version = "0.15", optional = true }
+rocksdb = { version = "0.22", optional = true }
 skiplist = { path = "skiplist" }
-tempdir = "0.3"
+tempfile = "3"
 thiserror = "1.0"
 yatp = { git = "https://github.com/tikv/yatp.git", rev = "b793461ea4abd202798cda6e20e97a054103f2ad" }
 
 [dev-dependencies]
 criterion = "0.3"
-tempfile = "3"
 
 [target.'cfg(not(target_env = "msvc"))'.dev-dependencies]
 tikv-jemallocator = "0.4.0"

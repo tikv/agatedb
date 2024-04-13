@@ -14,8 +14,8 @@ bytes = "1.0"
 clap = "2.33"
 indicatif = "0.15"
 rand = "0.7"
-rocksdb = { version = "0.15", optional = true }
-tempdir = "0.3"
+rocksdb = { version = "0.22", optional = true }
+tempfile = "3.0"
 threadpool = "1.8"
 yatp = { git = "https://github.com/tikv/yatp.git", rev = "b793461ea4abd202798cda6e20e97a054103f2ad" }
 

@@ -203,8 +203,6 @@ impl Builder {
 
 #[cfg(test)]
 mod tests {
-    use tempdir::TempDir;
-
     use super::*;
     use crate::{
         format::key_with_ts,
@@ -226,7 +224,10 @@ mod tests {
         };
 
         let mut builder = Builder::new(opts.clone());
-        let tmp_dir = TempDir::new("agatedb").unwrap();
+        let tmp_dir = tempfile::Builder::new()
+            .prefix("agatedb")
+            .tempdir()
+            .unwrap();
         let filename = tmp_dir.path().join("1.sst");
 
         let mut block_first_keys = vec![];

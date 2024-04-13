@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use bytes::{Bytes, BytesMut};
-use tempdir::TempDir;
 use tempfile::tempdir;
 
 use super::*;
@@ -119,7 +118,10 @@ pub fn run_agate_test<F>(opts: Option<AgateOptions>, test_fn: F)
 where
     F: FnOnce(Arc<Agate>),
 {
-    let tmp_dir = TempDir::new("agatedb").unwrap();
+    let tmp_dir = tempfile::Builder::new()
+        .prefix("agatedb")
+        .tempdir()
+        .unwrap();
 
     let mut opts = if let Some(opts) = opts {
         opts
