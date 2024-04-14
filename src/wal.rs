@@ -389,7 +389,7 @@ mod tests {
         let header = Header {
             key_len: 233333,
             value_len: 2333,
-            expires_at: std::u64::MAX - 2333333,
+            expires_at: u64::MAX - 2333333,
             user_meta: b'A',
             meta: b'B',
         };

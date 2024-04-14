@@ -33,7 +33,11 @@ fn append_ts(key: &mut BytesMut, ts: u64) {
 fn random_key(rng: &mut ThreadRng) -> Bytes {
     let mut key = BytesMut::with_capacity(16);
     unsafe {
-        rng.fill_bytes(mem::transmute(&mut key.chunk_mut()[..8]));
+        rng.fill_bytes(
+            mem::transmute::<&mut [std::mem::MaybeUninit<u8>], &mut [u8]>(
+                &mut key.spare_capacity_mut()[..8],
+            ),
+        );
         key.advance_mut(8);
     }
     append_ts(&mut key, 0);
