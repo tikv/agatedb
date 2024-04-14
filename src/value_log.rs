@@ -158,7 +158,6 @@ impl ValueLog {
         let mut result = inner
             .files_map
             .keys()
-            .into_iter()
             .filter(|k| !to_be_deleted.contains(k))
             .cloned()
             .collect::<Vec<u32>>();

@@ -25,7 +25,7 @@ pub fn verify_checksum(data: &[u8], expected: &Checksum) -> Result<()> {
 }
 
 mod xxhash {
-    use std::{ptr, u64};
+    use std::ptr;
 
     const PRIME1: u64 = 11400714785074694791;
     const PRIME2: u64 = 14029467366897019727;

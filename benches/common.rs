@@ -94,7 +94,7 @@ pub fn unix_time() -> u64 {
 }
 
 pub fn remove_files(path: &Path) {
-    read_dir(path).unwrap().into_iter().for_each(|entry| {
+    read_dir(path).unwrap().for_each(|entry| {
         let entry = entry.unwrap();
         remove_file(entry.path()).unwrap();
     });

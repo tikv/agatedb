@@ -1,3 +1,5 @@
+#![allow(clippy::arc_with_non_send_sync)]
+
 use std::{
     mem, ptr,
     ptr::NonNull,
@@ -5,7 +7,6 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    u32,
 };
 
 use bytes::Bytes;

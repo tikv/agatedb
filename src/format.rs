@@ -1,4 +1,4 @@
-use std::{ptr, u64};
+use std::ptr;
 
 use bytes::{BufMut, Bytes, BytesMut};
 
@@ -10,7 +10,7 @@ pub fn key_with_ts(key: impl Into<BytesMut>, ts: u64) -> Bytes {
 
 /// Append a ts to make this key be the first one within range.
 pub fn key_with_ts_first(key: impl Into<BytesMut>) -> Bytes {
-    key_with_ts(key, std::u64::MAX)
+    key_with_ts(key, u64::MAX)
 }
 
 /// Append a ts to make this key be the last one within range.

@@ -582,7 +582,7 @@ impl LevelsControllerInner {
                 // TODO: Check this.
                 let mut buf = BytesMut::with_capacity(biggest.len() + 8);
                 buf.put(user_key(biggest));
-                let right = key_with_ts(buf, std::u64::MAX);
+                let right = key_with_ts(buf, u64::MAX);
                 add_range(&mut compact_def.splits, right);
             }
         }
@@ -638,7 +638,7 @@ impl LevelsControllerInner {
 
         // Make the output always one file to decreases the L0 table stalls and
         // improves the performance.
-        compact_def.targets.file_size[0] = std::u32::MAX as u64;
+        compact_def.targets.file_size[0] = u32::MAX as u64;
 
         Ok(())
     }
@@ -664,7 +664,7 @@ impl LevelsControllerInner {
         let mut out = vec![];
 
         if !compact_def.drop_prefixes.is_empty() {
-            out = this_level.tables.clone();
+            out.clone_from(&this_level.tables);
         } else {
             let mut kr = KeyRange::default();
             // Start from the oldest file first.

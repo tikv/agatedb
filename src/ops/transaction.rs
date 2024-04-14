@@ -522,12 +522,12 @@ impl Agate {
     }
 
     /// Executes a function creating and managing a read-only transaction for the user.
-    /// If `view` is used with managed transactions, it would assume a read timestamp of `std::u64::MAX`.
+    /// If `view` is used with managed transactions, it would assume a read timestamp of `u64::MAX`.
     pub fn view(&self, f: impl FnOnce(&mut Transaction) -> Result<()>) -> Result<()> {
         // TODO: Check closed.
 
         let mut txn = if self.core.opts.managed_txns {
-            self.new_transaction_at(std::u64::MAX, false)
+            self.new_transaction_at(u64::MAX, false)
         } else {
             self.new_transaction(false)
         };
