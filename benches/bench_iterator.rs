@@ -7,7 +7,6 @@ use bytes::Bytes;
 use common::get_table_for_benchmark;
 use criterion::{criterion_group, criterion_main, Criterion};
 use rand::{thread_rng, Rng};
-use tempdir::TempDir;
 
 fn get_test_options() -> AgateOptions {
     agatedb::AgateOptions {
@@ -20,7 +19,7 @@ fn get_test_options() -> AgateOptions {
 }
 
 fn bench_iterator(c: &mut Criterion) {
-    let dir = TempDir::new("agatedb").unwrap();
+    let dir = tempfile::Builder::new().prefix("agatedb").tempdir().unwrap();
     let mut opt = get_test_options();
     opt.dir = dir.path().to_path_buf();
     opt.value_dir = dir.path().to_path_buf();

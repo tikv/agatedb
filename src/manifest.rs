@@ -419,9 +419,7 @@ mod tests {
             ManifestFile::open_or_create_manifest_file(&opts).unwrap();
             let path = opts.dir.join(MANIFEST_FILENAME);
             let file = OpenOptions::new()
-                .read(true)
                 .write(true)
-                .create(true)
                 .open(path)
                 .unwrap();
             file.write_at(&[b'G'], offset).unwrap();
