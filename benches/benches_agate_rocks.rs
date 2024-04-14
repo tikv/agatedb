@@ -24,7 +24,10 @@ const SMALL_VALUE_SIZE: usize = 32;
 const LARGE_VALUE_SIZE: usize = 4096;
 
 fn bench_agate(c: &mut Criterion) {
-    let dir = tempfile::Builder::new().prefix("agatedb-bench-small-value").tempdir().unwrap();
+    let dir = tempfile::Builder::new()
+        .prefix("agatedb-bench-small-value")
+        .tempdir()
+        .unwrap();
     let dir_path = dir.path();
     let mut opts = AgateOptions {
         dir: dir_path.to_path_buf(),
@@ -97,7 +100,10 @@ fn bench_agate(c: &mut Criterion) {
     });
 
     dir.close().unwrap();
-    let dir = tempfile::Builder::new().prefix("agatedb-bench-large-value").tempdir().unwrap();
+    let dir = tempfile::Builder::new()
+        .prefix("agatedb-bench-large-value")
+        .tempdir()
+        .unwrap();
     let dir_path = dir.path();
     opts.dir = dir_path.to_path_buf();
     opts.value_dir = dir_path.to_path_buf();
@@ -168,7 +174,10 @@ fn bench_agate(c: &mut Criterion) {
 }
 
 fn bench_rocks(c: &mut Criterion) {
-    let dir = tempfile::Builder::new().prefix("rocks-bench-small-value").tempdir().unwrap();
+    let dir = tempfile::Builder::new()
+        .prefix("rocks-bench-small-value")
+        .tempdir()
+        .unwrap();
     let dir_path = dir.path();
     let mut opts = rocksdb::Options::default();
     opts.create_if_missing(true);
@@ -228,7 +237,10 @@ fn bench_rocks(c: &mut Criterion) {
     });
 
     dir.close().unwrap();
-    let dir = tempfile::Builder::new().prefix("rocks-bench-large-value").tempdir().unwrap();
+    let dir = tempfile::Builder::new()
+        .prefix("rocks-bench-large-value")
+        .tempdir()
+        .unwrap();
     let dir_path = dir.path();
 
     c.bench_function("rocks sequentially populate large value", |b| {

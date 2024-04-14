@@ -19,7 +19,10 @@ fn get_test_options() -> AgateOptions {
 }
 
 fn bench_iterator(c: &mut Criterion) {
-    let dir = tempfile::Builder::new().prefix("agatedb").tempdir().unwrap();
+    let dir = tempfile::Builder::new()
+        .prefix("agatedb")
+        .tempdir()
+        .unwrap();
     let mut opt = get_test_options();
     opt.dir = dir.path().to_path_buf();
     opt.value_dir = dir.path().to_path_buf();
