@@ -1,4 +1,10 @@
+use std::{collections::hash_map::RandomState, sync::Arc};
+
 use super::TableOptions;
+use crate::{
+    cache::Cache,
+    table::{Block, BlockCacheKey},
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct Options {
@@ -12,6 +18,10 @@ pub struct Options {
     pub bloom_false_positive: f64,
     /// checksum mode
     pub checksum_mode: ChecksumVerificationMode,
+    /// db block cache
+    /// ? why not just use db options for table
+    pub block_cache:
+        Option<Arc<dyn Cache<Key = BlockCacheKey, Value = Arc<Block>, HashBuilder = RandomState>>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -39,5 +49,6 @@ pub fn build_table_options(opt: &crate::AgateOptions) -> TableOptions {
         bloom_false_positive: opt.bloom_false_positive,
         checksum_mode: opt.checksum_mode,
         table_capacity: (opt.base_level_size as f64 * 0.95) as u64,
+        block_cache: opt.block_cache.clone(),
     }
 }

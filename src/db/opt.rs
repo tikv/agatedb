@@ -1,10 +1,15 @@
-use std::cmp;
+use std::{cmp, collections::hash_map::RandomState};
 
 use getset::Setters;
 use skiplist::MAX_NODE_SIZE;
 
 use super::*;
-use crate::{entry::Entry, opt};
+use crate::{
+    cache::Cache,
+    entry::Entry,
+    opt,
+    table::{Block, BlockCacheKey},
+};
 
 #[derive(Clone, Setters)]
 pub struct AgateOptions {
@@ -144,6 +149,13 @@ pub struct AgateOptions {
     ///
     /// The default value of `max_batch_size` is (15 * `mem_table_size`) / 100.
     pub max_batch_size: u64,
+
+    /*Dynamic trait options*/
+    /// Block Cache for SST.
+    ///
+    /// The default value is `None` which means without block cache
+    pub block_cache:
+        Option<Arc<dyn Cache<Key = BlockCacheKey, Value = Arc<Block>, HashBuilder = RandomState>>>,
 }
 
 impl Default for AgateOptions {
@@ -186,6 +198,8 @@ impl Default for AgateOptions {
 
             max_batch_count: 0,
             max_batch_size: 0,
+
+            block_cache: None,
         }
         // TODO: add other options
     }
