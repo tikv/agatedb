@@ -524,7 +524,10 @@ impl LevelsControllerInner {
             new_tables.append(&mut table?);
         }
 
-        util::sync_dir(&self.opts.dir)?;
+        // To avoid error in memory mode with heavy workload.
+        if !self.opts.in_memory {
+            util::sync_dir(&self.opts.dir)?;
+        }
 
         new_tables.sort_by(|x, y| COMPARATOR.compare_key(x.biggest(), y.biggest()));
 
