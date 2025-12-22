@@ -350,7 +350,9 @@ fn test_uni_iterator() {
 // TODO: concat iterators and merge iterators
 
 fn value(i: usize) -> Bytes {
-    Bytes::from(format!("{:01048576}", i)) // 1MB value
+    let mut result = i.to_string().into_bytes();
+    result.resize(1048576, 0);
+    result.into()
 }
 
 #[test]
